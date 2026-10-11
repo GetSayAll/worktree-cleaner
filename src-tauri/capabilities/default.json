@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for Worktree Cleaner",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
