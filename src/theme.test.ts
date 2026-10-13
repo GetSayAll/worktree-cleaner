@@ -1,0 +1,139 @@
+import { readFileSync } from "node:fs";
+import { nextTick } from "vue";
+import { describe, expect, it, vi } from "vitest";
+
+/**
+ * The dark palette exists twice on purpose: once behind `prefers-color-scheme`
+ * (the "System" choice) and once behind the `[data-theme]` attribute (the manual
+ * choice). Plain CSS cannot share a block between a media query and a selector,
+ * so these tests are the guard that keeps the two copies from drifting apart.
+ */
+
+interface Block {
+  selector: string;
+  declarations: Record<string, string>;
+}
+
+/** Flattens `selector { declarations }` pairs; nested blocks keep their outer text. */
+function parseBlocks(css: string): Block[] {
+  const blocks: Block[] = [];
+  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const declarations: Record<string, string> = {};
+    for (const entry of match[2].split(";")) {
+      const colon = entry.indexOf(":");
+      if (colon < 0) continue;
+      const name = entry.slice(0, colon).trim();
+      const value = entry.slice(colon + 1).trim();
+      if (name) declarations[name] = value;
+    }
+    blocks.push({ selector: match[1].trim(), declarations });
+  }
+  return blocks;
+}
+
+const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const blocks = parseBlocks(css);
+
+function block(predicate: (selector: string) => boolean, label: string): Block {
+  const found = blocks.find((entry) => predicate(entry.selector));
+  if (!found) throw new Error(`no CSS block found for ${label}`);
+  return found;
+}
+
+const light = block((selector) => selector === ":root", "the light :root block");
+const mediaDark = block(
+  (selector) => selector.includes(':root:not([data-theme="light"])'),
+  "the prefers-color-scheme dark block"
+);
+const attributeDark = block((selector) => selector === ':root[data-theme="dark"]', "the [data-theme=dark] block");
+
+const tokens = (entry: Block) =>
+  Object.fromEntries(Object.entries(entry.declarations).filter(([name]) => name.startsWith("--")));
+
+describe("theme stylesheet", () => {
+  it("declares the same palette in both dark blocks", () => {
+    // Same names, same values: the manual choice and the OS preference must
+    // produce an identical dark theme.
+    expect(tokens(attributeDark)).toEqual(tokens(mediaDark));
+  });
+
+  it("only overrides tokens that already have a light default", () => {
+    // A token defined only in dark would resolve to nothing in light mode.
+    for (const name of Object.keys(tokens(mediaDark))) {
+      expect(light.declarations, `${name} has no light default`).toHaveProperty(name);
+    }
+  });
+
+  it("keeps the radius and font tokens out of the dark overrides", () => {
+    // Layout tokens are not theme dependent; overriding them would be a mistake.
+    for (const name of ["--radius-sm", "--radius", "--radius-lg", "--mono"]) {
+      expect(mediaDark.declarations).not.toHaveProperty(name);
+      expect(attributeDark.declarations).not.toHaveProperty(name);
+    }
+  });
+
+  it("flips color-scheme in both directions", () => {
+    expect(light.declarations["color-scheme"]).toBe("light");
+    expect(mediaDark.declarations["color-scheme"]).toBe("dark");
+    expect(attributeDark.declarations["color-scheme"]).toBe("dark");
+  });
+
+  it("uses a genuinely different dark canvas and ink", () => {
+    // Guards against a "dark" palette that is really the light one.
+    expect(mediaDark.declarations["--bg"]).not.toBe(light.declarations["--bg"]);
+    expect(mediaDark.declarations["--text"]).not.toBe(light.declarations["--text"]);
+  });
+});
+
+/** Minimal stand-in for an element: `dataset.foo` really maps to `data-foo`. */
+function fakeElement() {
+  const attributes = new Map<string, string>();
+  const dataset = new Proxy(
+    {},
+    {
+      get: (_target, prop: string) => attributes.get(`data-${prop}`),
+      set: (_target, prop: string, value) => {
+        attributes.set(`data-${prop}`, String(value));
+        return true;
+      },
+      has: (_target, prop: string) => attributes.has(`data-${prop}`)
+    }
+  );
+  return {
+    dataset,
+    getAttribute: (name: string) => attributes.get(name) ?? null,
+    setAttribute: (name: string, value: string) => attributes.set(name, value),
+    removeAttribute: (name: string) => attributes.delete(name)
+  };
+}
+
+describe("theme application", () => {
+  it("writes and clears data-theme on the document element", async () => {
+    const root = fakeElement();
+    vi.stubGlobal("document", { documentElement: root });
+
+    try {
+      // Imported after the stub exists so the watcher's immediate run sees it.
+      vi.resetModules();
+      const { settings } = await import("./state");
+
+      // The default is "system", which must not leave an attribute behind.
+      expect(root.getAttribute("data-theme")).toBeNull();
+
+      settings.theme = "dark";
+      await nextTick();
+      expect(root.getAttribute("data-theme")).toBe("dark");
+
+      settings.theme = "light";
+      await nextTick();
+      expect(root.getAttribute("data-theme")).toBe("light");
+
+      settings.theme = "system";
+      await nextTick();
+      expect(root.getAttribute("data-theme")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+});
