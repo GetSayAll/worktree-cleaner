@@ -17,7 +17,8 @@
 // Env:   CHROME_PATH=/path/to/Chrome   (default: the macOS Chrome bundle)
 
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +27,11 @@ const pagePath = resolve(process.argv[2] ?? join(root, "dist", "preview.html"));
 const shotDir = join(root, "dist", "theme-shots");
 const CHROME = process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const pageUrl = `file://${pagePath}`;
+
+// A CDP round trip that never answers would hang the whole run: every send is
+// bounded, and a socket that closes early fails the pending call loudly instead
+// of leaving the script waiting forever.
+const SEND_TIMEOUT_MS = 15_000;
 
 // Expected palettes, copied from the two source-of-truth blocks in src/styles.css.
 // `canvas`/`surface`/`ink` are the painted rgb() values a browser reports for the
@@ -63,7 +69,6 @@ class Cdp {
   #ws;
   #next = 0;
   #pending = new Map();
-  #events = new Map();
   sessionId = null;
 
   constructor(ws) {
@@ -78,27 +83,40 @@ class Cdp {
         else entry.resolve(msg.result);
         return;
       }
-      const waiters = this.#events.get(msg.method);
-      if (waiters) for (const waiter of waiters.splice(0)) waiter(msg.params);
+      // Events are unused today; the message loop keeps them for the day a case
+      // needs to await one.
+    });
+    ws.addEventListener("close", () => {
+      // Chrome died mid-run (crash, kill, tab close). Every in-flight call must
+      // fail now rather than resolve never.
+      for (const entry of this.#pending.values()) {
+        entry.reject(new Error("the DevTools socket closed before the call was answered"));
+      }
+      this.#pending.clear();
     });
   }
 
   send(method, params = {}) {
     const id = ++this.#next;
     return new Promise((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new Error(`${method} timed out after ${SEND_TIMEOUT_MS}ms`));
+      }, SEND_TIMEOUT_MS);
+      this.#pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      });
       const message = { id, method, params };
       // Omitted rather than null: an empty-string sessionId is rejected by Chrome.
       if (this.sessionId) message.sessionId = this.sessionId;
       this.#ws.send(JSON.stringify(message));
-    });
-  }
-
-  once(method) {
-    return new Promise((resolve) => {
-      const waiters = this.#events.get(method) ?? [];
-      waiters.push(resolve);
-      this.#events.set(method, waiters);
     });
   }
 
@@ -114,13 +132,9 @@ class Cdp {
     }
     return result.result.value;
   }
-
-  close() {
-    this.#ws.close();
-  }
 }
 
-async function launchChrome() {
+async function launchChrome(userDataDir) {
   const child = spawn(
     CHROME,
     [
@@ -130,6 +144,9 @@ async function launchChrome() {
       "--hide-scrollbars",
       "--window-size=1440,900",
       "--remote-debugging-port=0",
+      // A private profile per run: without it Chrome can attach to (or refuse to
+      // start because of) a profile locked by the user's normal browser.
+      `--user-data-dir=${userDataDir}`,
       "about:blank"
     ],
     { stdio: ["ignore", "ignore", "pipe"] }
@@ -150,15 +167,30 @@ async function launchChrome() {
   return { child, wsUrl };
 }
 
+/** SIGTERM, then SIGKILL if the process is still alive after a moment. */
+async function stopChrome(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill();
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && child.exitCode === null && child.signalCode === null) {
+    await sleep(50);
+  }
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+}
+
 /** Wait until the SPA has mounted and is idle for two animation frames. */
 async function settle(cdp) {
+  let ready = false;
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const ready = await cdp.evaluate(
+    ready = await cdp.evaluate(
       `document.readyState === "complete" && !!document.querySelector(".nav__item")`
     );
     if (ready) break;
     await sleep(100);
   }
+  // A page that never mounts would make every later assertion meaningless; fail
+  // here with the reason instead of reporting confusing palette mismatches.
+  if (!ready) throw new Error("the page never finished loading (.nav__item never appeared)");
   await cdp.evaluate(
     `new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null))))`,
     { awaitPromise: true }
@@ -206,23 +238,31 @@ async function readState(cdp) {
 
 async function main() {
   mkdirSync(shotDir, { recursive: true });
-  const { child, wsUrl } = await launchChrome();
+  const userDataDir = mkdtempSync(join(tmpdir(), "wtc-theme-"));
+  const { child, wsUrl } = await launchChrome(userDataDir);
   const ws = new WebSocket(wsUrl);
-  await new Promise((resolve, reject) => {
-    ws.addEventListener("open", resolve, { once: true });
-    ws.addEventListener("error", () => reject(new Error("could not open the DevTools socket")), { once: true });
-  });
-
-  const browser = new Cdp(ws);
-  const { targetId } = await browser.send("Target.createTarget", { url: "about:blank" });
-  const attached = await browser.send("Target.attachToTarget", { targetId, flatten: true });
-  const page = new Cdp(ws);
-  page.sessionId = attached.sessionId;
-  await page.send("Page.enable");
-  await page.send("Runtime.enable");
-
-  const results = [];
   try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("the DevTools socket did not open")), 10000);
+      ws.addEventListener("open", () => {
+        clearTimeout(timer);
+        resolve();
+      }, { once: true });
+      ws.addEventListener("error", () => {
+        clearTimeout(timer);
+        reject(new Error("could not open the DevTools socket"));
+      }, { once: true });
+    });
+
+    const browser = new Cdp(ws);
+    const { targetId } = await browser.send("Target.createTarget", { url: "about:blank" });
+    const attached = await browser.send("Target.attachToTarget", { targetId, flatten: true });
+    const page = new Cdp(ws);
+    page.sessionId = attached.sessionId;
+    await page.send("Page.enable");
+    await page.send("Runtime.enable");
+
+    const results = [];
     for (const [scheme, choice, expectedAttr, palette] of CASES) {
       await page.send("Emulation.setEmulatedMedia", {
         features: [{ name: "prefers-color-scheme", value: scheme }]
@@ -264,24 +304,24 @@ async function main() {
       }
       results.push({ case: `OS ${scheme} + ${choice}`, name, failures, state });
     }
-  } finally {
-    page.close();
-    browser.close();
-    child.kill();
-  }
 
-  let failed = 0;
-  for (const result of results) {
-    if (result.failures.length === 0) {
-      console.log(`PASS  ${result.case.padEnd(22)} -> ${result.name}  (bg ${result.state.bg}, canvas ${result.state.canvas})`);
-    } else {
-      failed += 1;
-      console.log(`FAIL  ${result.case.padEnd(22)} -> ${result.name}`);
-      for (const failure of result.failures) console.log(`        ${failure}`);
+    let failed = 0;
+    for (const result of results) {
+      if (result.failures.length === 0) {
+        console.log(`PASS  ${result.case.padEnd(22)} -> ${result.name}  (bg ${result.state.bg}, canvas ${result.state.canvas})`);
+      } else {
+        failed += 1;
+        console.log(`FAIL  ${result.case.padEnd(22)} -> ${result.name}`);
+        for (const failure of result.failures) console.log(`        ${failure}`);
+      }
     }
+    console.log(`\n${results.length - failed}/${results.length} combinations correct; screenshots in ${shotDir}`);
+    if (failed > 0) process.exitCode = 1;
+  } finally {
+    ws.close();
+    await stopChrome(child);
+    rmSync(userDataDir, { recursive: true, force: true });
   }
-  console.log(`\n${results.length - failed}/${results.length} combinations correct; screenshots in ${shotDir}`);
-  process.exit(failed === 0 ? 0 : 1);
 }
 
 main().catch((error) => {

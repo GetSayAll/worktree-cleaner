@@ -9,6 +9,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "build:preview": "vite build --base ./ && node scripts/build-preview.mjs",
     "test": "vitest run",
+    "test:theme": "pnpm run build:preview && node scripts/verify-theme.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

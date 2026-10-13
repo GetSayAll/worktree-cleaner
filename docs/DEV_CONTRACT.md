@@ -307,14 +307,14 @@ deliverable that does not exist yet.
 
 | Stage | Criterion | Status |
 |---|---|---|
-| P0 | 1 · `cargo test` green | Met — 89 unit + 5 integration + 4 against a real repository |
+| P0 | 1 · `cargo test` green | Met — 101 unit + 5 integration + 4 against a real repository |
 | P0 | 2 · every `wt.*` reason code has a test case | Met — all 16 `wt.*` codes have a positive and a negative case in `worktree.rs`, and every reason asserts non-empty `text` and `evidence`. The 10 `af.*` codes remain a P1 criterion |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 78 entries, plus a generated property test over 20,000 random paths |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
 | P0 | 5 · `cargo clippy -- -D warnings` | Met |
 | P1 | artifact scan criteria | Blocked — P1 not started |
 | P2 | CLI and snapshot contract criteria | Blocked — P2 not started |
-| P3 | report page criteria | Partly met — the prototype opens offline over `file://` with no console errors and no non-English text, but it still reads the mock rather than a snapshot file |
+| P3 | report page criteria | Partly met — the prototype opens offline over `file://` with no console errors and no non-English text; the appearance modes are verified in a real browser (`pnpm test:theme`, 6/6 combinations of OS preference and in-app choice); `vue-tsc --noEmit` is at zero errors and the build passes. It still reads the mock rather than a snapshot file, so the item-for-item JSON comparison (criterion 2) and the version-gate message (criterion 4) remain open |
 | P4 | execution criteria | Blocked — P4 not started |
 
 The rule for every row: a criterion counts as met only when a test in the
@@ -398,6 +398,11 @@ message):
    plan and execution behaviour, and `src/architecture.test.ts` keeps the safety
    derivation out of production code and the schema version in step with the
    Rust core.
+5. **The theme verification runs in a real browser.** `pnpm test:theme` builds the
+   single-file preview and drives Chrome through all six combinations of OS
+   preference and in-app choice, asserting the attribute, the resolved tokens and
+   the painted pixels; the run uses a throwaway profile and fails loudly if the
+   page never mounts or a CDP call times out.
 
 **Open**
 

@@ -34,6 +34,27 @@ function parseBlocks(css: string): Block[] {
 const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const blocks = parseBlocks(css);
 
+/**
+ * Body of a top-level at-rule block, braces balanced. `parseBlocks` flattens
+ * nested blocks away, which loses the context a `@media` query provides; these
+ * tests need that context back.
+ */
+function atRuleBody(prelude: string): string {
+  const start = css.indexOf(prelude);
+  if (start < 0) throw new Error(`no at-rule block found for ${prelude}`);
+  const open = css.indexOf("{", start);
+  if (open < 0) throw new Error(`malformed at-rule block for ${prelude}`);
+  let depth = 1;
+  for (let index = open + 1; index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    else if (css[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return css.slice(open + 1, index);
+    }
+  }
+  throw new Error(`unbalanced braces after ${prelude}`);
+}
+
 function block(predicate: (selector: string) => boolean, label: string): Block {
   const found = blocks.find((entry) => predicate(entry.selector));
   if (!found) throw new Error(`no CSS block found for ${label}`);
@@ -79,9 +100,24 @@ describe("theme stylesheet", () => {
   });
 
   it("uses a genuinely different dark canvas and ink", () => {
+    // Presence first: `not.toBe` on two missing declarations would pass while
+    // proving nothing.
+    expect(mediaDark.declarations).toHaveProperty("--bg");
+    expect(light.declarations).toHaveProperty("--bg");
+    expect(mediaDark.declarations).toHaveProperty("--text");
+    expect(light.declarations).toHaveProperty("--text");
     // Guards against a "dark" palette that is really the light one.
     expect(mediaDark.declarations["--bg"]).not.toBe(light.declarations["--bg"]);
     expect(mediaDark.declarations["--text"]).not.toBe(light.declarations["--text"]);
+  });
+
+  it("keeps the OS-preference palette inside its media query", () => {
+    // The selector text alone proves nothing: the same text outside
+    // `prefers-color-scheme: dark` would paint dark in light mode too.
+    const mediaBody = atRuleBody("@media (prefers-color-scheme: dark)");
+    expect(mediaBody).toContain(':root:not([data-theme="light"])');
+    // The manual pin is the sibling of that query, never a member of it.
+    expect(mediaBody).not.toContain(':root[data-theme="dark"]');
   });
 });
 
@@ -127,6 +163,12 @@ describe("theme application", () => {
       settings.theme = "light";
       await nextTick();
       expect(root.getAttribute("data-theme")).toBe("light");
+
+      // And back the other way: the pin is one attribute, so switching must
+      // overwrite it, never stack a second value or leave the old one behind.
+      settings.theme = "dark";
+      await nextTick();
+      expect(root.getAttribute("data-theme")).toBe("dark");
 
       settings.theme = "system";
       await nextTick();
