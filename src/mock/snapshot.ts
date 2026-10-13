@@ -17,6 +17,7 @@ function daysAgo(days: number): string {
 export const mockRoot = "/Users/andy/MySrc/remote-mic-app";
 
 export const mockSnapshot: ProjectSnapshot = {
+  schema_version: 1,
   root: mockRoot,
   scanned_at: new Date().toISOString(),
   default_branch: "main",

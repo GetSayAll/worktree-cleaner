@@ -79,6 +79,7 @@ export interface ArtifactRecord {
 }
 
 export interface ProjectSnapshot {
+  schema_version: number;
   root: string;
   scanned_at: string;
   default_branch: string | null;
@@ -86,6 +87,8 @@ export interface ProjectSnapshot {
   artifacts: ArtifactRecord[];
   warnings: string[];
 }
+
+export const SNAPSHOT_SCHEMA_VERSION = 1;
 
 export interface WorktreeRemovalItem {
   kind: "worktree";
