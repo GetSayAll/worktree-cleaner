@@ -123,6 +123,7 @@ export const zhCN = {
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
     chooseFolderUnavailable: "文件夹选择器只在桌面应用里可用，请直接输入路径",
+    pickerFailed: (message: string) => `文件夹选择器没能打开：${message}`,
     startScan: "开始扫描",
     dropHint: "也可以把项目文件夹拖进这个窗口。扫描阶段不写任何文件。",
     scanFailed: (message: string) => `扫描没有运行：${message}`,

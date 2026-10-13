@@ -81,7 +81,11 @@ const logDisplay = computed(() => {
 
 async function openLogDirectory() {
   if (!logFile.value) return;
-  await revealInFileManager(logFile.value);
+  try {
+    await revealInFileManager(logFile.value);
+  } catch (error) {
+    logNotice.value = error instanceof Error ? error.message : String(error);
+  }
 }
 
 async function onClearLog() {

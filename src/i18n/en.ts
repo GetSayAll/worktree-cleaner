@@ -128,6 +128,7 @@ export const en = {
     chooseFolderTitle: "Open the system folder picker",
     chooseFolderUnavailable:
       "The folder picker lives in the desktop app; type the path instead",
+    pickerFailed: (message: string) => `The folder picker could not open: ${message}`,
     startScan: "Start scan",
     dropHint: "You can also drop a project folder onto this window. The scan phase writes no files.",
     scanFailed: (message: string) => `The scan did not run: ${message}`,

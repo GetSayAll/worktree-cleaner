@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { executeError, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
 import { formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
-import { openTrash as openSystemTrash } from "../platform";
+import { openTrash } from "../platform";
 
 const root = computed(() => snapshot.value?.root ?? "");
 
@@ -30,6 +30,23 @@ function outcomeLabel(result: string): string {
 }
 
 const okCount = computed(() => lastResult.value.filter((item) => item.result === "ok").length);
+
+/**
+ * The failure of a system action this page offers.
+ *
+ * Opening the Trash or the log can fail — the path may not exist, the opener may
+ * refuse. None of those should leave a click with no effect and no explanation.
+ */
+const systemError = ref<string | null>(null);
+
+async function openSystemTrash() {
+  systemError.value = null;
+  try {
+    await openTrash();
+  } catch (error) {
+    systemError.value = error instanceof Error ? error.message : String(error);
+  }
+}
 
 /**
  * Splits the core's `log_error` into the path it could not write and what went
@@ -63,6 +80,7 @@ const logFailure = computed(() => {
     </div>
 
     <p v-if="executeError" class="notice notice--unsafe">{{ executeError }}</p>
+    <p v-if="systemError" class="notice notice--unsafe">{{ systemError }}</p>
     <p v-if="logFailure" class="notice notice--unsafe">
       <strong>{{ messages.result.logFailedTitle }}</strong>
       {{ messages.result.logFailedBody(logFailure.path, logFailure.error) }}
