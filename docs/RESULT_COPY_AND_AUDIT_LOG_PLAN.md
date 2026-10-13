@@ -179,12 +179,12 @@ a string.
 ## 3. Reason codes already exist — only the table is missing
 
 This part needs no Rust change at all. `ReasonCode` (`reason.rs:29-88`) is a full
-enum with `#[serde(rename = "...")]`, 28 codes in two families:
+enum with `#[serde(rename = "...")]`, 27 codes in two families:
 
 - `wt.*` (16): `main`, `locked`, `dirty`, `unpushed`, `detached`, `no_upstream`,
   `unmerged`, `untracked`, `stash`, `recent_activity`, `agent_active`,
   `cannot_verify`, `whitelisted`, `prunable`, `merged`, `clean`
-- `af.*` (12): `git_tracked`, `nested_git`, `authored_content`, `credentials`,
+- `af.*` (11): `git_tracked`, `nested_git`, `authored_content`, `credentials`,
   `symlink_outside`, `whitelisted`, `recent_activity`, `cannot_verify`, `empty`,
   `git_ignored`, `rebuildable`
 
@@ -197,7 +197,7 @@ render `reason.text` through it, falling back to the raw text for a code the
 table does not know (so a newer core with an older UI still says something
 true). `evidence` keeps rendering verbatim underneath.
 
-Build entries for all 28 codes even though a few may never appear on screen: the
+Build entries for all 27 codes even though a few may never appear on screen: the
 locale test that asserts both tables carry the same keys extends naturally to
 this table, and a missing entry becomes a test failure rather than a silent
 English string on a Chinese screen.
@@ -387,12 +387,17 @@ English text ever was.
 
 Each phase stands on its own and can be reviewed on its own.
 
-| phase | change | why in this position |
-|---|---|---|
-| 1 | Reason localization (§3) | no Rust, no contract change; removes the English from the reason column on both pages immediately |
-| 2 | Walk semantics (§6) | a safety fix that is independent of any copy; do it before the detail codes so `vanished` exists to be reported |
-| 3 | Detail codes (§4, §5) | needs §2's outcome distinction to be meaningful |
-| 4 | Activity log (§7) | largest surface, no effect on what the result page says |
+| phase | change | why in this position | state |
+|---|---|---|---|
+| 1 | Reason localization (§3) | no Rust, no contract change; removes the English from the reason column on both pages immediately | done — `9a1ddec`, `ecd660a` |
+| 2 | Walk semantics (§6) | a safety fix that is independent of any copy; do it before the detail codes so `vanished` exists to be reported | done — `42ce363` |
+| 3 | Detail codes (§4, §5) | needs §2's outcome distinction to be meaningful | not started |
+| 4 | Activity log (§7) | largest surface, no effect on what the result page says | not started |
+
+Phase 2 landed `Measurement::vanished` and the `read_dir` classification, so the
+`artifact.vanished` code in §4.2 has something real to report: a re-check that
+finds the directory gone can now say so instead of describing a change to a size
+of zero.
 
 Phases 1 and 2 do not depend on each other and can be reviewed independently.
 Phase 3 is the one that needs the most care: it changes a frozen contract, and
@@ -417,7 +422,7 @@ Phase 3 is the one that needs the most care: it changes a frozen contract, and
    (`cleanup.rs:348`) while the scan uses the configured depth. The size walk
    does not read `max_depth`, so identity is unaffected, but the constant should
    be confirmed as deliberate.
-4. **Whether every reason code needs copy.** §3 proposes all 28. If some can
+4. **Whether every reason code needs copy.** §3 proposes all 27. If some can
    never reach the interface, dropping them keeps the table smaller — but then the
    key-parity test has to be told which ones are exempt.
 
