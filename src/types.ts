@@ -32,7 +32,8 @@ export interface Reason {
   code: ReasonCode;
   severity: SafetyStatus;
   text: string;
-  evidence?: string | null;
+  /** 可验证证据：具体命令、文件计数或路径。不允许为空。 */
+  evidence: string;
 }
 
 export interface SafetyAssessment {

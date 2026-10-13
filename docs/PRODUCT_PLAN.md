@@ -168,11 +168,16 @@
 ```rust
 pub enum SafetyStatus { Safe, Review, Unsafe }
 
+pub enum ReasonCode {          // 序列化后为 "wt.dirty" 这样的字符串
+    WtDirty,
+    // …全部原因码见第五节判定表，共 26 个
+}
+
 pub struct Reason {
-    pub code: String,          // 稳定标识，如 "wt.dirty"
+    pub code: ReasonCode,      // 稳定标识，序列化后为 "wt.dirty"
     pub severity: SafetyStatus, // 该条原因导向的最严重等级
     pub text: String,          // 人类可读
-    pub evidence: Option<String>, // 证据：命令输出摘要 / 计数 / 路径
+    pub evidence: String,      // 可验证证据：命令输出摘要 / 计数 / 路径，不允许为空
 }
 
 pub struct SafetyAssessment {
@@ -190,6 +195,7 @@ pub struct WorktreeRecord {
     pub is_prunable: bool,             // 目录已丢失
     pub dirty_files: u32,
     pub untracked_files: u32,
+    pub untracked_file_list: Vec<String>, // 需要 --force 时逐行展示
     pub ahead: u32,
     pub behind: u32,
     pub has_upstream: bool,
@@ -213,10 +219,12 @@ pub struct ArtifactRecord {
     pub git_ignored: Option<bool>,
     pub git_tracked: Option<bool>,
     pub is_symlink: bool,
+    pub symlink_target: Option<String>,
     pub safety: SafetyAssessment,
 }
 
 pub struct ProjectSnapshot {
+    pub schema_version: u32,           // 契约版本，见第十节 10.5
     pub root: String,
     pub scanned_at: String,
     pub default_branch: Option<String>,

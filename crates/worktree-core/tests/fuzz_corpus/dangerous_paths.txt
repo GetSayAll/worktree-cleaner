@@ -1,0 +1,93 @@
+# 对抗路径语料：这里的每一条都必须被 validate_path_for_deletion 拒绝。
+# 每行一个路径；以 # 开头的行是注释；空行忽略。
+# 只允许放「一定被拒绝」的路径，放错会直接让测试失败——这是刻意的。
+
+# --- 空 / 空白 / 相对路径 ---
+node_modules
+./build
+../target
+a/b/c
+~/.cache
+target
+node_modules/
+baz/
+
+# --- 路径穿越 ---
+..
+../etc
+/..
+/foo/../etc
+/a/b/../..
+/Users/x/../..
+/usr/../etc
+/System/../..
+/./..
+/tmp/..
+/Users/andy/MySrc/../../etc
+/etc/../etc
+/bin/../etc
+
+# --- 顶层根目录本身（组件数 ≤ 2） ---
+/
+/etc
+/bin
+/sbin
+/usr
+/usr/local
+/System
+/Applications
+/Library
+/Volumes
+/Users
+/tmp
+/opt
+/var
+/private
+/home
+/root
+/dev
+/proc
+/sys
+/mnt
+/media
+/boot
+/run
+
+# --- 深层系统位置 ---
+/System/Library/CoreServices
+/System/Volumes/Data
+/bin/sh
+/bin/ls
+/sbin/mount
+/sbin/reboot
+/usr/bin/git
+/usr/lib/dyld
+/usr/share/man
+/etc/passwd
+/etc/hosts
+/etc/ssh/sshd_config
+/private/etc/hosts
+/private/etc/ssh/sshd_config
+/var/db/whatever
+/var/db
+/Library/Extensions/foo.kext
+/Library/Extensions/foo.kext/Contents
+/dev/null
+/dev/disk0
+/dev/fd/3
+/proc/self/environ
+/sys/kernel/mm
+
+# --- 归一化后塌缩成顶层根 ---
+//
+///
+/.
+/.//
+/./.
+/tmp/./..
+/Users/andy/./../..
+/System/./../..
+/a/../../..
+
+# --- 包含制表符（控制字符）---
+/tmp/with	tab
