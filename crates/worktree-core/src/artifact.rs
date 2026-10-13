@@ -286,6 +286,13 @@ pub struct ArtifactScanOptions {
     /// When set, the scan stops adding artifacts once the budget is spent and
     /// reports the unscanned remainder as a warning instead of guessing.
     pub budget_deadline: Option<Instant>,
+    /// Extra budget for the credential walk, on top of half of `per_dir_timeout`.
+    ///
+    /// Only set by tests: a test that drives `per_dir_timeout` to zero to make the
+    /// *size* measurement time out would otherwise also starve the credential walk,
+    /// and the two cannot be exercised apart. `None` in production, where the
+    /// credential walk simply takes its half of `per_dir_timeout`.
+    pub credential_budget: Option<Duration>,
 }
 
 impl Default for ArtifactScanOptions {
@@ -297,6 +304,7 @@ impl Default for ArtifactScanOptions {
             whitelist: Vec::new(),
             now: SystemTime::now(),
             budget_deadline: None,
+            credential_budget: None,
         }
     }
 }
@@ -563,7 +571,10 @@ fn check_artifact_with_credential_limit(
     // at all, and treating the two alike would leave every large `node_modules`
     // permanently unverifiable (D3, without turning the tool into noise).
     if !is_symlink {
-        match credential_in_with_limit(dir, credential_limit) {
+        // The same budget the size walk got, halved: this is a second pass over
+        // the same tree, so letting it have the full budget doubles what one
+        // directory can cost the executor.
+        match credential_in_within(dir, credential_limit, credential_budget(opts)) {
             CredentialScan::Complete(Some(name)) => reasons.push(Reason::blocking(
                 ReasonCode::AfCredentials,
                 "contains what looks like a credential file",
@@ -572,9 +583,9 @@ fn check_artifact_with_credential_limit(
             CredentialScan::Complete(None) => {}
             CredentialScan::Truncated { scanned } => reasons.push(Reason::review(
                 ReasonCode::AfCannotVerify,
-                "could not complete the check",
+                "could not finish checking for credentials",
                 format!(
-                    "the credential check stopped after {scanned} entries without covering the whole directory; a credential further inside would not have been found"
+                    "looked at {scanned} entries before the time limit, without covering the whole directory; a credential further inside would not have been found"
                 ),
             )),
             CredentialScan::Failed(error) => reasons.push(cannot_verify(&format!(
@@ -725,31 +736,44 @@ fn cannot_verify(evidence: &str) -> Reason {
 
 /// How many entries the credential check looks at before it gives up.
 ///
-/// The bound is what keeps this from becoming a second full walk of a large
-/// `node_modules`, and it has to be high enough to cover a real one: the previous
-/// 2,000 was below the ~5,800 entries this repository's own `node_modules` holds, so
-/// the *most common* artifact kind always ended in `cannot_verify` and the check was
-/// effectively off exactly where a stray `.env` would do the most damage. 50,000
-/// covers ordinary dependency trees while still bounding the work.
-const CREDENTIAL_SCAN_LIMIT: usize = 50_000;
+/// The hard ceiling on entries the credential check will look at.
+///
+/// **measured** on this machine, walking every entry with `read_dir` + `lstat`:
+/// a 5,786-entry `node_modules` takes 76ms, a 49,913-entry one 795ms, a 138,857-entry
+/// one 859ms and a 237,522-entry one 1.63s. Entry count was never the thing worth
+/// bounding — time is, and the caller's `per_dir_timeout` already bounds that.
+///
+/// Counting entries is kept only as a last-resort ceiling for a pathological tree
+/// (a network mount, a loop of bind mounts) where a per-directory budget would
+/// otherwise be spent entry by entry rather than in wall-clock time. It is set far
+/// above any real dependency tree so it is never the reason a normal `node_modules`
+/// cannot be checked: an earlier bound of 50,000 made every repository whose
+/// dependencies exceeded it permanently `cannot_verify`, which read on the result
+/// page as dozens of unexplained "skipped" rows.
+const CREDENTIAL_SCAN_LIMIT: usize = 1_000_000;
+
+/// The budget the credential walk gets for one directory.
+///
+/// Half of the per-directory budget, because it is a second pass over the tree the
+/// size walk already read: giving it the whole budget would let one directory cost
+/// the executor twice what the user allowed. Overridable in tests, so a test can
+/// starve the size walk without also starving this one.
+fn credential_budget(opts: &ArtifactScanOptions) -> Duration {
+    opts.credential_budget
+        .unwrap_or_else(|| opts.per_dir_timeout / 2)
+}
 
 /// The outcome of looking for credential files in a directory.
 #[derive(Debug, PartialEq, Eq)]
 enum CredentialScan {
     /// The whole directory was walked; `name` is the hit, relative to the directory.
     Complete(Option<String>),
-    /// The walk hit its entry bound, so the rest of the tree was never looked at.
+    /// The walk hit its ceiling, so the rest of the tree was never looked at.
     /// `scanned` says how far it got, which is what the user is told.
     Truncated { scanned: usize },
     /// A directory could not be read at all. Carries the message rather than the
     /// `io::Error` itself, so the outcome stays comparable in tests.
     Failed(String),
-}
-
-/// [`credential_in_with_limit`] at the bound the app ships.
-#[cfg(test)]
-fn credential_in(dir: &Path) -> CredentialScan {
-    credential_in_with_limit(dir, CREDENTIAL_SCAN_LIMIT)
 }
 
 /// A credential-looking entry inside `dir`, named relative to `dir`, if there is one.
@@ -760,10 +784,17 @@ fn credential_in(dir: &Path) -> CredentialScan {
 /// (`DirEntry::metadata` is `lstat`), so the walk cannot leave the directory, and
 /// `.git` is skipped so a nested repository is not walked for nothing.
 ///
-/// The entry bound is a parameter, so the truncation branch is reachable from a
-/// small fixture — the same reason `walk_size_with_cap` takes its cap. Callers pass
-/// [`CREDENTIAL_SCAN_LIMIT`].
-fn credential_in_with_limit(dir: &Path, limit: usize) -> CredentialScan {
+/// Bounded twice, and both bounds matter. The ceiling is a last-resort guard
+/// against a pathological tree. The deadline is the one that does the real work:
+/// this walk runs *in addition to* the size walk, so without a deadline of its own
+/// a slow directory was checked for size, then checked again for credentials with
+/// nothing to stop the second pass, and the executor spent twice its budget on one
+/// item. Passing the deadline is the same partial-walk outcome as the ceiling.
+/// Bounded by a ceiling (a last-resort guard for a pathological tree) and by a
+/// deadline, which is what the caller really controls: `per_dir_timeout` is the
+/// budget the user set for one directory.
+fn credential_in_within(dir: &Path, limit: usize, budget: Duration) -> CredentialScan {
+    let started = Instant::now();
     let mut visited = 0usize;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
@@ -777,7 +808,7 @@ fn credential_in_with_limit(dir: &Path, limit: usize) -> CredentialScan {
                 Err(error) => return CredentialScan::Failed(error.to_string()),
             };
             visited += 1;
-            if visited > limit {
+            if visited > limit || started.elapsed() > budget {
                 return CredentialScan::Truncated {
                     scanned: visited - 1,
                 };
@@ -1172,7 +1203,7 @@ mod tests {
         std::fs::write(nested.join(".env"), "API_KEY=live\n").expect("write the secret");
 
         assert_eq!(
-            credential_in_with_limit(dir.path(), CREDENTIAL_SCAN_LIMIT),
+            credential_in_within(dir.path(), CREDENTIAL_SCAN_LIMIT, Duration::from_secs(10)),
             CredentialScan::Complete(Some("left-pad/.env".to_string()))
         );
     }
@@ -1191,45 +1222,70 @@ mod tests {
 
         // Under the bound: a completed walk with nothing to report.
         assert_eq!(
-            credential_in_with_limit(dir.path(), 4),
+            credential_in_within(dir.path(), 4, Duration::from_secs(10)),
             CredentialScan::Complete(None)
         );
         // Over the bound: reported as a partial walk, with the count it reached —
         // never as a clean result.
         assert_eq!(
-            credential_in_with_limit(dir.path(), 2),
+            credential_in_within(dir.path(), 2, Duration::from_secs(10)),
             CredentialScan::Truncated { scanned: 2 }
         );
     }
 
     #[test]
-    fn the_shipped_credential_bound_covers_a_tree_larger_than_the_old_one() {
-        // Pins the constant itself, which the case above cannot: it passes a limit of
-        // its own, so lowering `CREDENTIAL_SCAN_LIMIT` back to 2,000 would leave it
-        // green while every real `node_modules` became permanently unverifiable.
+    fn a_tree_the_old_ceiling_cut_off_is_now_walked_whole() {
+        // The regression, as a behaviour rather than a constant.
         //
-        // The fixture is built at the size that actually caused the problem — past
-        // the old bound — and walked with the limit the app ships.
-        const OLD_BOUND: usize = 2_000;
+        // The ceiling used to be the only bound and sat at 50,000, below the
+        // 138,857- and 237,522-entry `node_modules` on this machine. Those reported
+        // "could not complete the check", were skipped at execution, and the result
+        // page showed a column of unexplained skips. **measured** on this machine,
+        // walking every entry: 5,786 entries in 76ms, 49,913 in 795ms, 138,857 in
+        // 859ms, 237,522 in 1.63s — so entry count was never what should have been
+        // bounded, and it is time now.
+        //
+        // The fixture is the size that caused it. It is walked with the ceiling the
+        // app ships and a budget a real directory finishes inside, and has to come
+        // back complete.
+        const OLD_CEILING: usize = 2_000;
         let dir = tempfile::TempDir::new().expect("temp dir");
-        // One directory holding enough entries to pass the old bound, so the walk has
-        // to descend rather than stop at the top level.
         let many = dir.path().join("node_modules");
         std::fs::create_dir_all(&many).expect("create");
-        for index in 0..OLD_BOUND + 10 {
+        for index in 0..OLD_CEILING * 2 {
             std::fs::write(many.join(format!("package-{index}")), "x").expect("write");
         }
 
-        // With the old bound this tree was cut short and reported as unverifiable.
+        // The old ceiling cuts it short — which is the state the shipped one is not in.
+        assert!(matches!(
+            credential_in_within(dir.path(), OLD_CEILING, Duration::from_secs(10)),
+            CredentialScan::Truncated { .. }
+        ));
+        // The shipped ceiling covers a tree well past the one that used to fail.
         assert_eq!(
-            credential_in_with_limit(dir.path(), OLD_BOUND),
-            CredentialScan::Truncated { scanned: OLD_BOUND }
-        );
-        // With the shipped bound the very same tree is walked whole.
-        assert_eq!(
-            credential_in(dir.path()),
+            credential_in_within(dir.path(), CREDENTIAL_SCAN_LIMIT, Duration::from_secs(10)),
             CredentialScan::Complete(None),
-            "the shipped bound must cover a node_modules larger than the old one"
+            "a dependency tree this size must be walked whole, not reported unverifiable"
+        );
+    }
+
+    #[test]
+    fn the_credential_walk_is_stopped_by_its_deadline_not_only_by_the_ceiling() {
+        // The second half of the fix: the bound that does the real work is time.
+        // Without a deadline the walk ran on however long the tree took, on top of
+        // the size walk that had already read the same directory.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        for index in 0..2_000 {
+            std::fs::write(dir.path().join(format!("f{index}")), "x").expect("write");
+        }
+        // A ceiling far above the tree, a deadline of nothing: the deadline is what
+        // stops it, so the outcome is a partial walk rather than a clean one.
+        assert!(
+            matches!(
+                credential_in_within(dir.path(), CREDENTIAL_SCAN_LIMIT, Duration::ZERO),
+                CredentialScan::Truncated { .. }
+            ),
+            "a zero budget must stop the walk even with the whole ceiling available"
         );
     }
 
@@ -1254,12 +1310,14 @@ mod tests {
                 ignored(".gitignore:1"),
             ),
         ]);
+        let mut options = opts();
+        options.credential_budget = Some(Duration::from_secs(10));
         let (record, _warnings) = check_artifact_with_credential_limit(
             &runner,
             &root,
             &artifact,
             lookup_kind("node_modules").expect("kind"),
-            &opts(),
+            &options,
             10,
         );
         assert_eq!(record.safety.status, SafetyStatus::Review);
@@ -1270,7 +1328,7 @@ mod tests {
             .find(|reason| reason.code == ReasonCode::AfCannotVerify)
             .expect("cannot_verify reason");
         assert!(
-            reason.evidence.contains("stopped after 10 entries"),
+            reason.evidence.contains("10 entries"),
             "{}",
             reason.evidence
         );
@@ -1348,6 +1406,10 @@ mod tests {
         ]);
         let mut options = opts();
         options.per_dir_timeout = Duration::from_nanos(0);
+        // Only the size walk is being starved here. The credential walk has a
+        // deadline of its own — it always did — so a size timeout must not also
+        // decide the credential answer, or the two failures blur into one.
+        options.credential_budget = Some(Duration::from_secs(10));
         let (record, warnings) = check_artifact(
             &runner,
             &root,
@@ -1898,6 +1960,11 @@ mod tests {
         // A zero budget expires before the walk can report, which is the same
         // path a multi-gigabyte directory takes.
         options.per_dir_timeout = Duration::from_nanos(0);
+        // Only the *size* walk is being starved here. The credential walk has a
+        // deadline of its own, and it would otherwise be cut short by the same
+        // zero — so the two independent failures would blur into one, and this
+        // test would no longer be about the size walk at all.
+        options.credential_budget = Some(Duration::from_secs(10));
         let (record, warnings) = check_artifact(
             &runner,
             &root,

@@ -463,7 +463,20 @@ a { color: var(--accent); }
 .segmented button.is-active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
 
 /* ---------- table ---------- */
-.table { width: 100%; border-collapse: collapse; }
+/* `table-layout: fixed` so a `max-width` on a cell is honoured. Under the default
+   `auto` layout the browser sizes a column by its widest unbreakable content and
+   ignores the width it was given, which is how one long sentence of evidence came
+   to occupy a single word per line and stretch a table row to a paragraph tall.
+   The columns are sized in `th`, so nothing depends on the content here. */
+.table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.table thead th {
+  /* The header stays while the body scrolls. Without this, a table long enough to
+     scroll loses its column labels on the way down and every row has to be read by
+     position. `top: 0` because the content pane above it is what scrolls. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
 .table th {
   text-align: left;
   font-size: 13px;
@@ -478,8 +491,19 @@ a { color: var(--accent); }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover { background: var(--surface-2); }
 .table tr.is-bundled { opacity: 0.62; }
-.table .cell-check { width: 34px; }
+.table .cell-check { width: 44px; }
 .table .cell-size, .table .cell-outcome { text-align: right; white-space: nowrap; }
+/* The reason column is the one that used to stretch a row: it carries the evidence
+   text, which is prose. It is given the largest share and capped, so a row's height
+   is decided by the number of items rather than by the longest unbroken string in
+   the table. The width lives on the `th`, because under `table-layout: fixed` only
+   the first row sizes a column. */
+.table .cell-reason {
+  width: 32%;
+  min-width: 0;
+  overflow: hidden;
+}
+.table .cell-path { width: 30%; min-width: 0; }
 
 .group-head {
   display: flex;
@@ -511,7 +535,12 @@ a { color: var(--accent); }
 }
 .reason__mark { flex-shrink: 0; margin-top: 3px; }
 .reason__text { color: var(--text); display: block; }
-.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: 13px; margin-top: 2px; display: block; }
+.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: 13px; margin-top: 2px; display: block; overflow-wrap: anywhere; }
+/* Evidence is often one unbreakable run — a path, a SHA, a sentence with a number
+   in it — so it has to be allowed to break inside a narrow column. Without this a
+   long one pushes its cell to a single word per line and the row grows to a
+   paragraph. */
+.reason__text { overflow-wrap: anywhere; }
 .reason--safe { border-color: var(--safe-border); background: var(--safe-bg); }
 .reason--review { border-color: var(--review-border); background: var(--review-bg); }
 .reason--unsafe { border-color: var(--unsafe-border); background: var(--unsafe-bg); }
@@ -666,10 +695,87 @@ a { color: var(--accent); }
 
 /* Back on the left, forward on the right, summary in the middle — the same three
    slots on every page, so the buttons are in the same place each time rather than
-   wherever that page's layout left room. */
-.actionbar__side { flex: 0 0 auto; display: flex; gap: var(--sp-2); }
+   wherever that page's layout left room.
+
+   `align-items: center` puts the row on one axis, but the buttons inside it came out
+   looking low: the summary is a line of text at `line-height: 1.55`, and a `.btn--lg`
+   is 42px tall, so a stretch-aligned child sat with its text below the button's
+   midpoint. `align-items: center` on the groups plus a line-height of 1 on the
+   summary puts every child on the same visual centre. */
+.actionbar__side {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
 .actionbar__side--end { margin-left: auto; }
-.actionbar__summary { min-width: 0; flex: 1; text-align: center; }
+.actionbar__summary {
+  min-width: 0;
+  flex: 1;
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* ---------- busy state ---------- */
+
+/* The executor works through the plan item by item behind a single call, so the
+   page cannot show a percentage — but a button that says "running" and then sits
+   still for several seconds is indistinguishable from a hung app, which is exactly
+   what it looked like. An indeterminate bar and a spinner say "working" without
+   claiming to know how far along it is. */
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.busy-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.busy-strip__bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+  position: relative;
+}
+.busy-strip__bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: sweep 1.25s ease-in-out infinite;
+}
+@keyframes sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+.busy-strip__label { flex: 0 0 auto; color: var(--text-2); font-size: 13px; }
+
+/* One motion preference, respected everywhere. The busy indicators are the whole
+   reason the app has animation, so honouring this matters more here than usual. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .busy-strip__bar::after {
+    animation: none;
+  }
+  .spinner { border-top-color: currentColor; opacity: 0.5; }
+  .busy-strip__bar::after { width: 100%; opacity: 0.5; }
+}
 
 /* ---------- plan ---------- */
 .plan-item {

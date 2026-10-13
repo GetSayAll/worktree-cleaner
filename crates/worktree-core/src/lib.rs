@@ -380,6 +380,7 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
         whitelist,
         now,
         budget_deadline: Some(started + budget),
+        credential_budget: None,
     };
     let artifact_scan = scan_artifacts(&runner, &present_roots, &artifact_options);
     warnings.extend(artifact_scan.warnings);

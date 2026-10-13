@@ -351,6 +351,7 @@ pub fn execute_plan(
                 whitelist: whitelist.clone(),
                 now: opts.now,
                 budget_deadline: None,
+                credential_budget: None,
             },
         );
         if artifact_identity(record) != artifact_identity(&rechecked) {

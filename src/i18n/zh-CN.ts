@@ -69,9 +69,12 @@ export const zhCN = {
       prune: "清理元数据"
     },
     outcome: {
-      ok: "成功",
-      skipped: "已跳过",
-      failed: "失败"
+      ok: "已删除",
+      // "Skipped" said nothing about whether anything happened. Every row on this
+      // page is a deletion, so the reader's first question is whether the thing is
+      // gone — "not deleted" answers it, and the row's own detail says why.
+      skipped: "未删除",
+      failed: "删除失败"
     }
   },
   units: {
@@ -260,6 +263,14 @@ export const zhCN = {
     gitIgnored: "已忽略",
     gitUnverified: "未核验",
     gitUntracked: "未跟踪",
+    columns: {
+      path: "目录",
+      git: "Git 状态",
+      lastActivity: "最近活动",
+      size: "体积",
+      safety: "判定",
+      reason: "原因"
+    },
     empty: "没有超过当前体积阈值的产物目录",
     selectedSummary: (artifacts: number, worktrees: number) =>
       `已选 ${artifacts} 个产物 · ${worktrees} 个工作树 · 预计可回收`,
@@ -345,7 +356,8 @@ export const zhCN = {
       `${n} 个「禁止删除」条目已被自动排除；回到列表可以查看原因`,
     backToAdjust: "返回调整",
     runCleanup: "执行清理",
-    running: "正在执行…"
+    running: "正在执行…",
+    runningNote: "正在逐项复检并删除，每项都要重新验证，所以需要一点时间；请不要关闭。",
   },
   result: {
     title: "执行结果",
@@ -363,12 +375,16 @@ export const zhCN = {
       // 假合计诚实。
       spaceFreedSubUnknown: (n: number) =>
         `至少为已测得的体积 · ${n} 项无法测量体积`,
-      succeeded: "成功",
-      succeededSub: "含元数据清理",
-      movedToTrash: "移入回收站",
+      // 「成功」把两件事混在一起，而用户会拿它和回收站里的数量对：
+      // 工作树是 git 直接删的，根本不进回收站，于是 4 成功 / 回收站 1 看着像对不上。
+      // 现在说清成功数里有什么、什么才会进回收站。
+      succeeded: "已处理",
+      succeededSub: (trashed: number) =>
+        `其中 ${trashed} 个目录进了回收站；工作树由 git 移除，不进回收站`,
+      movedToTrash: "进了回收站",
       movedToTrashSub: "可从回收站恢复",
-      skippedFailed: "跳过 / 失败",
-      skippedFailedSub: "原因见下表"
+      skippedFailed: "未删除",
+      skippedFailedSub: "都没删，原因见下表"
     },
     perItemTitle: "逐项结果",
     columns: {

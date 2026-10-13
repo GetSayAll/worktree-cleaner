@@ -72,6 +72,20 @@ function isCollapsed(key: string): boolean {
   return collapsed.value.includes(key);
 }
 
+/**
+ * The full text of an item's reasons, for the cell's tooltip.
+ *
+ * The row shows one line so it can be scanned; the evidence behind the verdict is
+ * exactly the part a user needs when a row says "needs review" and they want to
+ * know why, and a truncated cell would otherwise be all they get. Present on hover
+ * rather than in the row, so the list keeps its height.
+ */
+function reasonTitle(item: ArtifactRecord): string {
+  return item.safety.reasons
+    .map((reason) => `${reason.text} — ${reason.evidence}`)
+    .join("\n");
+}
+
 function toggleCollapsed(key: string) {
   collapsed.value = isCollapsed(key) ? collapsed.value.filter((k) => k !== key) : [...collapsed.value, key];
 }
@@ -139,6 +153,22 @@ function sizeText(item: ArtifactRecord): string {
 
       <div v-if="!isCollapsed(group.key)" class="card__body card__body--flush">
         <table class="table">
+          <!-- The header was missing entirely, so a table long enough to scroll lost
+               its column labels on the way down and every row had to be read by
+               position. It also carries the column widths: under `table-layout:
+               fixed` only the first row decides them, and `auto` would give the
+               reason column no more room than any other. -->
+          <thead>
+            <tr>
+              <th class="cell-check"></th>
+              <th class="cell-path">{{ messages.artifacts.columns.path }}</th>
+              <th>{{ messages.artifacts.columns.git }}</th>
+              <th>{{ messages.artifacts.columns.lastActivity }}</th>
+              <th class="cell-size">{{ messages.artifacts.columns.size }}</th>
+              <th>{{ messages.artifacts.columns.safety }}</th>
+              <th class="cell-reason">{{ messages.artifacts.columns.reason }}</th>
+            </tr>
+          </thead>
           <tbody>
             <template v-for="item in group.items" :key="item.path">
               <tr :class="{ 'is-bundled': bundledOwner(item) !== null }">
@@ -158,7 +188,7 @@ function sizeText(item: ArtifactRecord): string {
                     @change="toggleArtifact(item.path)"
                   />
                 </td>
-                <td>
+                <td class="cell-path">
                   <div class="row-wrap">
                     <span class="chip">{{ item.kind }}</span>
                     <span class="mono">{{ shortenPath(item.path, root) }}</span>
@@ -173,7 +203,13 @@ function sizeText(item: ArtifactRecord): string {
                 <td class="nowrap tiny">{{ formatRelTime(item.last_updated_at) }}</td>
                 <td class="cell-size numeric">{{ sizeText(item) }}</td>
                 <td class="nowrap"><SafetyBadge :status="item.safety.status" /></td>
-                <td style="max-width: 260px"><ReasonList :reasons="item.safety.reasons" :limit="1" /></td>
+                <!-- The reason is a title, not the whole story: the evidence under it
+                     can be a full sentence, and a list is for choosing items at a
+                     glance. The full reason is on the item's own page, and the row
+                     stays one line tall here. -->
+                <td class="cell-reason" :title="reasonTitle(item)">
+                  <ReasonList :reasons="item.safety.reasons" :limit="1" />
+                </td>
               </tr>
             </template>
           </tbody>

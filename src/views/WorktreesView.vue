@@ -134,13 +134,13 @@ function stateText(item: WorktreeRecord): string {
               <th class="cell-check">
                 <input v-model="allSelected" class="check" type="checkbox" :disabled="selectable.length === 0" />
               </th>
-              <th>{{ messages.worktrees.columns.branch }}</th>
+              <th class="cell-path">{{ messages.worktrees.columns.branch }}</th>
               <th>{{ messages.worktrees.columns.status }}</th>
               <th>{{ messages.worktrees.columns.agent }}</th>
               <th>{{ messages.worktrees.columns.lastActivity }}</th>
               <th class="cell-size">{{ messages.worktrees.columns.size }}</th>
               <th>{{ messages.worktrees.columns.safety }}</th>
-              <th style="width: 68px"></th>
+              <th style="width: 76px"></th>
             </tr>
           </thead>
           <tbody>
@@ -156,7 +156,7 @@ function stateText(item: WorktreeRecord): string {
                     @change="toggleWorktree(item.path)"
                   />
                 </td>
-                <td>
+                <td class="cell-path">
                   <div>{{ item.branch || messages.common.detachedHead }}</div>
                   <div class="mono tiny faint">
                     {{ displayPath(item.path, root) }}

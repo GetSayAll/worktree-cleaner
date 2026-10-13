@@ -75,9 +75,11 @@ export const en = {
       prune: "Clean up metadata"
     },
     outcome: {
-      ok: "Succeeded",
-      skipped: "Skipped",
-      failed: "Failed"
+      // Every row on the result page is a deletion, so the label says what happened
+      // to the thing rather than naming the run's internal state.
+      ok: "Deleted",
+      skipped: "Not deleted",
+      failed: "Delete failed"
     }
   },
   units: {
@@ -272,6 +274,14 @@ export const en = {
     gitIgnored: "ignored",
     gitUnverified: "unverified",
     gitUntracked: "untracked",
+    columns: {
+      path: "Directory",
+      git: "Git state",
+      lastActivity: "Last activity",
+      size: "Size",
+      safety: "Verdict",
+      reason: "Reason"
+    },
     empty: "No artifact directories exceed the current size threshold",
     selectedSummary: (artifacts: number, worktrees: number) =>
       `Selected ${artifacts} artifacts · ${worktrees} worktrees · Estimated reclaimable`,
@@ -360,7 +370,9 @@ export const en = {
       `${n} must-not-delete items were auto-excluded; return to the list to see why`,
     backToAdjust: "Back to adjust",
     runCleanup: "Run cleanup",
-    running: "Running…"
+    running: "Running…",
+    runningNote:
+      "Re-checking and removing item by item. Every item is verified again first, so it takes a moment — please leave the app open.",
   },
   result: {
     title: "Result",
@@ -378,12 +390,16 @@ export const en = {
       // "at least" keeps the number honest instead of reporting a false total.
       spaceFreedSubUnknown: (n: number) =>
         `At least the measured sizes · ${n} items had no measurable size`,
-      succeeded: "Succeeded",
-      succeededSub: "includes metadata cleanup",
-      movedToTrash: "Moved to Trash",
+      // A count that mixes worktrees and directories cannot be checked against the
+      // Trash: `git worktree remove` deletes in place and never goes through it.
+      // Saying so here is what stops "4 succeeded, 1 in the Trash" looking wrong.
+      succeeded: "Handled",
+      succeededSub: (trashed: number) =>
+        `${trashed} went to the Trash; worktrees are removed by git and do not go there`,
+      movedToTrash: "Went to Trash",
       movedToTrashSub: "recoverable from Trash",
-      skippedFailed: "Skipped / failed",
-      skippedFailedSub: "see the table below for reasons"
+      skippedFailed: "Not deleted",
+      skippedFailedSub: "nothing was removed; the table below says why"
     },
     perItemTitle: "Per-item results",
     columns: {

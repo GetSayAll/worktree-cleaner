@@ -52,10 +52,6 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         <h1>{{ messages.overview.title }}</h1>
         <p class="faint tiny mono">{{ messages.overview.subtitle(root, snapshot?.default_branch || messages.common.unknown) }}</p>
       </div>
-      <div class="row-wrap">
-        <button class="btn" @click="goTo('worktrees')">{{ messages.overview.viewWorktrees }}</button>
-        <button class="btn" @click="goTo('artifacts')">{{ messages.overview.viewArtifacts }}</button>
-      </div>
     </div>
 
     <div class="stat-grid stat-grid--4">
@@ -167,11 +163,14 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
       </div>
     </div>
 
+    <!-- The two ways into the lists live here, at the bottom, not up in the header
+         beside the title: the header scrolls away with the page, and the overview is
+         a long one — a user who reached the end had no way back into either list
+         except the sidebar. The bar stays put, so the way forward is always visible. -->
     <div class="actionbar">
       <div class="actionbar__side">
-        <button class="btn" data-nav-back="worktrees" :disabled="selectionCount === 0" @click="goTo('worktrees')">
-          {{ messages.overview.adjustSelection }}
-        </button>
+        <button class="btn" @click="goTo('worktrees')">{{ messages.overview.viewWorktrees }}</button>
+        <button class="btn" @click="goTo('artifacts')">{{ messages.overview.viewArtifacts }}</button>
       </div>
       <span class="actionbar__summary" :class="selectionCount > 0 ? 'muted' : 'faint'">
         {{ " " + messages.overview.selected(selectionCount) }} <strong>{{ formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 }) }}</strong>

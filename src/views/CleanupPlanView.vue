@@ -287,18 +287,34 @@ async function copyPlan() {
       </div>
       <span class="actionbar__summary faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
       <div class="actionbar__side" style="margin-left: auto">
-        <button class="btn" @click="showExport = !showExport">
+        <!-- Same height as the button beside it: two buttons of different sizes in
+             one row do not read as a pair, and the taller one sets the row height so
+             the shorter one floats. -->
+        <button class="btn btn--lg" @click="showExport = !showExport">
           {{ showExport ? messages.plan.hideExport : messages.plan.exportPlan }}
         </button>
         <button
           class="btn btn--danger btn--lg"
+          :class="executing ? 'is-busy' : ''"
           data-action="run-cleanup"
           :disabled="!canExecute || executing || !desktop"
           @click="executeCleanup"
         >
+          <!-- A spinner, because a button that reads "running" and then does nothing
+               for a few seconds is indistinguishable from a hung app. The executor
+               works through the plan item by item, so the wait is real. -->
+          <span v-if="executing" class="spinner" aria-hidden="true"></span>
           {{ executing ? messages.plan.running : messages.plan.runCleanup }}
         </button>
       </div>
+    </div>
+
+    <!-- An indeterminate bar for the same reason: the core answers in one call, so
+         there is no percentage to show, but there is definitely work happening and
+         the page should not look inert while it does. -->
+    <div v-if="executing" class="busy-strip" role="status">
+      <div class="busy-strip__bar"></div>
+      <span class="busy-strip__label">{{ messages.plan.runningNote }}</span>
     </div>
 
     <p v-if="!desktop" class="notice">{{ messages.preview.notice }}</p>
