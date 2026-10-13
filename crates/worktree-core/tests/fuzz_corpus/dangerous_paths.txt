@@ -1,8 +1,8 @@
-# 对抗路径语料：这里的每一条都必须被 validate_path_for_deletion 拒绝。
-# 每行一个路径；以 # 开头的行是注释；空行忽略。
-# 只允许放「一定被拒绝」的路径，放错会直接让测试失败——这是刻意的。
+# Adversarial path corpus: every entry here must be rejected by validate_path_for_deletion.
+# One path per line; lines starting with # are comments; blank lines are ignored.
+# Only paths that are guaranteed to be rejected may be added — a mistake fails the test directly, on purpose.
 
-# --- 空 / 空白 / 相对路径 ---
+# --- empty / blank / relative paths ---
 node_modules
 ./build
 ../target
@@ -12,7 +12,7 @@ target
 node_modules/
 baz/
 
-# --- 路径穿越 ---
+# --- path traversal ---
 ..
 ../etc
 /..
@@ -27,7 +27,7 @@ baz/
 /etc/../etc
 /bin/../etc
 
-# --- 顶层根目录本身（组件数 ≤ 2） ---
+# --- top-level roots themselves (component count ≤ 2) ---
 /
 /etc
 /bin
@@ -53,7 +53,7 @@ baz/
 /boot
 /run
 
-# --- 深层系统位置 ---
+# --- deep system locations ---
 /System/Library/CoreServices
 /System/Volumes/Data
 /bin/sh
@@ -78,7 +78,7 @@ baz/
 /proc/self/environ
 /sys/kernel/mm
 
-# --- 归一化后塌缩成顶层根 ---
+# --- collapse to a top-level root after normalisation ---
 //
 ///
 /.
@@ -89,5 +89,5 @@ baz/
 /System/./../..
 /a/../../..
 
-# --- 包含制表符（控制字符）---
+# --- contains a tab (control character) ---
 /tmp/with	tab

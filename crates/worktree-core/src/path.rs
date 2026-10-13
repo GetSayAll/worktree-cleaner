@@ -1,32 +1,38 @@
-//! 删除前的路径校验。
+//! Path validation before deletion.
 //!
-//! 任何删除动作都必须先通过 [`validate_path_for_deletion`]（开发契约 D10）。
-//! 校验只允许**收紧**：解析符号链接的结果只能让判定更严格，不能因为解析
-//! 出来一个「看起来正常」的路径就放行原本被拒的输入。
+//! Any deletion action must first pass [`validate_path_for_deletion`] (development
+//! contract D10). Validation may only ever **tighten**: resolving a symlink can only
+//! make the verdict stricter, never accept an originally-rejected input just because
+//! it resolves to a path that "looks normal".
 //!
-//! 校验项（对应产品规划 6.4）：
+//! Checks (corresponding to product plan §6.4):
 //!
-//! 1. 非空且为绝对路径；
-//! 2. 路径本身是符号链接时，解析目标后重新校验目标；
-//! 3. 路径的**祖先**是符号链接时，按解析后的真实路径重新校验；
-//! 4. 拒绝把 `..` 作为完整路径组件出现；
-//! 5. 拒绝包含 NUL 与控制字符的路径；
-//! 6. 归一化后拒绝系统位置与顶层根目录；
-//! 7. 拒绝「拼接结果与预期父目录相同」的空变量塌缩；
-//! 8. 命中用户白名单即拒绝。
+//! 1. Non-empty and absolute;
+//! 2. If the path itself is a symlink, resolve the target and re-validate it;
+//! 3. If an **ancestor** of the path is a symlink, re-validate against the resolved
+//!    real path;
+//! 4. Reject `..` appearing as a full path component;
+//! 5. Reject paths containing NUL or control characters;
+//! 6. After normalisation, reject system locations and top-level roots;
+//! 7. Reject empty-variable collapse, where the concatenated result equals the
+//!    expected parent;
+//! 8. Reject on user whitelist hit.
 //!
-//! 第 2、3 项的实现放在第 6 项之后（先做纯字符串判定，再解析文件系统），
-//! 顺序与文档列表不同但检查集合一致；解析结果同样会跑一遍第 6、7 项。
+//! Checks 2 and 3 are implemented after check 6 (pure string checks first, then
+//! filesystem resolution): the order differs from the list above but the set of checks
+//! is the same. The resolved result likewise runs through checks 6 and 7 again.
 
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
-/// 深层禁止删除的系统位置（含整个子树）。
+/// System locations that are deeply forbidden from deletion (including the whole
+/// subtree).
 ///
-/// 注意：`/Applications`、`/Library`、`/Volumes`、`/Users` 这类目录采取
-/// 「只禁止删除目录本身」的语义，由第 6 项的「组件数 ≤ 2」规则统一覆盖，
-/// 因此不在这里列成子树前缀——否则 `/Volumes/External/repo` 这类合理的
-/// 项目路径会被误杀。
+/// Note: directories such as `/Applications`, `/Library`, `/Volumes`, and `/Users` use
+/// the semantics of "only the directory itself is forbidden", uniformly covered by the
+/// "component count ≤ 2" rule in check 6, so they are not listed here as subtree
+/// prefixes — otherwise legitimate project paths such as `/Volumes/External/repo` would
+/// be killed by mistake.
 #[cfg(unix)]
 const DENIED_PREFIXES: &[&str] = &[
     "/System",
@@ -43,34 +49,36 @@ const DENIED_PREFIXES: &[&str] = &[
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PathRejection {
-    #[error("路径为空")]
+    #[error("path is empty")]
     Empty,
-    #[error("路径不是绝对路径：{0}")]
+    #[error("path is not absolute: {0}")]
     NotAbsolute(String),
-    #[error("路径包含 NUL 或控制字符：{0}")]
+    #[error("path contains NUL or control characters: {0}")]
     ControlCharacter(String),
-    #[error("路径包含 .. 组件：{0}")]
+    #[error("path contains a .. component: {0}")]
     ParentTraversal(String),
-    #[error("拒绝删除顶层根目录：{0}")]
+    #[error("refusing to delete a top-level root: {0}")]
     TopLevelRoot(String),
-    #[error("指向受保护的系统位置：{0}")]
+    #[error("points at a protected system location: {0}")]
     ProtectedLocation(String),
-    #[error("拼接结果与预期父目录相同，疑似变量为空：{0}")]
+    #[error("concatenated result equals the expected parent, likely an empty variable: {0}")]
     EmptyVariableCollapse(String),
-    #[error("符号链接指向受保护位置：{0} -> {1}")]
+    #[error("symlink points into a protected location: {0} -> {1}")]
     SymlinkEscape(String, String),
-    #[error("命中用户白名单：{0}")]
+    #[error("matches the user whitelist: {0}")]
     Whitelisted(String),
-    #[error("无法解析路径：{0}")]
+    #[error("cannot resolve path: {0}")]
     Unresolvable(String),
 }
 
-/// 校验上下文。
+/// Validation context.
 #[derive(Debug, Clone, Default)]
 pub struct DeletionContext {
-    /// 期望的父目录。候选路径与它相同即判定为空变量塌缩。
+    /// Expected parent directory. A candidate equal to it is judged an empty-variable
+    /// collapse.
     pub expected_parent: Option<PathBuf>,
-    /// 用户白名单。规则必须是**已展开的绝对路径**（调用方负责展开 `~`）。
+    /// User whitelist. Rules must be **expanded absolute paths** (the caller expands
+    /// `~`).
     pub whitelist: Vec<PathBuf>,
 }
 
@@ -90,14 +98,16 @@ impl DeletionContext {
     }
 }
 
-/// 通过校验的路径。
+/// A path that passed validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedPath {
-    /// 实际要被移除的路径（**不跟随**叶子符号链接，移走的永远是链接本身）。
+    /// The path that will actually be removed (**does not follow** a leaf symlink;
+    /// what is removed is always the link itself).
     pub target: PathBuf,
-    /// 解析后的真实路径，用于二次复核与证据展示。
+    /// Resolved real path, used for a second review and for showing evidence.
     pub resolved: PathBuf,
-    /// 叶子是否为符号链接。为真时只允许移动链接本身，禁止递归删除。
+    /// Whether the leaf is a symlink. When true, only the link itself may be moved;
+    /// recursive deletion is forbidden.
     pub is_symlink: bool,
 }
 
@@ -107,12 +117,13 @@ impl ValidatedPath {
     }
 }
 
-/// 删除前校验。返回 `Err` 即表示**必须拒绝**该删除动作。
+/// Validation before deletion. Returning `Err` means the deletion action **must be
+/// rejected**.
 pub fn validate_path_for_deletion(
     candidate: &Path,
     ctx: &DeletionContext,
 ) -> Result<ValidatedPath, PathRejection> {
-    // ---- 1 / 5：非空、绝对、无控制字符 ----
+    // ---- 1 / 5: non-empty, absolute, no control characters ----
     if candidate.as_os_str().is_empty() {
         return Err(PathRejection::Empty);
     }
@@ -124,7 +135,7 @@ pub fn validate_path_for_deletion(
         return Err(PathRejection::ControlCharacter(escape(&literal)));
     }
 
-    // ---- 4：`..` 作为完整路径组件 ----
+    // ---- 4: `..` as a full path component ----
     for component in candidate.components() {
         if matches!(component, Component::ParentDir) {
             return Err(PathRejection::ParentTraversal(literal));
@@ -133,14 +144,14 @@ pub fn validate_path_for_deletion(
 
     let normalized = lexical_normalize(candidate);
 
-    // ---- 6 / 7（字面量）：顶层根、系统位置、空变量塌缩 ----
+    // ---- 6 / 7 (literal): top-level root, system location, empty-variable collapse ----
     reject_roots(&normalized)?;
     reject_empty_variable_collapse(&normalized, ctx)?;
 
-    // ---- 2 / 3：解析符号链接（叶子 + 祖先）----
+    // ---- 2 / 3: resolve symlinks (leaf + ancestors) ----
     let (resolved, is_symlink) = resolve_for_inspection(candidate)?;
 
-    // ---- 6 / 7（解析结果）：同样的判定在真实路径上再跑一遍，只收紧 ----
+    // ---- 6 / 7 (resolved): run the same checks on the real path, tighten only ----
     if resolved != normalized {
         if let Err(rejection) = reject_roots(&resolved) {
             return Err(match (rejection, is_symlink) {
@@ -156,7 +167,7 @@ pub fn validate_path_for_deletion(
         reject_empty_variable_collapse_resolved(&resolved, ctx)?;
     }
 
-    // ---- 8：白名单 ----
+    // ---- 8: whitelist ----
     for rule in &ctx.whitelist {
         let rule_normalized = lexical_normalize(rule);
         if normalized == rule_normalized || normalized.starts_with(&rule_normalized) {
@@ -171,11 +182,12 @@ pub fn validate_path_for_deletion(
     })
 }
 
-/// 顶层根 + 系统位置判定。
+/// Top-level root + system location checks.
 fn reject_roots(path: &Path) -> Result<(), PathRejection> {
-    // 组件数 ≤ 2 即「/xxx」这一层：任何顶层目录本身都不允许删除，
-    // 这条路同时覆盖 / 本身、/etc、/Applications、/Library、/Volumes、
-    // /Users、/tmp、/opt 等，且不依赖平台特有的清单。
+    // A component count ≤ 2 means the "/xxx" level: no top-level directory itself may
+    // be deleted. This single rule also covers / itself, /etc, /Applications,
+    // /Library, /Volumes, /Users, /tmp, /opt, etc., without relying on a
+    // platform-specific list.
     if path.components().count() <= 2 {
         return Err(PathRejection::TopLevelRoot(display(path)));
     }
@@ -187,7 +199,7 @@ fn reject_roots(path: &Path) -> Result<(), PathRejection> {
     Ok(())
 }
 
-/// 命中受保护位置时返回命中的规则文本，否则返回 `None`。
+/// Returns the matched rule text when a protected location is hit, otherwise `None`.
 fn protected_location(path: &Path) -> Option<String> {
     #[cfg(unix)]
     {
@@ -198,7 +210,8 @@ fn protected_location(path: &Path) -> Option<String> {
             }
         }
 
-        // /usr 整体禁止，但 /usr/local 之下是用户与包管理器安装软件的位置。
+        // /usr is forbidden as a whole, but /usr/local is where users and package
+        // managers install software.
         let usr = Path::new("/usr");
         let usr_local = Path::new("/usr/local");
         if path == usr || (path.starts_with(usr) && !path.starts_with(usr_local)) {
@@ -226,7 +239,8 @@ fn protected_location(path: &Path) -> Option<String> {
         }
     }
 
-    // 用户主目录本身不允许删除；其下内容不受此条限制。
+    // The user's home directory itself may not be deleted; contents under it are not
+    // restricted by this rule.
     if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
         let home_path = Path::new(&home);
         if !home_path.as_os_str().is_empty() && path == home_path {
@@ -251,8 +265,9 @@ fn reject_empty_variable_collapse_resolved(
     ctx: &DeletionContext,
 ) -> Result<(), PathRejection> {
     if let Some(parent) = ctx.expected_parent.as_ref() {
-        let parent_resolved =
-            resolve_for_inspection(parent).map(|(path, _)| path).unwrap_or_else(|_| lexical_normalize(parent));
+        let parent_resolved = resolve_for_inspection(parent)
+            .map(|(path, _)| path)
+            .unwrap_or_else(|_| lexical_normalize(parent));
         if resolved == parent_resolved {
             return Err(PathRejection::EmptyVariableCollapse(display(resolved)));
         }
@@ -260,7 +275,7 @@ fn reject_empty_variable_collapse_resolved(
     Ok(())
 }
 
-/// 词法归一化：去掉 `.`，收敛 `..`，不触碰文件系统。
+/// Lexical normalisation: drop `.`, collapse `..`, and never touch the filesystem.
 fn lexical_normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
@@ -280,10 +295,11 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     out
 }
 
-/// 解析路径的真实位置，用于符号链接判定。
+/// Resolve the real location of a path, for symlink checks.
 ///
-/// 路径不存在时取「最长的已存在祖先」做归一化，再把剩余组件接回去——
-/// 这样即使待删除目录已经被删掉，也能判断它的祖先有没有被符号链接劫持。
+/// When the path does not exist, normalise the "longest existing ancestor" and append
+/// the remaining components back — so even if the directory to be deleted is already
+/// gone, we can still tell whether an ancestor has been hijacked by a symlink.
 fn resolve_for_inspection(path: &Path) -> Result<(PathBuf, bool), PathRejection> {
     let is_symlink = std::fs::symlink_metadata(path)
         .map(|meta| meta.file_type().is_symlink())
@@ -317,7 +333,8 @@ fn display(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// 把控制字符渲染成可见形式，便于把证据写进日志和界面。
+/// Render control characters into a visible form, so evidence can be written to logs
+/// and the UI.
 fn escape(raw: &str) -> String {
     raw.chars()
         .map(|c| match c {
@@ -337,7 +354,7 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
-    /// 建一个只在本次测试内使用的临时目录。
+    /// Create a temporary directory used only within the current test.
     struct TempDir(PathBuf);
 
     impl TempDir {
@@ -351,7 +368,7 @@ mod tests {
                     .map(|d| d.as_nanos())
                     .unwrap_or(0)
             ));
-            std::fs::create_dir_all(&dir).expect("创建临时目录");
+            std::fs::create_dir_all(&dir).expect("create temp dir");
             Self(dir)
         }
 
@@ -368,18 +385,19 @@ mod tests {
 
     fn assert_rejected(path: &str, ctx: &DeletionContext) {
         let result = validate_path_for_deletion(Path::new(path), ctx);
-        assert!(result.is_err(), "应当拒绝但通过了：{}", path);
+        assert!(result.is_err(), "should be rejected but passed: {}", path);
     }
 
     #[test]
     fn accepts_an_ordinary_project_path() {
         let ctx = DeletionContext::new();
-        let validated = validate_path_for_deletion(
-            Path::new("/Users/andy/MySrc/proj/node_modules"),
-            &ctx,
-        )
-        .expect("普通项目路径应当通过");
-        assert_eq!(validated.as_path(), Path::new("/Users/andy/MySrc/proj/node_modules"));
+        let validated =
+            validate_path_for_deletion(Path::new("/Users/andy/MySrc/proj/node_modules"), &ctx)
+                .expect("an ordinary project path should pass");
+        assert_eq!(
+            validated.as_path(),
+            Path::new("/Users/andy/MySrc/proj/node_modules")
+        );
         assert!(!validated.is_symlink);
     }
 
@@ -414,7 +432,7 @@ mod tests {
 
     #[test]
     fn allows_legitimate_names_containing_dots() {
-        // 名字里出现 `..` 不是路径穿越，不能一刀切拒绝。
+        // A `..` inside a name is not path traversal and must not be rejected outright.
         let ctx = DeletionContext::new();
         assert!(validate_path_for_deletion(Path::new("/tmp/name..files"), &ctx).is_ok());
         assert!(validate_path_for_deletion(Path::new("/tmp/..hidden"), &ctx).is_ok());
@@ -422,7 +440,16 @@ mod tests {
 
     #[test]
     fn rejects_top_level_roots() {
-        for path in ["/", "/etc", "/Applications", "/Library", "/Volumes", "/Users", "/tmp", "/opt"] {
+        for path in [
+            "/",
+            "/etc",
+            "/Applications",
+            "/Library",
+            "/Volumes",
+            "/Users",
+            "/tmp",
+            "/opt",
+        ] {
             assert_rejected(path, &DeletionContext::new());
         }
     }
@@ -457,30 +484,38 @@ mod tests {
             None => return,
         };
         let ctx = DeletionContext::new();
-        assert!(validate_path_for_deletion(&home, &ctx).is_err(), "主目录本身不能删");
+        assert!(
+            validate_path_for_deletion(&home, &ctx).is_err(),
+            "the home directory itself must not be deleted"
+        );
         assert!(validate_path_for_deletion(&home.join("proj/node_modules"), &ctx).is_ok());
     }
 
     #[test]
     fn rejects_empty_variable_collapse() {
         let ctx = DeletionContext::new().with_expected_parent("/Users/andy/proj");
-        // 拼接结果塌缩成父目录本身，说明某个变量是空的。
+        // The concatenated result collapses to the parent directory itself, which means
+        // some variable is empty.
         assert_eq!(
             validate_path_for_deletion(Path::new("/Users/andy/proj"), &ctx),
-            Err(PathRejection::EmptyVariableCollapse("/Users/andy/proj".to_string()))
+            Err(PathRejection::EmptyVariableCollapse(
+                "/Users/andy/proj".to_string()
+            ))
         );
-        // 正常拼接不受影响。
+        // A normal concatenation is unaffected.
         assert!(validate_path_for_deletion(Path::new("/Users/andy/proj/target"), &ctx).is_ok());
     }
 
     #[test]
     fn rejects_whitelisted_paths_and_their_children() {
-        let ctx = DeletionContext::new()
-            .with_whitelist(vec![PathBuf::from("/Users/andy/MySrc/keep-me")]);
+        let ctx =
+            DeletionContext::new().with_whitelist(vec![PathBuf::from("/Users/andy/MySrc/keep-me")]);
         assert_rejected("/Users/andy/MySrc/keep-me", &ctx);
         assert_rejected("/Users/andy/MySrc/keep-me/node_modules", &ctx);
-        // 前缀相同但不是同一路径组件的不受影响。
-        assert!(validate_path_for_deletion(Path::new("/Users/andy/MySrc/keep-me-other"), &ctx).is_ok());
+        // A different path that shares the prefix but not the component is unaffected.
+        assert!(
+            validate_path_for_deletion(Path::new("/Users/andy/MySrc/keep-me-other"), &ctx).is_ok()
+        );
     }
 
     #[test]
@@ -488,15 +523,23 @@ mod tests {
     fn rejects_symlink_pointing_into_protected_location() {
         let temp = TempDir::new("leaf-link");
         let link = temp.path().join("leaf-link");
-        symlink("/System", &link).expect("创建符号链接");
+        symlink("/System", &link).expect("create symlink");
 
         let result = validate_path_for_deletion(&link, &DeletionContext::new());
         match result {
             Err(PathRejection::SymlinkEscape(from, hit)) => {
-                assert!(from.ends_with("leaf-link"), "证据应指向链接本身：{}", from);
-                assert!(hit.starts_with("/System"), "证据应指向被保护位置：{}", hit);
+                assert!(
+                    from.ends_with("leaf-link"),
+                    "evidence should point at the link itself: {}",
+                    from
+                );
+                assert!(
+                    hit.starts_with("/System"),
+                    "evidence should point at the protected location: {}",
+                    hit
+                );
             }
-            other => panic!("应判定为符号链接逃逸，实际：{:?}", other),
+            other => panic!("expected a symlink escape, got: {:?}", other),
         }
     }
 
@@ -505,19 +548,26 @@ mod tests {
     fn rejects_symlinked_ancestor_pointing_into_protected_location() {
         let temp = TempDir::new("ancestor-link");
         let link = temp.path().join("usr-link");
-        symlink("/usr", &link).expect("创建符号链接");
+        symlink("/usr", &link).expect("create symlink");
 
-        // 叶子不存在（/usr/bin 存在，所以用更深一层不存在的位置），
-        // 但祖先 usr-link 指向 /usr，解析后落在受保护子树里。
+        // The leaf does not exist (/usr/bin exists, so we use a deeper, nonexistent
+        // location), but the ancestor usr-link points at /usr, so the resolved path
+        // lands inside the protected subtree.
         let candidate = link.join("bin/definitely-not-here");
         let result = validate_path_for_deletion(&candidate, &DeletionContext::new());
-        assert!(result.is_err(), "祖先符号链接指向 /usr 时必须拒绝，实际：{:?}", result);
+        assert!(
+            result.is_err(),
+            "an ancestor symlink pointing at /usr must be rejected, got: {:?}",
+            result
+        );
     }
 
     #[test]
     fn root_path_is_resolvable() {
-        // 绝对路径总能沿祖先走到 `/`，所以解析失败只可能是防御性分支。
-        let (resolved, is_symlink) = resolve_for_inspection(Path::new("/")).expect("根目录可解析");
+        // An absolute path can always walk its ancestors up to `/`, so a resolution
+        // failure can only be a defensive branch.
+        let (resolved, is_symlink) =
+            resolve_for_inspection(Path::new("/")).expect("root is resolvable");
         assert_eq!(resolved, Path::new("/"));
         assert!(!is_symlink);
     }
@@ -526,15 +576,21 @@ mod tests {
     fn resolving_nonexistent_path_keeps_tail_components() {
         let temp = TempDir::new("missing-tail");
         let candidate = temp.path().join("gone/also-gone");
-        let (resolved, is_symlink) = resolve_for_inspection(&candidate).expect("可解析到已存在祖先");
+        let (resolved, is_symlink) =
+            resolve_for_inspection(&candidate).expect("resolvable to an existing ancestor");
         assert!(!is_symlink);
-        assert!(resolved.ends_with("gone/also-gone"), "尾部组件应保留：{}", resolved.display());
+        assert!(
+            resolved.ends_with("gone/also-gone"),
+            "the tail components should be kept: {}",
+            resolved.display()
+        );
     }
 
     #[test]
     fn validates_normalized_target_form() {
         let ctx = DeletionContext::new();
-        let validated = validate_path_for_deletion(Path::new("/tmp/./a/./b"), &ctx).expect("通过校验");
+        let validated =
+            validate_path_for_deletion(Path::new("/tmp/./a/./b"), &ctx).expect("passes validation");
         assert_eq!(validated.as_path(), Path::new("/tmp/a/b"));
     }
 }

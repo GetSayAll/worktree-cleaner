@@ -33,15 +33,15 @@ export type ViewKey =
   | "settings";
 
 export const VIEW_LABEL: Record<ViewKey, string> = {
-  welcome: "项目",
-  scanning: "扫描",
-  overview: "概览",
+  welcome: "Project",
+  scanning: "Scan",
+  overview: "Overview",
   worktrees: "Worktree",
-  artifacts: "构建产物",
-  plan: "清理计划",
-  result: "执行结果",
-  history: "历史",
-  settings: "设置"
+  artifacts: "Build artifacts",
+  plan: "Cleanup plan",
+  result: "Result",
+  history: "History",
+  settings: "Settings"
 };
 
 const WORKTREE_VIEWS: ViewKey[] = ["worktrees", "artifacts", "plan", "result", "history", "settings"];
@@ -329,7 +329,7 @@ function buildPlan(): CleanupPlan {
     const home = item.replace(/^\/Users\/[^/]+/, "~");
     for (const rule of settings.whitelist_paths) {
       if (home === rule || home.startsWith(`${rule}/`)) {
-        blockers.push(`命中白名单保护：${item}`);
+        blockers.push(`Blocked by whitelist protection: ${item}`);
       }
     }
   }
@@ -338,11 +338,11 @@ function buildPlan(): CleanupPlan {
   const totalItems = worktree_removals.length + trash_moves.length;
   const forcedItems = worktree_removals.filter((w) => w.force);
   if (forcedItems.length > 0) {
-    ack_reasons.push(`包含 ${forcedItems.length} 个需要 --force 的 worktree，将一并删除其中的未跟踪文件`);
+    ack_reasons.push(`Includes ${forcedItems.length} worktrees that need --force; their untracked files will be deleted too`);
   }
-  if (totalItems > 5) ack_reasons.push(`本次将处理 ${totalItems} 项，超过 5 项的确认阈值`);
+  if (totalItems > 5) ack_reasons.push(`This run will process ${totalItems} items, above the 5-item confirmation threshold`);
   if (total_bytes > 10 * 1024 * 1024 * 1024) {
-    ack_reasons.push("单次释放空间超过 10 GB");
+    ack_reasons.push("A single run frees more than 10 GB");
   }
 
   return { worktree_removals, trash_moves, excluded_unsafe, total_bytes, blockers, ack_reasons };
@@ -374,7 +374,7 @@ export function executeCleanup() {
       action: "trash-move",
       target: item.path,
       result: "ok",
-      detail: bundled ? "随所属 worktree 一并移除，未单独操作" : "移入系统废纸篓，可在废纸篓中找回",
+      detail: bundled ? "Removed together with its owning worktree; no separate operation" : "Moved to the system Trash; recoverable from Trash",
       size_bytes: bundled ? 0 : item.size_bytes ?? 0
     });
     if (!bundled) {
@@ -388,7 +388,7 @@ export function executeCleanup() {
       action: "prune",
       target: snapshot.value?.root ?? "",
       result: "ok",
-      detail: "git worktree prune 收尾，清理残留元数据",
+      detail: "git worktree prune finalizes cleanup of leftover metadata",
       size_bytes: 0
     });
   }
@@ -396,9 +396,9 @@ export function executeCleanup() {
   for (const blocker of plan.blockers) {
     entries.push({
       action: "trash-move",
-      target: blocker.replace("命中白名单保护：", ""),
+      target: blocker.replace("Blocked by whitelist protection: ", ""),
       result: "skipped",
-      detail: "先决条件校验未通过，未执行",
+      detail: "Precondition check failed; not executed",
       size_bytes: 0
     });
     failed += 1;
@@ -411,10 +411,10 @@ export function executeCleanup() {
     target: entry.target,
     reason:
       plan.worktree_removals.find((w) => w.path === entry.target)?.branch
-        ? "用户确认后执行"
+        ? "Executed after user confirmation"
         : plan.trash_moves.find((t) => t.path === entry.target)
-          ? "命中可重建产物类型"
-          : "元数据清理",
+          ? "Matched a rebuildable artifact type"
+          : "Metadata cleanup",
     result: entry.result,
     size_bytes: entry.size_bytes,
     detail: entry.detail

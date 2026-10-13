@@ -1,19 +1,36 @@
-# Worktree Cleaner 开发规则
+# Worktree Cleaner — Development Rules
 
-- UI 使用 Vue 3。
-- 应用宿主使用 Tauri 2。
-- Git 解析、状态判断和 artifact 扫描位于纯 Rust crate worktree-core。
-- 核心扫描不依赖某个 Agent 厂商目录。
-- 默认只读扫描。
-- 删除 Worktree 使用 git worktree remove。
-- 删除目录使用 macOS Trash 或 Windows 回收站。
-- 不使用永久删除命令清理用户目录。
-- 删除判断必须显示可验证原因。
-- macOS 和 Windows 行为分别验证。
+## Language
 
-## 已冻结的设计
+**English only.** Everything that lands in this repository is written in English:
+README, commit messages, code comments, documentation, identifiers, and file
+names. This project is an international open-source project, so English is the
+single language of the codebase.
 
-- 产品设计与判定表见 `docs/PRODUCT_PLAN.md`。
-- 开发约束与验收标准见 `docs/DEV_CONTRACT.md`，实现必须遵循该文件。
-- 涉及 DEV_CONTRACT 中 D1–D16、字段契约或原因码语义的改动，必须先改文档再改代码。
-- 界面结构与信息结构以 `src/` 下已冻结的原型为准；生产数据接入后 `src/mock/` 退出生产路径。
+User-visible application strings follow the same rule. English is the default and
+the source locale. Every string a user can see must live in one place so other
+locales can be added later — do not scatter display literals across templates.
+
+## Project rules
+
+- The UI is built with Vue 3.
+- The application host is Tauri 2.
+- Git parsing, state evaluation, and artifact scanning live in the pure Rust
+  crate `worktree-core`.
+- Core scanning must not depend on any single agent vendor's directory layout.
+- Scanning is read-only by default.
+- Worktrees are removed with `git worktree remove`.
+- Directories are removed through the macOS Trash or the Windows Recycle Bin.
+- Never use permanent-delete commands to clean up a user's directories.
+- Every deletion decision must be backed by a verifiable reason.
+- macOS and Windows behaviour are verified separately.
+
+## Frozen design
+
+- Product design and decision tables: `docs/PRODUCT_PLAN.md`.
+- Development constraints and acceptance criteria: `docs/DEV_CONTRACT.md`.
+  Implementation must follow that file.
+- Changes touching D1–D23, field contracts, or reason-code semantics require the
+  documentation change to land in the same commit.
+- UI structure and information architecture follow the frozen prototype under
+  `src/`. Once production data is wired in, `src/mock/` leaves the production path.

@@ -9,12 +9,12 @@ const filter = ref<FilterKey>("all");
 const copied = ref(false);
 
 const ACTION_LABEL: Record<string, string> = {
-  "worktree-remove": "移除 Worktree",
-  "trash-move": "移入废纸篓",
-  prune: "清理元数据"
+  "worktree-remove": "Remove Worktree",
+  "trash-move": "Move to Trash",
+  prune: "Clean up metadata"
 };
 
-const OUTCOME_LABEL: Record<string, string> = { ok: "成功", skipped: "已跳过", failed: "失败" };
+const OUTCOME_LABEL: Record<string, string> = { ok: "Succeeded", skipped: "Skipped", failed: "Failed" };
 
 const filtered = computed(() => {
   const rows = filter.value === "all" ? history.value : history.value.filter((row) => row.action === filter.value);
@@ -36,19 +36,19 @@ async function copyAll() {
   <div class="stack">
     <div class="spread">
       <div>
-        <h1>历史</h1>
-        <p class="faint tiny">日志只记录在本机，不上报。位置见设置页。</p>
+        <h1>History</h1>
+        <p class="faint tiny">Logs are stored locally and never uploaded. See Settings for the location.</p>
       </div>
-      <button class="btn" @click="copyAll">{{ copied ? "已复制" : "导出日志" }}</button>
+      <button class="btn" @click="copyAll">{{ copied ? "Copied" : "Export log" }}</button>
     </div>
 
     <div class="row-wrap">
       <div class="segmented">
-        <button :class="filter === 'all' ? 'is-active' : ''" @click="filter = 'all'">全部 {{ history.length }}</button>
+        <button :class="filter === 'all' ? 'is-active' : ''" @click="filter = 'all'">All {{ history.length }}</button>
         <button :class="filter === 'worktree-remove' ? 'is-active' : ''" @click="filter = 'worktree-remove'">
-          移除 Worktree
+          Remove Worktree
         </button>
-        <button :class="filter === 'trash-move' ? 'is-active' : ''" @click="filter = 'trash-move'">移入废纸篓</button>
+        <button :class="filter === 'trash-move' ? 'is-active' : ''" @click="filter = 'trash-move'">Move to Trash</button>
       </div>
     </div>
 
@@ -68,7 +68,7 @@ async function copyAll() {
               <div class="tiny muted">{{ row.detail }}</div>
             </div>
           </div>
-          <div v-if="filtered.length === 0" class="empty">没有记录</div>
+          <div v-if="filtered.length === 0" class="empty">No records</div>
         </div>
       </div>
     </div>

@@ -32,7 +32,7 @@ export interface Reason {
   code: ReasonCode;
   severity: SafetyStatus;
   text: string;
-  /** 可验证证据：具体命令、文件计数或路径。不允许为空。 */
+  /** Verifiable evidence: a concrete command, file count, or path. Must not be empty. */
   evidence: string;
 }
 
@@ -153,9 +153,9 @@ export interface Settings {
 }
 
 export const STATUS_LABEL: Record<SafetyStatus, string> = {
-  Safe: "可安全删除",
-  Review: "需要确认",
-  Unsafe: "不可删除"
+  Safe: "Safe to delete",
+  Review: "Needs review",
+  Unsafe: "Must not delete"
 };
 
 export const SEVERITY_RANK: Record<SafetyStatus, number> = {

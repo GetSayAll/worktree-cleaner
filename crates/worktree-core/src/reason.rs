@@ -1,16 +1,17 @@
-//! 判定原因模型。
+//! The decision-reason model.
 //!
-//! 每个安全判定都由一组带证据的 [`Reason`] 组成，整体等级由其中**最严重**的
-//! 一条决定（开发契约 D2）。失败（超时 / 无权限 / 命令非零退出）一律产出
-//! [`ReasonCode::WtCannotVerify`] 一类的 `cannot_verify` 原因，等级为
-//! `Review`，永不降级为 `Safe`（D3）。
+//! Every safety decision is made up of a set of [`Reason`] values with evidence, and
+//! the overall level is decided by the **most severe** one among them (development
+//! contract D2). Failures (timeout / permission error / non-zero command exit) always
+//! produce a `cannot_verify` reason such as [`ReasonCode::WtCannotVerify`] with level
+//! `Review`, and are never downgraded to `Safe` (D3).
 
 use serde::{Deserialize, Serialize};
 
-/// 安全等级。
+/// Safety level.
 ///
-/// 派生顺序即严重程度顺序：`Safe` < `Review` < `Unsafe`，
-/// 因此比较两个等级的大小就等于比较严重程度。
+/// The derive order is the severity order: `Safe` < `Review` < `Unsafe`,
+/// so comparing two levels is the same as comparing their severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum SafetyStatus {
     Safe,
@@ -18,10 +19,11 @@ pub enum SafetyStatus {
     Unsafe,
 }
 
-/// 判定原因码。
+/// Decision reason code.
 ///
-/// 序列化后的字符串（`wt.*` / `af.*`）是对外契约的一部分，**只增不改语义**：
-/// 语义变化必须新增原因码，旧码标记废弃但不复用。
+/// The serialised strings (`wt.*` / `af.*`) are part of the external contract and may
+/// **only be added, never change meaning**: a semantic change must introduce a new
+/// reason code; old codes are marked deprecated but never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ReasonCode {
     // ---- worktree ----
@@ -81,7 +83,8 @@ pub enum ReasonCode {
 }
 
 impl ReasonCode {
-    /// 全部原因码。用于契约漂移测试（序列化结果必须与 [`Self::as_str`] 一致）。
+    /// All reason codes. Used by the contract-drift test (the serialised value must
+    /// match [`Self::as_str`]).
     pub const ALL: [ReasonCode; 26] = [
         ReasonCode::WtMain,
         ReasonCode::WtLocked,
@@ -111,7 +114,7 @@ impl ReasonCode {
         ReasonCode::AfRebuildable,
     ];
 
-    /// 对外字符串形式，与 `serde` 的序列化结果必须一致。
+    /// External string form, which must match `serde`'s serialised value.
     pub const fn as_str(self) -> &'static str {
         match self {
             ReasonCode::WtMain => "wt.main",
@@ -143,25 +146,27 @@ impl ReasonCode {
         }
     }
 
-    /// 属于 worktree 判定还是产物判定。
+    /// Whether the reason belongs to a worktree decision or an artifact decision.
     pub fn is_worktree(self) -> bool {
         self.as_str().starts_with("wt.")
     }
 }
 
-/// 一条判定原因。四个字段缺一不可（D9）：
-/// 稳定标识、该原因导向的最严重等级、人类可读文本、可验证证据。
+/// A single decision reason. All four fields are required (D9):
+/// a stable identifier, the most severe level this reason leads to, human-readable
+/// text, and verifiable evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reason {
     pub code: ReasonCode,
     pub severity: SafetyStatus,
     pub text: String,
-    /// 证据：具体命令、文件计数或路径。**不允许为空**。
+    /// Evidence: a concrete command, file count, or path. **Must not be empty**.
     pub evidence: String,
 }
 
 impl Reason {
-    /// 构造一条原因。文本与证据都不允许为空，违反时在测试构建下直接断言失败。
+    /// Construct a reason. Neither text nor evidence may be empty; a violation fails
+    /// the assertion immediately in test builds.
     pub fn new(
         code: ReasonCode,
         severity: SafetyStatus,
@@ -170,10 +175,14 @@ impl Reason {
     ) -> Self {
         let text = text.into();
         let evidence = evidence.into();
-        debug_assert!(!text.trim().is_empty(), "原因文本不能为空：{}", code.as_str());
+        debug_assert!(
+            !text.trim().is_empty(),
+            "reason text must not be empty: {}",
+            code.as_str()
+        );
         debug_assert!(
             !evidence.trim().is_empty(),
-            "原因证据不能为空：{}",
+            "reason evidence must not be empty: {}",
             code.as_str()
         );
         Self {
@@ -184,23 +193,27 @@ impl Reason {
         }
     }
 
-    /// 正向证据：说明为什么可以删除。
+    /// Positive evidence: explains why this can be deleted.
     pub fn safe(code: ReasonCode, text: impl Into<String>, evidence: impl Into<String>) -> Self {
         Self::new(code, SafetyStatus::Safe, text, evidence)
     }
 
-    /// 不确定：不构成危险，但需要用户确认。
+    /// Uncertain: not dangerous on its own, but needs user confirmation.
     pub fn review(code: ReasonCode, text: impl Into<String>, evidence: impl Into<String>) -> Self {
         Self::new(code, SafetyStatus::Review, text, evidence)
     }
 
-    /// 硬性禁止：该项不可删除。
-    pub fn blocking(code: ReasonCode, text: impl Into<String>, evidence: impl Into<String>) -> Self {
+    /// Hard prohibition: this item must not be deleted.
+    pub fn blocking(
+        code: ReasonCode,
+        text: impl Into<String>,
+        evidence: impl Into<String>,
+    ) -> Self {
         Self::new(code, SafetyStatus::Unsafe, text, evidence)
     }
 }
 
-/// 一组原因及其推导出的整体等级。
+/// A set of reasons together with the overall level derived from them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SafetyAssessment {
     pub status: SafetyStatus,
@@ -208,10 +221,10 @@ pub struct SafetyAssessment {
 }
 
 impl SafetyAssessment {
-    /// 等级 = 所有原因中最严重的那条（D2）。
+    /// Level = the most severe of all reasons (D2).
     ///
-    /// 一条原因都没有时判为 `Review` 而不是 `Safe`：没有任何证据的沉默
-    /// 不能当作安全（D3）。
+    /// With no reasons at all the verdict is `Review` rather than `Safe`: silence
+    /// without any evidence cannot be treated as safe (D3).
     pub fn from_reasons(reasons: Vec<Reason>) -> Self {
         let status = reasons
             .iter()
@@ -221,7 +234,7 @@ impl SafetyAssessment {
         Self { status, reasons }
     }
 
-    /// 便捷构造：单项判定。
+    /// Convenience constructor: a single-item decision.
     pub fn single(reason: Reason) -> Self {
         Self::from_reasons(vec![reason])
     }
@@ -234,12 +247,13 @@ impl SafetyAssessment {
         self.status == SafetyStatus::Unsafe
     }
 
-    /// 该项是否可以被用户选中（不可删除项不能被选中，D12）。
+    /// Whether the item can be selected by the user (non-deletable items cannot be
+    /// selected, D12).
     pub fn is_selectable(&self) -> bool {
         self.status != SafetyStatus::Unsafe
     }
 
-    /// 是否默认勾选（Safe 默认勾选，Review 默认不勾，D12）。
+    /// Whether it is checked by default (Safe is checked by default, Review is not, D12).
     pub fn is_default_selected(&self) -> bool {
         self.status == SafetyStatus::Safe
     }
@@ -258,9 +272,21 @@ mod tests {
     #[test]
     fn worst_reason_decides_status() {
         let assessment = SafetyAssessment::from_reasons(vec![
-            Reason::safe(ReasonCode::WtClean, "工作区干净", "无未提交改动"),
-            Reason::review(ReasonCode::WtUnmerged, "未合入 main", "merge-base 判定不是祖先"),
-            Reason::blocking(ReasonCode::WtDirty, "有未提交改动", "3 个文件有未提交改动"),
+            Reason::safe(
+                ReasonCode::WtClean,
+                "clean working tree",
+                "no uncommitted changes",
+            ),
+            Reason::review(
+                ReasonCode::WtUnmerged,
+                "not merged into main",
+                "merge-base does not report an ancestor",
+            ),
+            Reason::blocking(
+                ReasonCode::WtDirty,
+                "has uncommitted changes",
+                "3 files have uncommitted changes",
+            ),
         ]);
         assert_eq!(assessment.status, SafetyStatus::Unsafe);
     }
@@ -268,8 +294,16 @@ mod tests {
     #[test]
     fn review_beats_safe() {
         let assessment = SafetyAssessment::from_reasons(vec![
-            Reason::safe(ReasonCode::WtClean, "工作区干净", "无未提交改动"),
-            Reason::review(ReasonCode::WtRecentActivity, "近 7 天有改动", "最后活动：2 天前"),
+            Reason::safe(
+                ReasonCode::WtClean,
+                "clean working tree",
+                "no uncommitted changes",
+            ),
+            Reason::review(
+                ReasonCode::WtRecentActivity,
+                "changed within the last 7 days",
+                "last activity: 2 days ago",
+            ),
         ]);
         assert_eq!(assessment.status, SafetyStatus::Review);
         assert!(!assessment.is_default_selected());
@@ -278,7 +312,7 @@ mod tests {
 
     #[test]
     fn empty_reasons_is_review_not_safe() {
-        // D3：拿不到任何证据的时候不能说安全。
+        // D3: when no evidence can be obtained, we must not call it safe.
         let assessment = SafetyAssessment::from_reasons(vec![]);
         assert_eq!(assessment.status, SafetyStatus::Review);
     }
@@ -287,8 +321,8 @@ mod tests {
     fn unsafe_is_not_selectable() {
         let assessment = SafetyAssessment::single(Reason::blocking(
             ReasonCode::WtMain,
-            "这是主工作区",
-            "git worktree list 首项",
+            "this is the main worktree",
+            "first entry of git worktree list",
         ));
         assert!(assessment.is_unsafe());
         assert!(!assessment.is_selectable());
@@ -297,13 +331,13 @@ mod tests {
 
     #[test]
     fn reason_code_wire_format_matches_as_str() {
-        // 契约漂移防护：serde 输出必须与 as_str() 一致。
+        // Contract-drift guard: the serde output must match as_str().
         for code in ReasonCode::ALL {
-            let json = serde_json::to_string(&code).expect("序列化原因码");
+            let json = serde_json::to_string(&code).expect("serialize reason code");
             assert_eq!(
                 json,
                 format!("\"{}\"", code.as_str()),
-                "原因码 {:?} 的 serde 输出与 as_str 不一致",
+                "serde output for reason code {:?} does not match as_str",
                 code
             );
         }
@@ -313,11 +347,15 @@ mod tests {
     fn reason_codes_are_unique_and_prefixed() {
         let mut seen = std::collections::HashSet::new();
         for code in ReasonCode::ALL {
-            assert!(seen.insert(code.as_str()), "原因码重复：{}", code.as_str());
+            assert!(
+                seen.insert(code.as_str()),
+                "duplicate reason code: {}",
+                code.as_str()
+            );
             let s = code.as_str();
             assert!(
                 s.starts_with("wt.") || s.starts_with("af."),
-                "原因码必须带 wt. / af. 前缀：{}",
+                "reason code must carry a wt. / af. prefix: {}",
                 s
             );
         }
@@ -326,22 +364,36 @@ mod tests {
 
     #[test]
     fn reason_round_trips_through_json() {
-        let reason = Reason::review(ReasonCode::AfCannotVerify, "无法完成检查", "体积统计超时（30s）");
-        let json = serde_json::to_string(&reason).expect("序列化原因");
-        let back: Reason = serde_json::from_str(&json).expect("反序列化原因");
+        let reason = Reason::review(
+            ReasonCode::AfCannotVerify,
+            "cannot complete the check",
+            "size measurement timed out (30s)",
+        );
+        let json = serde_json::to_string(&reason).expect("serialize reason");
+        let back: Reason = serde_json::from_str(&json).expect("deserialize reason");
         assert_eq!(reason, back);
         assert!(json.contains("\"af.cannot_verify\""));
     }
 
     #[test]
-    #[should_panic(expected = "原因证据不能为空")]
+    #[should_panic(expected = "reason evidence must not be empty")]
     fn empty_evidence_is_rejected() {
-        let _ = Reason::new(ReasonCode::WtClean, SafetyStatus::Safe, "工作区干净", "   ");
+        let _ = Reason::new(
+            ReasonCode::WtClean,
+            SafetyStatus::Safe,
+            "clean working tree",
+            "   ",
+        );
     }
 
     #[test]
-    #[should_panic(expected = "原因文本不能为空")]
+    #[should_panic(expected = "reason text must not be empty")]
     fn empty_text_is_rejected() {
-        let _ = Reason::new(ReasonCode::WtClean, SafetyStatus::Safe, "", "无未提交改动");
+        let _ = Reason::new(
+            ReasonCode::WtClean,
+            SafetyStatus::Safe,
+            "",
+            "no uncommitted changes",
+        );
     }
 }

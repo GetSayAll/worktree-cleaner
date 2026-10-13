@@ -22,7 +22,7 @@ export const mockSnapshot: ProjectSnapshot = {
   scanned_at: new Date().toISOString(),
   default_branch: "main",
   warnings: [
-    "worktree cursor/perf-audio 下的 .nuxt 目录扫描超时，体积记为未知并按「需要确认」处理。"
+    "Scanning the .nuxt directory under worktree cursor/perf-audio timed out; the size is recorded as unknown and treated as Needs review."
   ],
   worktrees: [
     {
@@ -45,8 +45,8 @@ export const mockSnapshot: ProjectSnapshot = {
       agent: null,
       size_bytes: 486_000_000,
       safety: assess([
-        { code: "wt.main", severity: "Unsafe", text: "这是主工作区", evidence: "git worktree list 首项" },
-        { code: "wt.clean", severity: "Safe", text: "工作区干净", evidence: "无未提交改动" }
+        { code: "wt.main", severity: "Unsafe", text: "This is the main worktree", evidence: "first entry in git worktree list" },
+        { code: "wt.clean", severity: "Safe", text: "clean working tree", evidence: "no uncommitted changes" }
       ])
     },
     {
@@ -69,8 +69,8 @@ export const mockSnapshot: ProjectSnapshot = {
       agent: "codex",
       size_bytes: 1_900_000_000,
       safety: assess([
-        { code: "wt.clean", severity: "Safe", text: "工作区干净", evidence: "无未提交改动、无未跟踪文件" },
-        { code: "wt.merged", severity: "Safe", text: "已合入 main", evidence: "merge-base 判定为祖先" }
+        { code: "wt.clean", severity: "Safe", text: "clean working tree", evidence: "no uncommitted changes, no untracked files" },
+        { code: "wt.merged", severity: "Safe", text: "merged into main", evidence: "merge-base determines it is an ancestor" }
       ])
     },
     {
@@ -93,9 +93,9 @@ export const mockSnapshot: ProjectSnapshot = {
       agent: "claude",
       size_bytes: 1_100_000_000,
       safety: assess([
-        { code: "wt.dirty", severity: "Unsafe", text: "有未提交改动", evidence: "3 个文件有未提交改动" },
-        { code: "wt.unpushed", severity: "Unsafe", text: "有未推送提交", evidence: "2 个提交未推送" },
-        { code: "wt.unmerged", severity: "Review", text: "未合入 main", evidence: "merge-base 判定不是祖先" }
+        { code: "wt.dirty", severity: "Unsafe", text: "uncommitted changes", evidence: "3 files have uncommitted changes" },
+        { code: "wt.unpushed", severity: "Unsafe", text: "unpushed commits", evidence: "2 commits not pushed" },
+        { code: "wt.unmerged", severity: "Review", text: "not merged into main", evidence: "merge-base determines it is not an ancestor" }
       ])
     },
     {
@@ -118,9 +118,9 @@ export const mockSnapshot: ProjectSnapshot = {
       agent: "cursor",
       size_bytes: 2_400_000_000,
       safety: assess([
-        { code: "wt.unmerged", severity: "Review", text: "未合入 main", evidence: "merge-base 判定不是祖先" },
-        { code: "wt.stash", severity: "Review", text: "有 stash 记录", evidence: "1 条 stash" },
-        { code: "wt.recent_activity", severity: "Review", text: "近 7 天仍在改动", evidence: "最后活动：2 天前" }
+        { code: "wt.unmerged", severity: "Review", text: "not merged into main", evidence: "merge-base determines it is not an ancestor" },
+        { code: "wt.stash", severity: "Review", text: "has stash entries", evidence: "1 stash entry" },
+        { code: "wt.recent_activity", severity: "Review", text: "changed within the last 7 days", evidence: "last activity: 2 days ago" }
       ])
     },
     {
@@ -148,8 +148,8 @@ export const mockSnapshot: ProjectSnapshot = {
       agent: null,
       size_bytes: 640_000_000,
       safety: assess([
-        { code: "wt.locked", severity: "Unsafe", text: "被 Git 锁定", evidence: "porcelain 标记 locked" },
-        { code: "wt.untracked", severity: "Review", text: "有未跟踪文件", evidence: "4 个未跟踪文件" }
+        { code: "wt.locked", severity: "Unsafe", text: "locked by Git", evidence: "porcelain marks it as locked" },
+        { code: "wt.untracked", severity: "Review", text: "untracked files", evidence: "4 untracked files" }
       ])
     },
     {
@@ -175,8 +175,8 @@ export const mockSnapshot: ProjectSnapshot = {
         {
           code: "wt.prunable",
           severity: "Safe",
-          text: "工作目录已不存在",
-          evidence: "仅清理 .git/worktrees 元数据"
+          text: "working directory no longer exists",
+          evidence: "only cleans .git/worktrees metadata"
         }
       ])
     }
@@ -196,9 +196,9 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过 npm install 重建", evidence: "package-lock.json 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:12" },
-        { code: "af.recent_activity", severity: "Review", text: "近 7 天有改动", evidence: "最后活动：3 天前" }
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with npm install", evidence: "package-lock.json exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:12" },
+        { code: "af.recent_activity", severity: "Review", text: "changed within the last 7 days", evidence: "last activity: 3 days ago" }
       ])
     },
     {
@@ -215,8 +215,8 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过 uv sync 重建", evidence: "pyproject.toml 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:24" }
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with uv sync", evidence: "pyproject.toml exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:24" }
       ])
     },
     {
@@ -233,8 +233,8 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过 npm run build 重建", evidence: "scripts.build 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:6" }
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with npm run build", evidence: "scripts.build exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:6" }
       ])
     },
     {
@@ -251,8 +251,8 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "构建缓存，可重新生成", evidence: "turbo.json 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:9" }
+        { code: "af.rebuildable", severity: "Safe", text: "build cache, can be regenerated", evidence: "turbo.json exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:9" }
       ])
     },
     {
@@ -272,8 +272,8 @@ export const mockSnapshot: ProjectSnapshot = {
         {
           code: "af.git_tracked",
           severity: "Unsafe",
-          text: "目录内有已提交进仓库的文件",
-          evidence: "git ls-files 命中 23 个文件，不是纯构建产物"
+          text: "the directory contains files committed to the repository",
+          evidence: "git ls-files matches 23 files, so it is not a pure build artifact"
         }
       ])
     },
@@ -294,8 +294,8 @@ export const mockSnapshot: ProjectSnapshot = {
         {
           code: "af.symlink_outside",
           severity: "Unsafe",
-          text: "是指向项目外的符号链接",
-          evidence: "目标 /Users/andy/toolchains/pnpm-store/node_modules 在项目根之外，删除会误伤共享目录"
+          text: "symlink pointing outside the project",
+          evidence: "target /Users/andy/toolchains/pnpm-store/node_modules is outside the project root; deleting it would damage a shared directory"
         }
       ])
     },
@@ -313,8 +313,8 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过 cargo build 重建", evidence: "Cargo.toml 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:1" }
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with cargo build", evidence: "Cargo.toml exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:1" }
       ])
     },
     {
@@ -331,8 +331,8 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过 npm run build 重建", evidence: "scripts.build 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:6" }
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with npm run build", evidence: "scripts.build exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:6" }
       ])
     },
     {
@@ -349,9 +349,9 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过 npm install 重建", evidence: "package-lock.json 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:12" },
-        { code: "af.recent_activity", severity: "Review", text: "近 7 天有改动", evidence: "最后活动：1 天前" }
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with npm install", evidence: "package-lock.json exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:12" },
+        { code: "af.recent_activity", severity: "Review", text: "changed within the last 7 days", evidence: "last activity: 1 day ago" }
       ])
     },
     {
@@ -368,9 +368,9 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过 next build 重建", evidence: "next.config.ts 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:8" },
-        { code: "af.recent_activity", severity: "Review", text: "近 7 天有改动", evidence: "最后活动：1 天前" }
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with next build", evidence: "next.config.ts exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:8" },
+        { code: "af.recent_activity", severity: "Review", text: "changed within the last 7 days", evidence: "last activity: 1 day ago" }
       ])
     },
     {
@@ -387,9 +387,9 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过 cargo build 重建", evidence: "Cargo.toml 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:1" },
-        { code: "af.recent_activity", severity: "Review", text: "近 7 天有改动", evidence: "最后活动：2 天前" }
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with cargo build", evidence: "Cargo.toml exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:1" },
+        { code: "af.recent_activity", severity: "Review", text: "changed within the last 7 days", evidence: "last activity: 2 days ago" }
       ])
     },
     {
@@ -406,8 +406,8 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过 npm install 重建", evidence: "package-lock.json 存在" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:12" }
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with npm install", evidence: "package-lock.json exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:12" }
       ])
     },
     {
@@ -424,8 +424,8 @@ export const mockSnapshot: ProjectSnapshot = {
       is_symlink: false,
       symlink_target: null,
       safety: assess([
-        { code: "af.rebuildable", severity: "Safe", text: "可通过测试重新生成", evidence: "vitest --coverage" },
-        { code: "af.git_ignored", severity: "Safe", text: "已被 .gitignore 忽略", evidence: ".gitignore:15" }
+        { code: "af.rebuildable", severity: "Safe", text: "can be regenerated by running tests", evidence: "vitest --coverage" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:15" }
       ])
     },
     {
@@ -445,8 +445,8 @@ export const mockSnapshot: ProjectSnapshot = {
         {
           code: "af.cannot_verify",
           severity: "Review",
-          text: "无法完成检查",
-          evidence: "体积统计超时（30s），无法确认是否含已提交文件"
+          text: "could not complete the check",
+          evidence: "size scan timed out (30s); cannot confirm whether it contains committed files"
         }
       ])
     }
@@ -458,37 +458,37 @@ export const mockHistory: HistoryEntry[] = [
     at: daysAgo(4),
     action: "trash-move",
     target: `${mockRoot}--codex-fix-ble/target/debug/incremental`,
-    reason: "命中可重建产物类型 · 超过 30 天未改动",
+    reason: "Matched a rebuildable artifact type · unchanged for over 30 days",
     result: "ok",
     size_bytes: 812_000_000,
-    detail: "移入废纸篓，可恢复"
+    detail: "Moved to Trash, recoverable"
   },
   {
     at: daysAgo(4),
     action: "worktree-remove",
     target: `${mockRoot}--codex-old-spike`,
-    reason: "工作区干净 · 已合入 main",
+    reason: "clean working tree · merged into main",
     result: "ok",
     size_bytes: 1_240_000_000,
-    detail: "git worktree remove 执行成功，随后 prune 清理元数据"
+    detail: "git worktree remove succeeded, then prune cleaned up metadata"
   },
   {
     at: daysAgo(4),
     action: "trash-move",
     target: `${mockRoot}/apps/desktop/node_modules`,
-    reason: "指向项目外的符号链接",
+    reason: "symlink pointing outside the project",
     result: "skipped",
     size_bytes: 0,
-    detail: "path.symlink_outside 校验未通过，未执行"
+    detail: "path.symlink_outside check failed; not executed"
   },
   {
     at: daysAgo(11),
     action: "trash-move",
     target: `${mockRoot}/crates/remote-mic-core/build`,
-    reason: "疑似构建产物",
+    reason: "suspected build artifact",
     result: "failed",
     size_bytes: 6_200_000,
-    detail: "git ls-files 发现 23 个已提交文件，已中止。请人工确认后再处理"
+    detail: "git ls-files found 23 committed files; aborted. Confirm manually before retrying"
   }
 ];
 
@@ -508,10 +508,10 @@ export const defaultSettings: Settings = {
 };
 
 export const scanStages = [
-  { key: "worktrees", label: "解析 Git worktree", detail: "git worktree list --porcelain" },
-  { key: "status", label: "检查各 worktree 状态", detail: "status · merge-base · stash · upstream" },
-  { key: "artifacts", label: "扫描构建产物", detail: "按产物类型清单与项目边界遍历" },
-  { key: "verify", label: "复核与汇总", detail: "活跃度复核 · 原因归并 · 体积汇总" }
+  { key: "worktrees", label: "Parse Git worktrees", detail: "git worktree list --porcelain" },
+  { key: "status", label: "Check each worktree's status", detail: "status · merge-base · stash · upstream" },
+  { key: "artifacts", label: "Scan build artifacts", detail: "walk a list of artifact kinds within project boundaries" },
+  { key: "verify", label: "Verify and summarize", detail: "activity re-check · reason merge · size rollup" }
 ];
 
 export const scanTrace = [
@@ -519,10 +519,10 @@ export const scanTrace = [
   "status --porcelain=v2 --branch @ remote-mic-app--claude-ui",
   "merge-base --is-ancestor 9de04f1 main @ remote-mic-app--cursor-perf",
   "stash list --format=%gd @ remote-mic-app--cursor-perf",
-  "扫描 remote-mic-app--codex-fix-ble/target …",
-  "扫描 remote-mic-app--cursor-perf/target …",
+  "scan remote-mic-app--codex-fix-ble/target …",
+  "scan remote-mic-app--cursor-perf/target …",
   "check-ignore remote-mic-app/.turbo",
-  "ls-files crates/remote-mic-core/build → 23 个已跟踪文件",
+  "ls-files crates/remote-mic-core/build → 23 tracked files",
   "readlink apps/desktop/node_modules → /Users/andy/toolchains/pnpm-store/node_modules",
-  "活跃度复核：remote-mic-app--cursor-perf/target 最后活动 2 天前"
+  "activity re-check: remote-mic-app--cursor-perf/target last activity 2 days ago"
 ];

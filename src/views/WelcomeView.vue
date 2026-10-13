@@ -8,16 +8,16 @@ const path = ref("");
 const dragActive = ref(false);
 
 const recents = [
-  { path: mockRoot, scanned: "今天 09:12", safe: 8, review: 6, unsafe: 4, freed: 4.2 * 1024 ** 3 },
+  { path: mockRoot, scanned: "Today 09:12", safe: 8, review: 6, unsafe: 4, freed: 4.2 * 1024 ** 3 },
   {
     path: "/Users/andy/MySrc/private-marketing-toolkit",
-    scanned: "3 天前",
+    scanned: "3 days ago",
     safe: 3,
     review: 1,
     unsafe: 2,
     freed: 1.1 * 1024 ** 3
   },
-  { path: "/Users/andy/MySrc/worktree-cleaner", scanned: "11 天前", safe: 2, review: 0, unsafe: 1, freed: 612 * 1024 ** 2 }
+  { path: "/Users/andy/MySrc/worktree-cleaner", scanned: "11 days ago", safe: 2, review: 0, unsafe: 1, freed: 612 * 1024 ** 2 }
 ];
 
 const dropStyle = computed(() =>
@@ -45,9 +45,9 @@ function onDrop(event: DragEvent) {
   <div class="welcome">
     <div class="welcome__hero">
       <p class="faint tiny">Worktree Cleaner</p>
-      <h1 class="welcome__title">项目清理审计</h1>
+      <h1 class="welcome__title">Project cleanup audit</h1>
       <p class="welcome__lede">
-        扫描一个仓库，列出它的全部 Git worktree 与构建产物，逐条说明为什么可以删、为什么不能删。默认只读扫描，删除一律进系统废纸篓。
+        Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted. Scanning is read-only by default; deletions always go to the system Trash.
       </p>
     </div>
 
@@ -65,43 +65,43 @@ function onDrop(event: DragEvent) {
           placeholder="/Users/andy/MySrc/your-repo"
           @keyup.enter="submit"
         />
-        <button class="btn" title="原型中填入示例路径；正式版接系统目录选择器" @click="fillDemoPath">选择文件夹</button>
-        <button class="btn btn--primary" :disabled="!path.trim()" @click="submit">开始扫描</button>
+        <button class="btn" title="In the prototype, fills in a sample path; the shipped version uses a system folder picker" @click="fillDemoPath">Choose folder</button>
+        <button class="btn btn--primary" :disabled="!path.trim()" @click="submit">Start scan</button>
       </div>
-      <p class="field__hint">也可以把项目文件夹拖进这个区域。扫描阶段不写任何文件。</p>
+      <p class="field__hint">You can also drag a project folder into this area. The scan phase writes no files.</p>
     </div>
 
     <div class="promise-grid">
       <div class="promise">
-        <div class="promise__k">只读扫描</div>
-        <div class="promise__v">检查阶段只跑 Git 只读命令，不改动仓库、不写入目标目录。</div>
+        <div class="promise__k">Read-only scan</div>
+        <div class="promise__v">The check phase runs only read-only Git commands; it does not modify the repository or write into the target directory.</div>
       </div>
       <div class="promise">
-        <div class="promise__k">可验证原因</div>
-        <div class="promise__v">每条判断都附证据：具体命令、文件计数或路径，不接受「看起来像垃圾」。</div>
+        <div class="promise__k">Verifiable reasons</div>
+        <div class="promise__v">Every judgment comes with evidence: a concrete command, file count, or path. "Looks like junk" is not accepted.</div>
       </div>
       <div class="promise">
-        <div class="promise__k">废纸篓删除</div>
-        <div class="promise__v">目录删除统一走系统废纸篓，Worktree 走 git worktree remove，不永久删除。</div>
+        <div class="promise__k">Trash-based deletion</div>
+        <div class="promise__v">Directory deletions always go to the system Trash; worktrees go through git worktree remove. Nothing is permanently deleted.</div>
       </div>
     </div>
 
     <div class="card">
       <div class="card__head">
-        <h2>最近项目</h2>
-        <span class="faint tiny">点击直接扫描</span>
+        <h2>Recent projects</h2>
+        <span class="faint tiny">Click to scan</span>
       </div>
       <div class="card__body">
         <div class="recent-list">
           <button v-for="item in recents" :key="item.path" class="recent" @click="startScan(item.path)">
             <span class="recent__path">{{ homePath(item.path) }}</span>
-            <span class="faint tiny nowrap">上次扫描 {{ item.scanned }}</span>
+            <span class="faint tiny nowrap">Last scan {{ item.scanned }}</span>
             <span class="row-wrap nowrap">
               <span class="tiny" style="color: var(--safe)">{{ item.safe }}</span>
               <span class="tiny" style="color: var(--review)">{{ item.review }}</span>
               <span class="tiny" style="color: var(--unsafe)">{{ item.unsafe }}</span>
             </span>
-            <span class="faint tiny nowrap">可释放 {{ formatBytes(item.freed) }}</span>
+            <span class="faint tiny nowrap">Can free {{ formatBytes(item.freed) }}</span>
           </button>
         </div>
       </div>

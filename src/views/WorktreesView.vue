@@ -50,25 +50,25 @@ function isExpanded(path: string): boolean {
 }
 
 function upstreamText(item: WorktreeRecord): string {
-  if (item.is_prunable) return "工作目录已丢失";
-  if (!item.has_upstream) return "无上游分支";
-  return `上游 ahead ${item.ahead} / behind ${item.behind}`;
+  if (item.is_prunable) return "working directory is gone";
+  if (!item.has_upstream) return "no upstream branch";
+  return `upstream ahead ${item.ahead} / behind ${item.behind}`;
 }
 
 function mergeText(item: WorktreeRecord): string {
-  if (item.is_main) return "主工作区，不参与合并判断";
-  if (item.merged_into_default === null) return `无法判定是否合入 ${snapshot.value?.default_branch || "默认分支"}`;
+  if (item.is_main) return "main worktree; not evaluated for merge status";
+  if (item.merged_into_default === null) return `cannot be determined whether merged into ${snapshot.value?.default_branch || "default branch"}`;
   return item.merged_into_default
-    ? `已合入 ${snapshot.value?.default_branch || "默认分支"}`
-    : `未合入 ${snapshot.value?.default_branch || "默认分支"}`;
+    ? `merged into ${snapshot.value?.default_branch || "default branch"}`
+    : `not merged into ${snapshot.value?.default_branch || "default branch"}`;
 }
 
 function stateText(item: WorktreeRecord): string {
-  if (item.is_prunable) return "目录已丢失";
+  if (item.is_prunable) return "directory is gone";
   const parts: string[] = [];
-  parts.push(item.dirty_files > 0 ? `脏 ${item.dirty_files}` : "干净");
-  if (item.untracked_files > 0) parts.push(`未跟踪 ${item.untracked_files}`);
-  if (item.is_locked) parts.push("已锁定");
+  parts.push(item.dirty_files > 0 ? `dirty ${item.dirty_files}` : "clean");
+  if (item.untracked_files > 0) parts.push(`untracked ${item.untracked_files}`);
+  if (item.is_locked) parts.push("locked");
   return parts.join(" · ");
 }
 </script>
@@ -78,24 +78,24 @@ function stateText(item: WorktreeRecord): string {
     <div class="spread">
       <h1>Worktree</h1>
       <span class="faint tiny">
-        数据来源：git worktree list --porcelain · status --porcelain=v2 · merge-base --is-ancestor
+        Data source: git worktree list --porcelain · status --porcelain=v2 · merge-base --is-ancestor
       </span>
     </div>
 
     <div class="row-wrap">
       <div class="segmented">
-        <button :class="filter === 'all' ? 'is-active' : ''" @click="filter = 'all'">全部 {{ worktrees.length }}</button>
+        <button :class="filter === 'all' ? 'is-active' : ''" @click="filter = 'all'">All {{ worktrees.length }}</button>
         <button :class="filter === 'Safe' ? 'is-active' : ''" @click="filter = 'Safe'">
-          可安全删除 {{ statusCount(worktrees, "Safe") }}
+          Safe to delete {{ statusCount(worktrees, "Safe") }}
         </button>
         <button :class="filter === 'Review' ? 'is-active' : ''" @click="filter = 'Review'">
-          需要确认 {{ statusCount(worktrees, "Review") }}
+          Needs review {{ statusCount(worktrees, "Review") }}
         </button>
         <button :class="filter === 'Unsafe' ? 'is-active' : ''" @click="filter = 'Unsafe'">
-          不可删除 {{ statusCount(worktrees, "Unsafe") }}
+          Must not delete {{ statusCount(worktrees, "Unsafe") }}
         </button>
       </div>
-      <input v-model="query" class="input input--sm" style="max-width: 240px" placeholder="按路径或分支搜索" />
+      <input v-model="query" class="input input--sm" style="max-width: 240px" placeholder="Search by path or branch" />
     </div>
 
     <div class="card">
@@ -106,12 +106,12 @@ function stateText(item: WorktreeRecord): string {
               <th class="cell-check">
                 <input v-model="allSelected" class="check" type="checkbox" :disabled="selectable.length === 0" />
               </th>
-              <th>分支</th>
-              <th>状态</th>
+              <th>Branch</th>
+              <th>Status</th>
               <th>Agent</th>
-              <th>最后活动</th>
-              <th class="cell-size">大小</th>
-              <th>安全等级</th>
+              <th>Last activity</th>
+              <th class="cell-size">Size</th>
+              <th>Safety</th>
               <th style="width: 68px"></th>
             </tr>
           </thead>
@@ -124,12 +124,12 @@ function stateText(item: WorktreeRecord): string {
                     type="checkbox"
                     :checked="isSelectedWorktree(item.path)"
                     :disabled="item.safety.status === 'Unsafe'"
-                    :title="item.safety.status === 'Unsafe' ? '不可删除项无法勾选' : ''"
+                    :title="item.safety.status === 'Unsafe' ? 'Must not delete items cannot be selected' : ''"
                     @change="toggleWorktree(item.path)"
                   />
                 </td>
                 <td>
-                  <div>{{ item.branch || "（detached HEAD）" }}</div>
+                  <div>{{ item.branch || "(detached HEAD)" }}</div>
                   <div class="mono tiny faint">{{ displayPath(item.path, root) }}</div>
                 </td>
                 <td class="nowrap tiny">{{ stateText(item) }}</td>
@@ -139,7 +139,7 @@ function stateText(item: WorktreeRecord): string {
                 <td class="nowrap"><SafetyBadge :status="item.safety.status" /></td>
                 <td class="nowrap">
                   <button class="btn btn--ghost" @click="toggleExpanded(item.path)">
-                    {{ isExpanded(item.path) ? "收起" : "详情" }}
+                    {{ isExpanded(item.path) ? "Collapse" : "Details" }}
                   </button>
                 </td>
               </tr>
@@ -148,32 +148,32 @@ function stateText(item: WorktreeRecord): string {
                   <div class="detail">
                     <div class="detail__grid">
                       <div class="stack stack--tight">
-                        <h3>Git 事实</h3>
+                        <h3>Git facts</h3>
                         <dl class="kv">
-                          <dt>完整路径</dt>
+                          <dt>Full path</dt>
                           <dd class="mono">{{ item.path }}</dd>
                           <dt>HEAD</dt>
                           <dd class="mono">{{ item.head || "—" }}</dd>
-                          <dt>上游</dt>
+                          <dt>Upstream</dt>
                           <dd>{{ upstreamText(item) }}</dd>
-                          <dt>合并状态</dt>
+                          <dt>Merge status</dt>
                           <dd>{{ mergeText(item) }}</dd>
                           <dt>stash</dt>
-                          <dd>{{ item.stash_count }} 条</dd>
-                          <dt>未跟踪文件</dt>
-                          <dd>{{ item.untracked_files }} 个</dd>
-                          <dt>目录体积</dt>
+                          <dd>{{ item.stash_count }} entries</dd>
+                          <dt>Untracked files</dt>
+                          <dd>{{ item.untracked_files }}</dd>
+                          <dt>Directory size</dt>
                           <dd>{{ formatBytes(item.size_bytes) }}</dd>
                         </dl>
                         <div v-if="item.is_prunable" class="banner banner--info">
-                          工作目录已不存在，只会执行 git worktree prune 清理 .git/worktrees 里的元数据，不动任何文件。
+                          The working directory no longer exists; only git worktree prune runs to clean up metadata in .git/worktrees. No files are touched.
                         </div>
                       </div>
                       <div class="stack stack--tight">
-                        <h3>判断原因</h3>
+                        <h3>Reasons</h3>
                         <ReasonList :reasons="item.safety.reasons" />
                         <div v-if="item.untracked_file_list.length > 0">
-                          <div class="field__label">未跟踪文件（删除该 worktree 时需要 --force）</div>
+                          <div class="field__label">Untracked files (removing this worktree requires --force)</div>
                           <div class="untracked-list">
                             <div v-for="file in item.untracked_file_list" :key="file">{{ file }}</div>
                           </div>
@@ -185,7 +185,7 @@ function stateText(item: WorktreeRecord): string {
               </tr>
             </template>
             <tr v-if="filtered.length === 0">
-              <td colspan="8"><div class="empty">没有符合条件的 Worktree</div></td>
+              <td colspan="8"><div class="empty">No worktrees match the current filters</div></td>
             </tr>
           </tbody>
         </table>
@@ -194,17 +194,17 @@ function stateText(item: WorktreeRecord): string {
 
     <div class="actionbar">
       <span class="muted">
-        已选 {{ selectedSummary.worktrees }} 个 Worktree · {{ selectedSummary.artifacts }} 个产物 · 预计释放
+        Selected {{ selectedSummary.worktrees }} worktrees · {{ selectedSummary.artifacts }} artifacts · Estimated reclaimable
         <strong>{{ formatBytes(selectedSummary.bytes) }}</strong>
       </span>
       <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('artifacts')">继续选产物</button>
+      <button class="btn" @click="goTo('artifacts')">Continue to artifacts</button>
       <button
         class="btn btn--primary"
         :disabled="selectedSummary.worktrees + selectedSummary.artifacts === 0"
         @click="goTo('plan')"
       >
-        生成清理计划
+        Generate cleanup plan
       </button>
     </div>
   </div>

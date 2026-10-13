@@ -7,15 +7,15 @@ import { formatBytes, displayPath } from "../format";
 const root = computed(() => snapshot.value?.root ?? "");
 
 const ACTION_LABEL: Record<string, string> = {
-  "worktree-remove": "移除 Worktree",
-  "trash-move": "移入废纸篓",
-  prune: "清理元数据"
+  "worktree-remove": "Remove Worktree",
+  "trash-move": "Move to Trash",
+  prune: "Clean up metadata"
 };
 
 const OUTCOME_LABEL: Record<string, string> = {
-  ok: "成功",
-  skipped: "已跳过",
-  failed: "失败"
+  ok: "Succeeded",
+  skipped: "Skipped",
+  failed: "Failed"
 };
 
 const okCount = computed(() => lastResult.value.filter((item) => item.result === "ok").length);
@@ -25,39 +25,39 @@ const okCount = computed(() => lastResult.value.filter((item) => item.result ===
   <div class="stack">
     <div class="spread">
       <div>
-        <h1>执行结果</h1>
+        <h1>Result</h1>
         <p class="faint tiny mono">{{ projectPath }}</p>
       </div>
       <div class="row-wrap">
-        <button class="btn" title="原型未接入系统调用" @click="resetToWelcome">打开废纸篓</button>
-        <button class="btn" title="原型未接入系统调用" @click="goTo('history')">打开日志</button>
-        <button class="btn btn--primary" @click="startScan(projectPath)">重新扫描</button>
+        <button class="btn" title="Prototype does not call into the system" @click="resetToWelcome">Open Trash</button>
+        <button class="btn" title="Prototype does not call into the system" @click="goTo('history')">Open log</button>
+        <button class="btn btn--primary" @click="startScan(projectPath)">Rescan</button>
       </div>
     </div>
 
     <div class="stat-grid stat-grid--4">
-      <StatCard label="释放空间" tone="accent" :value="formatBytes(resultSummary.freed)" sub="已计入废纸篓与 Worktree" />
-      <StatCard label="成功条目" tone="safe" value-tone :value="String(okCount)" sub="含元数据清理" />
-      <StatCard label="移入废纸篓" :value="String(resultSummary.trashed)" sub="可在废纸篓中找回" />
+      <StatCard label="Space freed" tone="accent" :value="formatBytes(resultSummary.freed)" sub="includes Trash moves and worktrees" />
+      <StatCard label="Succeeded" tone="safe" value-tone :value="String(okCount)" sub="includes metadata cleanup" />
+      <StatCard label="Moved to Trash" :value="String(resultSummary.trashed)" sub="recoverable from Trash" />
       <StatCard
-        label="跳过 / 失败"
+        label="Skipped / failed"
         :value="String(resultSummary.failed)"
         :tone="resultSummary.failed > 0 ? 'unsafe' : 'plain'"
-        sub="原因见下表"
+        sub="see the table below for reasons"
       />
     </div>
 
     <div class="card">
-      <div class="card__head"><h2>逐条结果</h2></div>
+      <div class="card__head"><h2>Per-item results</h2></div>
       <div class="card__body card__body--flush">
         <table class="table">
           <thead>
             <tr>
-              <th>动作</th>
-              <th>目标</th>
-              <th>说明</th>
-              <th class="cell-outcome">结果</th>
-              <th class="cell-size">体积</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Detail</th>
+              <th class="cell-outcome">Result</th>
+              <th class="cell-size">Size</th>
             </tr>
           </thead>
           <tbody>
@@ -71,23 +71,23 @@ const okCount = computed(() => lastResult.value.filter((item) => item.result ===
               <td class="cell-size numeric">{{ formatBytes(item.size_bytes) }}</td>
             </tr>
             <tr v-if="lastResult.length === 0">
-              <td colspan="5"><div class="empty">没有执行记录</div></td>
+              <td colspan="5"><div class="empty">No execution records</div></td>
             </tr>
           </tbody>
         </table>
       </div>
       <div class="card__foot">
         <span class="faint tiny">
-          失败条目不影响其它条目；已写入本机操作日志。删除动作不永久生效，目录类目标均可从废纸篓恢复。
+          Failed items do not affect the others; every action is written to the local operation log. Deletions are not permanent, and directory targets can be recovered from Trash.
         </span>
       </div>
     </div>
 
     <div class="actionbar">
-      <span class="muted">清理完成，可重新扫描确认结果</span>
+      <span class="muted">Cleanup complete; rescan to confirm the result</span>
       <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('history')">查看历史</button>
-      <button class="btn btn--primary" @click="goTo('overview')">返回概览</button>
+      <button class="btn" @click="goTo('history')">View history</button>
+      <button class="btn btn--primary" @click="goTo('overview')">Back to overview</button>
     </div>
   </div>
 </template>

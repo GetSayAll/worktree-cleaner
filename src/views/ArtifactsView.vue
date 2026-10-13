@@ -25,7 +25,7 @@ const root = computed(() => snapshot.value?.root ?? "");
 const groups = computed(() => {
   const buckets = new Map<string, ArtifactRecord[]>();
   for (const item of visibleArtifacts.value) {
-    const key = item.worktree_path ?? "（未归属到任何 worktree）";
+    const key = item.worktree_path ?? "(not owned by any worktree)";
     const list = buckets.get(key) ?? [];
     list.push(item);
     buckets.set(key, list);
@@ -40,7 +40,7 @@ const groups = computed(() => {
     );
     return {
       key,
-      label: key === root.value ? `${shortenPath(key, root.value)} （主工作区）` : shortBounded(key),
+      label: key === root.value ? `${shortenPath(key, root.value)} (main worktree)` : shortBounded(key),
       items,
       bytes: items.reduce((sum, a) => sum + (a.size_bytes ?? 0), 0),
       selectable: items.filter((a) => a.safety.status !== "Unsafe" && bundledOwner(a) === null).map((a) => a.path)
@@ -49,7 +49,7 @@ const groups = computed(() => {
 });
 
 function shortBounded(path: string): string {
-  if (path.startsWith(`${root.value}--`)) return `${path.slice(root.value.length - 1)} （worktree）`;
+  if (path.startsWith(`${root.value}--`)) return `${path.slice(root.value.length - 1)} (worktree)`;
   return shortenPath(path, root.value);
 }
 
@@ -66,10 +66,10 @@ function groupAllSelected(paths: string[]): boolean {
 }
 
 function gitState(item: ArtifactRecord): string {
-  if (item.git_tracked) return "已跟踪";
-  if (item.git_ignored) return "已忽略";
-  if (item.git_ignored === null) return "未验证";
-  return "未跟踪";
+  if (item.git_tracked) return "tracked";
+  if (item.git_ignored) return "ignored";
+  if (item.git_ignored === null) return "unverified";
+  return "untracked";
 }
 
 function sizeText(item: ArtifactRecord): string {
@@ -80,25 +80,25 @@ function sizeText(item: ArtifactRecord): string {
 <template>
   <div class="stack">
     <div class="spread">
-      <h1>构建产物</h1>
+      <h1>Build artifacts</h1>
       <span class="faint tiny">
-        候选目录名只是线索，最终按「是否被 Git 跟踪 / 是否有已创作内容 / 活跃度」判定
+        Candidate directory names are only hints; the final call is based on whether it is Git-tracked, whether it contains authored content, and its activity
       </span>
     </div>
 
     <div class="row-wrap">
       <div class="segmented">
-        <button :class="sortMode === 'size' ? 'is-active' : ''" @click="sortMode = 'size'">按体积</button>
-        <button :class="sortMode === 'time' ? 'is-active' : ''" @click="sortMode = 'time'">按最后活动</button>
+        <button :class="sortMode === 'size' ? 'is-active' : ''" @click="sortMode = 'size'">By size</button>
+        <button :class="sortMode === 'time' ? 'is-active' : ''" @click="sortMode = 'time'">By last activity</button>
       </div>
       <div class="row-wrap" style="flex: 1; min-width: 240px">
-        <span class="faint tiny nowrap">只显示大于</span>
+        <span class="faint tiny nowrap">Show only larger than</span>
         <input v-model.number="settings.min_artifact_mb" class="slider" type="range" min="0" max="500" step="10" style="max-width: 200px" />
         <span class="tiny numeric nowrap">{{ settings.min_artifact_mb }} MB</span>
       </div>
       <span class="faint tiny nowrap">
-        共 {{ visibleArtifacts.length }} 个 · 可安全 {{ statusCount(visibleArtifacts, "Safe") }} · 需确认
-        {{ statusCount(visibleArtifacts, "Review") }} · 不可删 {{ statusCount(visibleArtifacts, "Unsafe") }}
+        {{ visibleArtifacts.length }} total · Safe {{ statusCount(visibleArtifacts, "Safe") }} · Review
+        {{ statusCount(visibleArtifacts, "Review") }} · Blocked {{ statusCount(visibleArtifacts, "Unsafe") }}
       </span>
     </div>
 
@@ -107,7 +107,7 @@ function sizeText(item: ArtifactRecord): string {
         <button class="btn btn--ghost" @click="toggleCollapsed(group.key)">
           <span>{{ isCollapsed(group.key) ? "▸" : "▾" }}</span>
           <span class="group-head__path">{{ group.label }}</span>
-          <span class="faint tiny">{{ group.items.length }} 项 · {{ formatBytes(group.bytes) }}</span>
+          <span class="faint tiny">{{ group.items.length }} items · {{ formatBytes(group.bytes) }}</span>
         </button>
         <span style="flex: 1"></span>
         <label class="row-wrap tiny faint" style="gap: 6px; padding-right: 12px">
@@ -118,7 +118,7 @@ function sizeText(item: ArtifactRecord): string {
             :disabled="group.selectable.length === 0"
             @change="toggleGroupArtifacts(group.selectable, !groupAllSelected(group.selectable))"
           />
-          全选可删项
+          Select all safe items
         </label>
       </div>
 
@@ -135,9 +135,9 @@ function sizeText(item: ArtifactRecord): string {
                     :disabled="item.safety.status === 'Unsafe' || bundledOwner(item) !== null"
                     :title="
                       item.safety.status === 'Unsafe'
-                        ? '不可删除项无法勾选'
+                        ? 'Must not delete items cannot be selected'
                         : bundledOwner(item) !== null
-                          ? '随所属 worktree 一并移除'
+                          ? 'Removed together with its owning worktree'
                           : ''
                     "
                     @change="toggleArtifact(item.path)"
@@ -147,11 +147,11 @@ function sizeText(item: ArtifactRecord): string {
                   <div class="row-wrap">
                     <span class="chip">{{ item.kind }}</span>
                     <span class="mono">{{ shortenPath(item.path, root) }}</span>
-                    <span v-if="bundledOwner(item) !== null" class="badge badge--neutral">随 worktree 一并移除</span>
+                    <span v-if="bundledOwner(item) !== null" class="badge badge--neutral">Removed with worktree</span>
                   </div>
                   <div class="tiny faint">
-                    {{ item.ecosystem }} · {{ item.file_count > 0 ? `${formatCount(item.file_count)} 个文件` : "文件数未知" }}
-                    <span v-if="item.is_symlink"> · 符号链接 → {{ item.symlink_target }}</span>
+                    {{ item.ecosystem }} · {{ item.file_count > 0 ? `${formatCount(item.file_count)} files` : "file count unknown" }}
+                    <span v-if="item.is_symlink"> · symlink → {{ item.symlink_target }}</span>
                   </div>
                 </td>
                 <td class="nowrap tiny">{{ gitState(item) }}</td>
@@ -167,22 +167,22 @@ function sizeText(item: ArtifactRecord): string {
     </div>
 
     <div v-if="groups.length === 0" class="card">
-      <div class="empty">没有超过当前体积阈值的产物目录</div>
+      <div class="empty">No artifact directories exceed the current size threshold</div>
     </div>
 
     <div class="actionbar">
       <span class="muted">
-        已选 {{ selectedSummary.artifacts }} 个产物 · {{ selectedSummary.worktrees }} 个 Worktree · 预计释放
+        Selected {{ selectedSummary.artifacts }} artifacts · {{ selectedSummary.worktrees }} worktrees · Estimated reclaimable
         <strong>{{ formatBytes(selectedSummary.bytes) }}</strong>
       </span>
       <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('worktrees')">返回 Worktree</button>
+      <button class="btn" @click="goTo('worktrees')">Back to Worktree</button>
       <button
         class="btn btn--primary"
         :disabled="selectedSummary.worktrees + selectedSummary.artifacts === 0"
         @click="goTo('plan')"
       >
-        生成清理计划
+        Generate cleanup plan
       </button>
     </div>
   </div>

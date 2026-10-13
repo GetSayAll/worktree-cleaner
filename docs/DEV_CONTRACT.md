@@ -1,237 +1,344 @@
-# 开发契约
+# Development Contract
 
-本文件是开发的唯一约束来源。`docs/PRODUCT_PLAN.md` 与 `src/` 下的界面原型是设计真源；任何偏离都必须先改本文件或产品规划，再改代码。
+This file is the single source of constraints for development. `docs/PRODUCT_PLAN.md`
+and the frozen UI prototype under `src/` are the design source of truth. Any
+deviation must change this file or the product plan first, and only then the code.
 
 ---
 
-## 0. 冻结基线
+## 0. Baseline
 
-本次提交同时冻结以下内容，此后视为「已确认设计」：
+The following content was frozen by these commits and counts as "design agreed":
 
-| 类别 | 文件 | 状态 |
+| Category | Files | Status |
 |---|---|---|
-| 产品设计 | `docs/PRODUCT_PLAN.md` | 冻结 |
-| 开发约束 | `docs/DEV_CONTRACT.md`（本文件） | 冻结 |
-| 数据契约 | `src/types.ts` | 冻结（与 Rust 结构体逐字段对应） |
-| 界面原型 | `src/App.vue`、`src/views/`、`src/components/`、`src/state.ts`、`src/format.ts`、`src/styles.css`、`src/mock/snapshot.ts` | 冻结（交互与信息结构） |
-| 原型复现 | `scripts/build-preview.mjs` | 冻结 |
-| 未纳入 | `crates/`、`src-tauri/` | 仍为初始骨架，未改动 |
+| Product design | `docs/PRODUCT_PLAN.md` | Frozen |
+| Development constraints | `docs/DEV_CONTRACT.md` (this file) | Frozen |
+| Data contract | `src/types.ts` | Frozen (field-for-field with the Rust structs) |
+| UI prototype | `src/App.vue`, `src/views/`, `src/components/`, `src/state.ts`, `src/format.ts`, `src/styles.css`, `src/mock/snapshot.ts` | Frozen (interaction and information structure) |
+| Prototype build | `scripts/build-preview.mjs` | Frozen |
+| Not yet covered | `crates/` (partially), `src-tauri/` | `worktree-core` is in progress; `src-tauri` is still the initial skeleton |
 
-冻结的含义：**界面结构与判定语义不再随意调整**。实现层面的自由度见第 6 节。
+Frozen means **the UI structure and the decision semantics are not to be changed
+casually**. The freedom left at the implementation level is described in section 6.
 
-**冻结基线提交**：`bdfc990`（产品设计与界面原型）、`a8e2edc`（基线记录）。此后对上述任一文件的改动，都必须在提交信息中写明依据（变更控制见第 6 节）。
+**Baseline commits**: `bdfc990` (product design and UI prototype), `a8e2edc`
+(baseline record). Any later change to the files above must state its
+justification in the commit message (change control is in section 6).
 
-**形态变更记录（2026-10-11）**：交付形态由「Tauri 桌面应用」扩展为「形态 A 只读报告版 → 形态 B 本地 daemon + 浏览器 → 形态 C Tauri 桌面外壳」，依据为产品规划第十节。本次变更同时把 D17–D22 纳入约束、重排 P2–P6 阶段（第 5 节），并决策了原本第 7 节列出的依赖修复问题。
+**Form-factor change record (2026-10-11)**: the delivery form was extended from
+"a Tauri desktop application" to "Form A read-only report → Form B local daemon +
+browser → Form C Tauri desktop shell", per section 10 of the product plan. The
+same change added D17–D22, reworked the P2–P6 stages (section 5) and settled the
+dependency-fix question that section 7 previously listed as open.
+
+**Language rule (2026-10-11)**: the project is an international open-source
+project, so the repository is English-only. See D23. The rule covers everything
+committed to the repository; the local agent notes under `.workbuddy/` are not
+committed and are outside its scope.
 
 ---
 
-## 1. 不可变更的设计决定
+## 1. Immutable design decisions
 
-编号 D1–D22。每条都是硬约束，违反即视为实现错误。D17–D22 为形态相关约束。
+Numbered D1–D23. Each one is a hard constraint; violating it is an implementation
+bug. D17–D23 are form-factor and repository-wide constraints.
 
-| 编号 | 决定 | 为什么 | 怎么验证 |
+| ID | Decision | Why | How to verify |
 |---|---|---|---|
-| D1 | 扫描阶段只读：不写仓库、不写目标目录；唯一写入是本机操作日志 | 用户要能放心先扫再看 | 扫描后 `git status` 无新增改动；目标目录 mtime 不变 |
-| D2 | 三档等级由 `reasons` 中最严重的一条决定，不引入独立评分 | 等级必须可追溯到具体证据 | 单元测试：任一 Unsafe 原因存在时整体必为 Unsafe |
-| D3 | 失败即降级：超时、无权限、命令非零退出 → `Review`，**永不 Safe** | 拿不到证据就不能说安全 | 注入超时的测试用例，断言等级为 Review 且带 `cannot_verify` |
-| D4 | 主工作区永不可删除，即使它干净 | 删掉主工作区等于删掉仓库 | 主工作区用例断言 `wt.main` 且 Unsafe |
-| D5 | 目录删除只走系统废纸篓，**不提供永久删除，不提供绕过开关** | 用户目录的删除必须可恢复 | macOS 删除后能在废纸篓中找到并「放回」 |
-| D6 | Worktree 删除只走 `git worktree remove` / `git worktree prune`，禁止对 worktree 目录用 `rm -rf` | 必须让 Git 元数据保持一致 | 删除后 `git worktree list` 无残留；产物代码路径中搜索不到裸删除调用 |
-| D7 | 产物目录名只是候选线索，判定必须落到：是否被 Git 跟踪 / 目录内有无已创作内容 / 活跃度 / 是否越界符号链接 | 「叫 build 就删」会丢源码 | 反例用例：`build/` 内含被跟踪文件 → Unsafe |
-| D8 | 产物目录不得被当作项目根继续下钻 | 把 `node_modules` 当项目根会删掉包内 `dist/`，留下「依赖树看起来完好、实际已损坏」且必须联网重装的状态 | 反例用例：`node_modules` 内出现 `package.json` 时不得被识别为项目根 |
-| D9 | 每条判定必须携带 `code` + `severity` + `text` + `evidence` 四要素 | 「可验证原因」是本产品的核心承诺 | 结构体字段非可选；UI 上每条原因都能展开看到证据 |
-| D10 | 删除前必须依次通过路径校验 8 条，且校验只允许收紧、不允许因为解析结果而放宽 | 防符号链接绕过与空变量塌缩 | 校验器 fuzz 语料全部拒绝；祖先符号链接用例拒绝 |
-| D11 | 计划生成与执行之间必须复核目标身份（路径 + 体积 + mtime）与活跃度 | 防「生成计划时安全、点执行时已变」 | 执行前改动目标，断言该项被跳过 |
-| D12 | 默认勾选规则：Safe 默认勾选、Review 默认不勾、Unsafe 复选框禁用 | 默认值必须是保守的 | UI 与执行层均有对应用例 |
-| D13 | 高风险确认阈值：删除项数 ≥ 5、或含 `--force`、或单次释放 > 10 GB 时，必须手动勾选确认 | 大动作必须有人为停顿 | 计划对象给出 `ack_reasons`，未确认时执行按钮不可用 |
-| D14 | 串行执行，单条失败不影响后续；不做并发删除 | 失败要可归因，不制造部分成功的混乱 | 单条失败用例：其余条目仍完成 |
-| D15 | 日志只写本机、不联网，必须包含时间 / 动作 / 目标 / 原因 / 结果 / 体积 | 事后可追溯是本产品的信任基础 | 日志文件内容断言；代码内无任何网络调用 |
-| D16 | macOS 与 Windows 必须**分别**真机验证 | 废纸篓与回收站是两套机制，不能在一边验证另一边 | 两平台各有一份验证记录 |
-| D17 | 只读形态（形态 A 的网页、以及任何纯展示产物）不得包含任何删除或写入能力，连「请求后端删除」的入口都不能存在 | 形态的权责必须清晰，只读就是只读 | 构建产物代码扫描断言：不出现删除相关接口调用 |
-| D18 | 删除与写入只允许由本地进程执行，且必须经过「计划对象」；任何形态都不得由网页直接触发文件系统写操作 | 执行权必须落在本地且可复核 | 形态 A 无写入路径；形态 B 的 `execute` 只接受计划对象 |
-| D19 | 形态 B 的 daemon 必须：只绑定 `127.0.0.1`；每次启动生成随机 token；严格校验 `Origin` 与 `Host`（防 DNS rebinding）；不使用 CORS 通配符；破坏性接口除 token 外仍需界面二次确认 | 本地端口对浏览器可达，恶意网页可以发请求 | `lsof` 断言无对外监听；无 token / 跨源请求被拒；未二次确认时拒绝执行 |
-| D20 | `snapshot.json` 必须带 `schema_version`，它是 CLI 与网页之间的唯一契约；网页遇到更高版本必须明确提示升级，不允许猜测字段 | 接口一旦发布就不能假设两端同步升级 | 契约往返测试；构造更高版本输入断言给出明确错误 |
-| D21 | 形态不得降低既有约束：D5（只走废纸篓）与 D6（只走 `git worktree remove`）在全部形态下同样成立 | 换形态不是放松安全的理由 | 每个形态各有一份针对 D5 / D6 的验证记录 |
-| D22 | 报告版网页必须能在无网络、无服务的条件下打开（资源内联），不引入运行时后端依赖 | 只读形态的可用性不该依赖环境 | 断网 + `file://` 打开并完成一次完整查看 |
+| D1 | Scanning is read-only: it does not write to the repository or to target directories. The only write is the local operation log | Users must be able to scan first and decide later | `git status` is unchanged after a scan; target directory mtimes are unchanged |
+| D2 | The level of a record is decided by the **most severe** entry in `reasons`. No independent scoring | Every level must trace back to concrete evidence | Unit test: the presence of any Unsafe reason forces the whole record to Unsafe |
+| D3 | Failures downgrade: a timeout, a permission error, or a non-zero command exit produces `Review`, **never `Safe`** | Without evidence you cannot call something safe | Inject a timeout and assert the level is Review and carries `cannot_verify` |
+| D4 | The main worktree is never deletable, even when clean | Deleting the main worktree deletes the repository | Assert the main worktree carries `wt.main` and is Unsafe |
+| D5 | Directories are removed only through the system Trash. **No permanent delete, no bypass switch** | Deleting inside a user's directories must be recoverable | On macOS, a deleted item can be found in the Trash and put back |
+| D6 | Worktrees are removed only with `git worktree remove` / `git worktree prune`. Raw `rm -rf` on a worktree directory is forbidden | Git metadata must stay consistent | `git worktree list` shows no leftovers after removal; no bare-delete call exists in the code paths |
+| D7 | An artifact directory name is only a candidate hint. The verdict must rest on: whether Git tracks it, whether it holds authored content, its activity, and whether it is a symlink escaping the project | "It is called build, so delete it" destroys source code | Counter-example test: a `build/` directory containing tracked files must be Unsafe |
+| D8 | An artifact directory must never be treated as a project root and walked into | Treating `node_modules` as a project root deletes package-internal `dist/`, leaving a tree that looks installed but is corrupt and needs a network restore | Counter-example test: a `node_modules` containing `package.json` must not be recognised as a project root |
+| D9 | Every decision carries four elements: `code` + `severity` + `text` + `evidence` | "A verifiable reason" is the core promise of this product | Struct fields are not optional; every reason in the UI can be expanded to show its evidence |
+| D10 | Before deletion, the path must pass the eight checks in order, and verification may only tighten — a resolved path never grants permission the literal path lacked | Guards against symlink escape and empty-variable collapse | The whole fuzz corpus is rejected; the ancestor-symlink case is rejected |
+| D11 | Between plan generation and execution, the target identity (path + size + mtime) and its activity are re-checked | Guards against "safe when planned, changed when executed" | Modify the target after planning and assert the item is skipped |
+| D12 | Default selection: `Safe` is selected, `Review` is not, `Unsafe` checkboxes are disabled | Defaults must be conservative | Both the UI and the execution layer have tests for this |
+| D13 | High-risk confirmation: 5 or more items, or any `--force`, or more than 10 GB freed in one run requires an explicit manual acknowledgement | Large actions need a human pause | The plan object exposes `ack_reasons`; the execute button stays disabled until acknowledged |
+| D14 | Execution is serial. A failure on one item does not affect the others. No concurrent deletion | Failures must stay attributable; no confusing partial success | Single-failure test: the remaining items still complete |
+| D15 | The log is written locally only, never sent anywhere, and records time / action / target / reason / result / size | After-the-fact traceability is the basis for trust | Assert on log contents; no network call exists anywhere in the code |
+| D16 | macOS and Windows are verified **separately** on real machines | Trash and Recycle Bin are two different mechanisms; verifying one does not verify the other | One verification record per platform |
+| D17 | A read-only form (the Form A web page, and any display-only artifact) must not contain any deletion or write capability — not even an entry point that asks a backend to delete | The responsibility of each form must be unambiguous: read-only means read-only | A code-scan assertion over the build output: no deletion-related call is present |
+| D18 | Deletion and writing may only be performed by a local process, and only when driven by a plan object. No form may let a web page trigger a filesystem write directly | Execution authority must live locally and stay reviewable | Form A has no write path; Form B's `execute` accepts only a plan object |
+| D19 | Form B's daemon must: bind to `127.0.0.1` only; generate a random token on every start; strictly validate `Origin` and `Host` against DNS rebinding; never use a wildcard CORS policy; and require in-UI confirmation in addition to the token for destructive endpoints | A local port is reachable from the browser, so a malicious page can send requests | `lsof` shows no externally reachable listener; requests without a token and cross-origin requests are rejected; execution without confirmation is refused |
+| D20 | `snapshot.json` must carry `schema_version` and is the only contract between the CLI and the web page. On a higher version the page must say the viewer needs an upgrade; it must never guess at fields | Once published, an interface cannot assume both ends upgrade together | Round-trip test on the contract; feed a higher version and assert a clear error |
+| D21 | No form may weaken the existing constraints: D5 (Trash only) and D6 (`git worktree remove` only) hold in every form | Changing the form is not a reason to relax safety | One verification record per form, each covering D5 and D6 |
+| D22 | The report web page must open with no network and no server (assets inlined) and must not introduce a runtime backend dependency | The availability of a read-only form should not depend on the environment | Open it offline over `file://` and complete a full review |
+| D23 | **English only.** Every artifact committed to this repository is written in English: code, comments, identifiers, documentation, commit messages, file names, and user-visible strings. English is the default and the source locale | This is an international open-source project; a mixed-language repository is not reviewable by the community it targets | Repository scan for non-ASCII natural language outside fixtures; new commits read in English |
 
 ---
 
-## 2. 架构约束
+## 2. Architecture constraints
 
-三种形态共享同一套核心，只有最外层不同；依赖方向单向，禁止反向依赖：
+All three forms share one core; only the outermost layer differs. Dependencies are
+single-direction and must never be reversed:
 
 ```
-形态 A：静态网页 ────── 读 snapshot.json（只读，无执行权）
-形态 B：浏览器 ── HTTP(127.0.0.1 + token) ──┐
-形态 C：Tauri 桌面外壳 ── IPC ──────────────┤
+Form A: static web page ────── reads snapshot.json (read-only, no execution)
+Form B: browser ── HTTP(127.0.0.1 + token) ──┐
+Form C: Tauri desktop shell ── IPC ──────────┤
                                             ↓
-       worktree-core（纯 Rust：Git 解析、状态判断、产物扫描、路径校验）
+       worktree-core (pure Rust: Git parsing, state evaluation, artifact scan, path verification)
                                             ↓
-                                     本地文件系统 / 系统废纸篓
+                                     local filesystem / system Trash
 ```
 
-- `worktree-core` 不依赖 Tauri，不依赖任何 Agent 厂商的目录名做功能前提（识别 Agent 只是给路径打标签，识别不出不报错、不猜）。
-- 形态 B 的 daemon 与形态 C 的 Tauri 宿主都只做「转发 + 平台适配」，不得包含任何判定逻辑，只负责把计划对象交给执行模块。
-- `worktree-core` 内**只做只读扫描**；删除执行必须放在独立模块，且只能通过「计划对象」驱动，不允许扫描过程顺手删除。
-- 所有 Git 调用集中在 `worktree-core` 的 git 子模块，**不解析 `.git` 内部文件格式**（用 `git worktree list --porcelain` 等命令输出）。
-- 前端不重复实现任何判定逻辑：UI 只做展示、筛选与选择；等级与原因一律来自 Rust 输出。
-- 契约方向：Rust `serde` 输出即前端契约，字段 `snake_case`，枚举单元变体序列化为 `"Safe" | "Review" | "Unsafe"`。
+- `worktree-core` does not depend on Tauri, and it does not depend on any single
+  agent vendor's directory layout as a precondition. Recognising an agent only
+  labels a path; failing to recognise one is not an error and must not be guessed.
+- Form B's daemon and Form C's Tauri host only forward calls and adapt to the
+  platform. They must contain no decision logic and only hand a plan object to the
+  execution module.
+- `worktree-core` performs **read-only scanning only**. Execution lives in a
+  separate module and is driven exclusively by a plan object; scanning must never
+  delete anything as a side effect.
+- All Git calls are collected in a `git` submodule of `worktree-core`, and the
+  internal `.git` file format is never parsed (use command output such as
+  `git worktree list --porcelain`).
+- The front end never re-implements decision logic: the UI only displays, filters,
+  and selects. Levels and reasons always come from Rust output.
+- Contract direction: Rust `serde` output is the front-end contract. Fields are
+  `snake_case`, and unit enum variants serialise to `"Safe" | "Review" | "Unsafe"`.
 
 ---
 
-## 3. 命名与契约规则
+## 3. Naming and contract rules
 
-- 原因码格式 `wt.*` / `af.*`（worktree / artifact）。**只增不改语义**；语义变化必须用新码，旧码标记废弃但不复用。
-- `src/types.ts` 与 Rust 结构体逐字段对应，任一侧改动必须同一次提交内同步另一侧，并由测试兜底（Rust 侧对沙盒样例做序列化/反序列化往返断言）。
-- 可选数值用 `Option<u64>`（前端 `number | null`）：**「无法测量」必须与「0」可区分**，UI 上分别显示为「未知」和「0 B」。
-- 内部实现命名自由，但对外出现的字段名、原因码、命令文本（如 `git worktree remove --force "<path>"`）属于契约，不得随意改。
-
----
-
-## 4. 测试要求
-
-- **每个原因码至少 1 个正例 + 1 个反例**。原因码清单见产品规划第五节的判定表。
-- 路径校验器必须有 fuzz 测试（cargo-fuzz 或 proptest），不变量：**任何通过校验的路径必须是绝对路径、不含 NUL、不含 `..` 路径组件**。
-- 必须有下列反例用例（缺一不可）：
-  - `build/` 内含被 Git 跟踪的文件；
-  - `node_modules` 被误当项目根；
-  - 拼接出的路径因变量为空塌缩成父目录；
-  - 路径的**祖先**是符号链接且指向危险位置；
-  - 产物目录体积统计超时 → 判 Review 且显示「未知」而非 0；
-  - 目标在计划生成后被替换或变为活跃。
-- 前端：每次改动 UI 必须 `vue-tsc --noEmit` 零错误且构建通过。
-- 平台：macOS 每次发版前真机验证废纸篓链路；Windows 单独验证回收站链路，两平台结果分别记录。
-
----
-
-## 5. 交付物与验收标准
-
-每个阶段「通过」的判据是可执行的检查，不是主观评价。
-
-### P0 · 路径校验器与原因模型
-
-**交付物**：`worktree-core` 的路径校验模块、`Reason` / `SafetyAssessment` / `WorktreeRecord` 结构体、Worktree 检查实现、单元测试、fuzz target。
-
-**验收标准**
-
-1. `cargo test -p worktree-core` 全绿；
-2. 判定表里全部 `wt.*` 原因码各自有用例，且每条原因带非空 `evidence`；
-3. fuzz 语料 ≥ 60 条对抗路径（含 `..`、祖先符号链接、控制字符、系统根、空路径）全部被拒绝；
-4. 注入超时/无权限的用例断言等级为 `Review` 且含 `cannot_verify`；
-5. `cargo clippy -- -D warnings` 通过。
-
-### P1 · 产物扫描与边界识别
-
-**交付物**：产物类型清单、生态归属、体积与文件数统计、Git 跟踪状态判定、边界识别。
-
-**验收标准**
-
-1. `build/` 内含被跟踪文件 → `Unsafe` + `af.git_tracked`，证据含命中文件数；
-2. `node_modules` 不被识别为项目根（D8 反例用例通过）；
-3. 目录内有嵌套 `.git` 或凭据文件 → `Unsafe`；
-4. 越界符号链接 → `Unsafe` + `af.symlink_outside`，证据含目标路径；
-5. 体积统计超时 → 等级 `Review`，前端显示「未知」而非 `0 B`；
-6. 全部 `af.*` 原因码各自有用例。
-
-### P2 · CLI 骨架与 snapshot JSON 契约
-
-**交付物**：`worktree-cleaner scan --json <path>` 子命令、`schema_version` 字段、序列化实现、CLI 参数与退出码约定。
-
-**验收标准**
-
-1. 输出符合产品规划 10.5 的契约，字段齐全、类型正确、`schema_version` 存在；
-2. 扫描前后 `git status` 与目标目录 mtime 无变化（D1）；
-3. 「非 Git 目录」「目录不存在」「无权限」三种输入的退出码与错误信息各自明确，不静默成功；
-4. 输出字段与 `src/types.ts` 的 `ProjectSnapshot` 逐字段一致；
-5. 扫描降级情形（超时、无权限）如实出现在 `warnings` 与对应条目的 `reasons` 中。
-
-### P3 · 只读报告版网页（形态 A）
-
-**交付物**：单文件网页（资源内联）、拖入 snapshot JSON 的入口、三档展示与筛选、导出清理计划 JSON。
-
-**验收标准**
-
-1. 断网 + `file://` 打开，可完成一次完整查看（D22）；
-2. 页面显示的三档数量、原因文本与 `evidence` 与 JSON 逐项一致（随机抽 10 条比对）；
-3. 页面不存在任何删除按钮、删除接口调用或文件系统写入路径（D17，构建产物代码扫描断言）；
-4. 拖入高于自身支持的 `schema_version` 时给出明确升级提示，不猜测字段（D20）；
-5. 导出的清理计划 JSON 字段与计划对象一致，可被 CLI 直接接受；
-6. `src/mock/` 不再被生产代码引用；`vue-tsc --noEmit` 零错误、构建通过。
-
-### P4 · 本地清理执行与日志（形态 A 的执行侧）
-
-**交付物**：`clean --plan <file>` 命令、执行模块、废纸篓三档回退、`git worktree remove` / `prune` 调用、操作日志写入。
-
-**验收标准**
-
-1. macOS：删除后能在废纸篓中找到并成功「放回」（D5）；
-2. `git worktree remove` 后 `git worktree list` 无残留，且随后 `prune` 收尾（D6）；
-3. 含未跟踪文件的 worktree 在未确认时**拒绝执行**，确认后命令为 `git worktree remove --force`，且未跟踪文件清单已在计划中逐行展示；
-4. 白名单命中 → 该项被阻断，不进入执行；
-5. 目标身份或活跃度在计划后被改动 → 该项被跳过并给出原因（D11）；
-6. 单条失败不影响其余条目（D14）；
-7. 日志文件包含时间 / 动作 / 目标 / 原因 / 结果 / 体积，且代码内不存在网络调用（D15）；
-8. Windows：回收站链路单独验证通过，结果单独记录（D16）。
-
-### P5 · 本地 daemon 与浏览器界面（形态 B）
-
-**交付物**：本地 HTTP 服务（`scan` / `plan` / `execute`）、token 鉴权与 Origin / Host 校验、网页的 HTTP 数据源。
-
-**验收标准**
-
-1. `lsof` 断言只监听 `127.0.0.1`，不存在对外监听（D19）；
-2. 无 token 请求、错误 token 请求、跨源 `Origin` 请求全部被拒；
-3. `execute` 接口只接受计划对象，未完成二次确认时拒绝执行（D18、D13）；
-4. 浏览器里跑通完整链路：扫描 → 勾选 → 计划 → 执行 → 结果 → 历史；
-5. `worktree-core` 在本阶段无改动（复用验证）；
-6. 形态 A 的只读网页与本形态共用同一套组件，仅数据来源不同。
-
-### P6 · 收尾
-
-**交付物**：设置持久化、历史读取真实日志、计划导出、可选的 Tauri 桌面外壳（形态 C）。
-
-**验收标准**
-
-1. 重启后设置保留；
-2. 历史内容来自真实操作日志，失败的条目也在其中；
-3. 导出文件字段与计划对象一致；
-4. 若实现形态 C：双击启动后调用的是同一套 core 与执行模块，不产生第二套判定实现。
+- Reason codes use the `wt.*` / `af.*` form (worktree / artifact). They are
+  **additive only**: a semantic change requires a new code, and retired codes are
+  marked deprecated but never reused.
+- `src/types.ts` matches the Rust structs field for field. A change on either side
+  must be mirrored on the other side within the same commit, backed by a test (the
+  Rust side asserts a serialise/deserialise round trip on a sample).
+- Optional numbers use `Option<u64>` (front end: `number | null`):
+  **"cannot be measured" must be distinguishable from "0"**, and the UI shows
+  `unknown` and `0 B` respectively.
+- Every reason must carry a non-empty `text` and a non-empty `evidence`. The
+  constructors assert this in test builds.
+- Internal naming is free, but field names that appear externally, reason codes,
+  and command text (such as `git worktree remove --force "<path>"`) are part of the
+  contract and must not change casually.
+- Language: identifiers, comments, documentation, commit messages, file names, and
+  user-visible strings are all English (D23). Commit messages are written as
+  `type(scope): short imperative summary`, followed by a body explaining what
+  changed and why.
+- File names are English, lowercase, and use `kebab-case` for docs and scripts.
+  Rust and TypeScript files follow their ecosystem conventions (`snake_case` for
+  Rust modules, `PascalCase.vue` for components).
 
 ---
 
-## 6. 变更控制
+## 4. Testing requirements
 
-**可以自由改**：内部实现、算法与性能、内部命名、日志文案、样式细节、单元测试组织方式。
-
-**必须先改文档、再改代码**（并在提交信息里写明理由）：
-
-- 第 1 节 D1–D22 任一条；
-- `src/types.ts` / Rust 结构体的任何字段增删或类型变化（含 `schema_version`）；
-- 原因码的语义（新增原因码属于此类，需同步更新产品规划第五节的判定表）；
-- 页面清单与信息结构；
-- 三种形态之间的权责划分（哪个形态有执行权）。
-
-**禁止**：
-
-- 提供绕过废纸篓的删除路径；
-- 把判定逻辑搬到前端；
-- 让 `cannot_verify` / `uncertain` 变成 `Safe`；
-- 去掉原因中的 `evidence` 字段；
-- 让扫描阶段产生除日志以外的任何写入。
+- **Every reason code has at least one positive and one negative case.** The list of
+  codes is in the decision tables in section 5 of the product plan.
+- The path validator must have a fuzz test (cargo-fuzz or proptest). Invariant:
+  **any path that passes verification must be absolute, free of NUL bytes, and free
+  of `..` path components.**
+- The following counter-examples are mandatory; none may be skipped:
+  - a `build/` directory containing Git-tracked files;
+  - `node_modules` mistaken for a project root;
+  - a path that collapses into its parent because a variable was empty;
+  - an **ancestor** of the path being a symlink that points somewhere dangerous;
+  - artifact size measurement timing out, which must produce Review and display
+    `unknown` rather than 0;
+  - the target being replaced, or becoming active, after the plan was generated.
+- Front end: any UI change must leave `vue-tsc --noEmit` at zero errors and the
+  build passing.
+- Platform: macOS verifies the Trash path on a real machine before every release;
+  Windows verifies the Recycle Bin path separately. Both results are recorded
+  separately.
 
 ---
 
-## 7. 已决策与待决策项
+## 5. Deliverables and acceptance criteria
 
-**已决策（2026-10-11）**
+"Done" for each stage means the checks below pass. They are executable checks, not
+subjective judgement.
 
-1. **依赖修复（已完成）**：`@vitejs/plugin-vue` 由 `^6.1.0` 改为 `^6.0.10`（原版本在 registry 上不存在，为安装失败的直接原因），并补 `@types/node`（`tsconfig.json` 引入了 `vite.config.ts` 却缺该类型包）。修复后全部依赖均可解析，`vue-tsc --noEmit` 零错误、`vite build` 通过、单文件原型交互验证通过。
-2. **交付形态**：采用「形态 A 只读报告版 → 形态 B 本地 daemon + 浏览器 → 形态 C Tauri 桌面外壳（可选）」，**不做托管 SaaS 形态**。
-3. **`.workbuddy/`**：保持本地，不纳入版本控制。
-4. **单文件原型**：不纳入版本控制（`dist/` 已 gitignore），由 `scripts/build-preview.mjs` 复现。
+### P0 · Path validator and reason model
 
-**待决策**
+**Deliverables**: the path verification module in `worktree-core`, the `Reason` /
+`SafetyAssessment` / `WorktreeRecord` structs, the worktree check implementation,
+unit tests, and a fuzz target.
 
-1. **Windows 回收站链路的验证方式**：D16 要求两平台分别验证，形态 A / B 下如何在 Windows 真机取得并留存这份验证记录。
-2. **形态 B 的 daemon 分发方式**：做成 `worktree-cleaner serve` 子命令（单一二进制）还是独立可执行文件。
-3. **`snapshot.json` 的存放约定**：CLI 输出到 stdout 还是默认写入约定路径；CI 场景下的产物命名规则。
+**Acceptance criteria**
+
+1. `cargo test -p worktree-core` is green;
+2. every `wt.*` reason code in the decision tables has a test case, and every reason
+   carries non-empty `evidence`;
+3. a fuzz corpus of at least 60 adversarial paths (covering `..`, ancestor symlinks,
+   control characters, system roots, empty paths) is fully rejected;
+4. a case that injects a timeout or a permission error asserts the level is `Review`
+   and carries `cannot_verify`;
+5. `cargo clippy -- -D warnings` passes.
+
+### P1 · Artifact scan and boundary detection
+
+**Deliverables**: artifact type list, ecosystem attribution, size and file-count
+measurement, Git tracking status, boundary detection.
+
+**Acceptance criteria**
+
+1. a `build/` directory containing tracked files is `Unsafe` with `af.git_tracked`,
+   and its evidence names the number of matches;
+2. `node_modules` is not recognised as a project root (the D8 counter-example passes);
+3. a directory containing a nested `.git` or credential files is `Unsafe`;
+4. an escaping symlink is `Unsafe` with `af.symlink_outside`, and its evidence names
+   the target path;
+5. a size-measurement timeout produces `Review`, and the UI shows `unknown`, not `0 B`;
+6. every `af.*` reason code has a test case.
+
+### P2 · CLI skeleton and the snapshot JSON contract
+
+**Deliverables**: the `worktree-cleaner scan --json <path>` subcommand, the
+`schema_version` field, serialisation, and the CLI argument and exit-code conventions.
+
+**Acceptance criteria**
+
+1. output matches the contract in product plan section 10.5 — complete fields,
+   correct types, `schema_version` present;
+2. `git status` and target directory mtimes are unchanged by a scan (D1);
+3. "not a Git directory", "directory does not exist", and "permission denied" each
+   produce a distinct exit code and a clear message, and never a silent success;
+4. output fields match `ProjectSnapshot` in `src/types.ts` field for field;
+5. degraded scans (timeouts, permission errors) appear honestly in `warnings` and in
+   the `reasons` of the affected records.
+
+### P3 · Read-only report web page (Form A)
+
+**Deliverables**: a single-file web page (inlined assets), an entry point for
+dropping in a snapshot JSON, the three-level display and filtering, and export of the
+cleanup plan as JSON.
+
+**Acceptance criteria**
+
+1. opened offline over `file://`, a full review can be completed (D22);
+2. the three level counts, reason texts, and `evidence` shown by the page match the
+   JSON item for item (compare 10 randomly chosen records);
+3. the page contains no delete button, no deletion call, and no filesystem write path
+   (D17, asserted by scanning the build output);
+4. a `schema_version` higher than the page supports produces a clear upgrade message
+   and no field guessing (D20);
+5. the exported cleanup plan JSON matches the plan object and is accepted by the CLI
+   directly;
+6. `src/mock/` is no longer referenced by production code, `vue-tsc --noEmit` is at
+   zero errors, and the build passes.
+
+### P4 · Local cleanup execution and logging (the execution side of Form A)
+
+**Deliverables**: the `clean --plan <file>` command, the execution module, the
+three-tier Trash fallback, the `git worktree remove` / `prune` calls, and operation
+log writing.
+
+**Acceptance criteria**
+
+1. macOS: after deletion the item can be found in the Trash and put back (D5);
+2. after `git worktree remove`, `git worktree list` shows no leftovers and `prune`
+   runs as a follow-up (D6);
+3. a worktree with untracked files **refuses to execute** until confirmed; after
+   confirmation the command is `git worktree remove --force`, and the untracked file
+   list was already shown line by line in the plan;
+4. a whitelist hit blocks the item and keeps it out of execution;
+5. a target whose identity or activity changed after planning is skipped with a
+   stated reason (D11);
+6. a failure on one item does not affect the others (D14);
+7. the log file contains time / action / target / reason / result / size, and no
+   network call exists in the code (D15);
+8. Windows: the Recycle Bin path is verified separately and recorded separately (D16).
+
+### P5 · Local daemon and browser UI (Form B)
+
+**Deliverables**: the local HTTP service (`scan` / `plan` / `execute`), token
+authentication and `Origin` / `Host` validation, and the web page's HTTP data source.
+
+**Acceptance criteria**
+
+1. `lsof` shows a listener on `127.0.0.1` only, with no externally reachable listener
+   (D19);
+2. requests without a token, with a wrong token, and with a cross-origin `Origin` are
+   all rejected;
+3. `execute` accepts only a plan object and refuses to run before the second
+   confirmation (D18, D13);
+4. the full chain runs in a browser: scan → select → plan → execute → result → history;
+5. `worktree-core` is unchanged in this stage (the reuse check);
+6. the Form A read-only page and this form share one component set and differ only in
+   their data source.
+
+### P6 · Wrap-up
+
+**Deliverables**: settings persistence, history read from the real log, plan export,
+and the optional Tauri desktop shell (Form C).
+
+**Acceptance criteria**
+
+1. settings survive a restart;
+2. history comes from the real operation log, including failed entries;
+3. the exported file matches the plan object field for field;
+4. if Form C is implemented: launching it calls the same core and the same execution
+   module, and introduces no second decision implementation.
+
+---
+
+## 6. Change control
+
+**Free to change**: internal implementation, algorithms and performance, internal
+naming, log wording, style details, and how unit tests are organised.
+
+**Documentation change required first** (with the justification stated in the commit
+message):
+
+- any of D1–D23 in section 1;
+- any field addition, removal, or type change in `src/types.ts` or the Rust structs
+  (including `schema_version`);
+- reason-code semantics (adding a code belongs here, and requires updating the
+  decision tables in section 5 of the product plan in the same commit);
+- the page inventory and information structure;
+- the division of responsibility between the three forms (which form may execute).
+
+**Forbidden**:
+
+- providing any deletion path that bypasses the Trash;
+- moving decision logic into the front end;
+- turning `cannot_verify` / `uncertain` into `Safe`;
+- removing the `evidence` field from a reason;
+- letting the scanning stage write anything other than the log;
+- committing non-English content (D23).
+
+---
+
+## 7. Decided and open items
+
+**Decided (2026-10-11)**
+
+1. **Dependency fix (done)**: `@vitejs/plugin-vue` moved from `^6.1.0` to `^6.0.10`
+   (the original version does not exist in the registry, which was the direct cause
+   of the install failure), and `@types/node` was added (`tsconfig.json` includes
+   `vite.config.ts` but the type package was missing). All dependencies now resolve,
+   `vue-tsc --noEmit` is at zero errors, `vite build` passes, and the single-file
+   prototype passes its interaction check.
+2. **Delivery form**: "Form A read-only report → Form B local daemon + browser →
+   Form C Tauri desktop shell (optional)". **A hosted SaaS form is not built.**
+3. **`.workbuddy/`**: stays local and is not committed.
+4. **Single-file prototype**: not committed (`dist/` is gitignored); it is
+   reproducible through `scripts/build-preview.mjs`.
+
+**Open**
+
+1. **How to verify the Windows Recycle Bin path**: D16 requires separate verification
+   per platform. How does Form A / Form B obtain and retain that record on a real
+   Windows machine?
+2. **How Form B's daemon is distributed**: as a `worktree-cleaner serve` subcommand
+   (single binary) or as a separate executable.
+3. **Where `snapshot.json` is written**: stdout or a conventional default path, and
+   the artifact naming rule for CI.
+4. **UI localisation depth**: whether the English UI ships with a string table and a
+   locale switch from day one, or only with centralised strings so locales can be
+   added later.
+5. **The five commits made before D23**: their messages are in Chinese. Rewriting
+   local history is possible because nothing has been pushed, but it requires an
+   explicit decision.

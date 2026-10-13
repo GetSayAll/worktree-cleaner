@@ -1,6 +1,6 @@
-// 把 vite 构建产物内联成零依赖单文件 dist/preview.html。
-// 用途：界面原型需要在没有服务、没有 Node 环境的情况下也能双击打开。
-// 用法：node scripts/build-preview.mjs（前置：已执行 vite build --base ./）
+// Inline the Vite build output into a zero-dependency single file at dist/preview.html.
+// Purpose: the UI prototype needs to open by double-click without a server or a Node environment.
+// Usage: node scripts/build-preview.mjs (prerequisite: vite build --base ./ has already run)
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -13,25 +13,27 @@ const html = readFileSync(join(dist, "index.html"), "utf8");
 const jsName = html.match(/src="\.\/assets\/([^"]+\.js)"/)?.[1];
 const cssName = html.match(/href="\.\/assets\/([^"]+\.css)"/)?.[1];
 if (!jsName || !cssName) {
-  throw new Error("dist/index.html 里找不到 ./assets 引用，请先用 --base ./ 构建");
+  throw new Error("Could not find ./assets references in dist/index.html; build with --base ./ first");
 }
 
 const js = readFileSync(join(dist, "assets", jsName), "utf8").replaceAll("</script", "<\\/script");
 const css = readFileSync(join(dist, "assets", cssName), "utf8").replaceAll("</style", "<\\/style");
 
-// 两个必须注意的点：
-// 1) 必须用函数式替换。字符串形式的替换会把 JS 里的 $& / $` / $' 当成替换模式，
-//    导致内联内容被 HTML 片段污染、产出语法错误的文件。
-// 2) 内联脚本必须放在 </body> 之前。经典脚本不会像 module 那样自动 defer，
-//    放在 <head> 里会早于 #app 解析执行，Vue 挂载目标不存在且不会报错。
-//    这里也不用 type="module"，因为 file:// 下 module 脚本受 CORS 限制无法加载外部 chunk。
+// Two things to watch out for:
+// 1) The replacement must be a function. A string replacement treats $& / $` / $' in the JS
+//    as replacement patterns, which pollutes the inlined content with HTML fragments and
+//    produces a file with syntax errors.
+// 2) The inline script must go before </body>. Classic scripts do not auto-defer like modules,
+//    so placing it in <head> runs it before #app is parsed, the Vue mount target does not exist,
+//    and no error is thrown. We also avoid type="module" here, because under file:// module
+//    scripts are blocked by CORS from loading external chunks.
 const out = html
   .replace(/<script type="module"[^>]*><\/script>\s*/, "")
   .replace(/<link rel="stylesheet"[^>]*>/, () => `<style>\n${css}\n</style>`)
   .replace(/<\/body>/, () => `<script>\n${js}\n</script>\n</body>`);
 
-if (out.includes("assets/index-")) throw new Error("仍有外部资源引用，内联未完成");
-if (!out.includes("<script>")) throw new Error("脚本未被内联");
+if (out.includes("assets/index-")) throw new Error("External references remain; inlining did not finish");
+if (!out.includes("<script>")) throw new Error("The script was not inlined");
 
 writeFileSync(join(dist, "preview.html"), out);
-console.log(`dist/preview.html 已生成（${out.length} 字节）`);
+console.log(`dist/preview.html generated (${out.length} bytes)`);

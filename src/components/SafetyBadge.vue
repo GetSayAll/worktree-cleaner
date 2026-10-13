@@ -5,9 +5,9 @@ import { STATUS_LABEL } from "../types";
 withDefaults(defineProps<{ status: SafetyStatus; compact?: boolean }>(), { compact: false });
 
 const SHORT: Record<SafetyStatus, string> = {
-  Safe: "可删",
-  Review: "待确认",
-  Unsafe: "不可删"
+  Safe: "Safe",
+  Review: "Review",
+  Unsafe: "Blocked"
 };
 </script>
 

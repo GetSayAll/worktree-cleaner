@@ -29,56 +29,56 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
   <div class="stack">
     <div class="spread">
       <div>
-        <h1>概览</h1>
-        <p class="faint tiny mono">{{ root }} · 默认分支 {{ snapshot?.default_branch || "未知" }}</p>
+        <h1>Overview</h1>
+        <p class="faint tiny mono">{{ root }} · default branch {{ snapshot?.default_branch || "unknown" }}</p>
       </div>
       <div class="row-wrap">
-        <button class="btn" @click="goTo('worktrees')">查看 Worktree</button>
-        <button class="btn" @click="goTo('artifacts')">查看构建产物</button>
+        <button class="btn" @click="goTo('worktrees')">View Worktree</button>
+        <button class="btn" @click="goTo('artifacts')">View build artifacts</button>
       </div>
     </div>
 
     <div class="stat-grid stat-grid--4">
       <StatCard
-        label="可安全删除"
+        label="Safe to delete"
         tone="safe"
         value-tone
         :value="String(counts.worktree.Safe + counts.artifact.Safe)"
-        :sub="`合计 ${formatBytes(safeBytes)} · Safe 默认已勾选`"
+        :sub="`Total ${formatBytes(safeBytes)} · Safe items are selected by default`"
       />
       <StatCard
-        label="需要确认"
+        label="Needs review"
         tone="review"
         value-tone
         :value="String(reviewCount)"
-        sub="未合并 / 近期有改动 / 无法完成检查"
+        sub="not merged / recently changed / check incomplete"
       />
       <StatCard
-        label="不可删除"
+        label="Must not delete"
         tone="unsafe"
         value-tone
         :value="String(unsafeCount)"
-        sub="主工作区 / 有改动 / 被锁定 / 已提交进仓库"
+        sub="main worktree / dirty / locked / committed to the repository"
       />
       <StatCard
-        label="预计可释放"
+        label="Estimated reclaimable"
         tone="accent"
         :value="formatBytes(selectedSummary.bytes)"
-        :sub="`已选 ${selectionCount} 项 · Worktree ${selectedSummary.worktrees} · 产物 ${selectedSummary.artifacts}`"
+        :sub="`Selected ${selectionCount} items · Worktree ${selectedSummary.worktrees} · artifacts ${selectedSummary.artifacts}`"
       />
     </div>
 
     <div v-for="warning in snapshot?.warnings || []" :key="warning" class="banner banner--warn">
       <span>⚠</span>
       <span>
-        <span class="banner__title">扫描未完整完成 · </span>{{ warning }}
+        <span class="banner__title">Scan incomplete · </span>{{ warning }}
       </span>
     </div>
 
     <div class="card">
       <div class="card__head">
-        <h2>体积最大的 Worktree</h2>
-        <button class="btn btn--ghost" @click="goTo('worktrees')">查看全部 {{ worktrees.length }} 个</button>
+        <h2>Largest worktrees</h2>
+        <button class="btn btn--ghost" @click="goTo('worktrees')">View all {{ worktrees.length }}</button>
       </div>
       <div class="card__body card__body--flush">
         <table class="table">
@@ -86,10 +86,10 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
             <tr v-for="item in topWorktrees" :key="item.path">
               <td>
                 <div class="mono">{{ displayPath(item.path, root) }}</div>
-                <div class="tiny faint">{{ item.branch || "（detached）" }}{{ item.is_main ? " · 主工作区" : "" }}</div>
+                <div class="tiny faint">{{ item.branch || "(detached)" }}{{ item.is_main ? " · main worktree" : "" }}</div>
               </td>
               <td class="nowrap">
-                <span class="chip">{{ item.agent || "未知 Agent" }}</span>
+                <span class="chip">{{ item.agent || "unknown agent" }}</span>
               </td>
               <td class="cell-size">
                 <div class="numeric">{{ formatBytes(item.size_bytes) }}</div>
@@ -107,8 +107,8 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
 
     <div class="card">
       <div class="card__head">
-        <h2>体积最大的构建产物</h2>
-        <button class="btn btn--ghost" @click="goTo('artifacts')">查看全部 {{ artifacts.length }} 个</button>
+        <h2>Largest build artifacts</h2>
+        <button class="btn btn--ghost" @click="goTo('artifacts')">View all {{ artifacts.length }}</button>
       </div>
       <div class="card__body card__body--flush">
         <table class="table">
@@ -119,7 +119,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
                   <span class="chip">{{ item.kind }}</span>
                   <span class="mono">{{ displayPath(item.path, root) }}</span>
                 </div>
-                <div class="tiny faint">{{ item.ecosystem }} · {{ formatCount(item.file_count) }} 个文件</div>
+                <div class="tiny faint">{{ item.ecosystem }} · {{ formatCount(item.file_count) }} files</div>
               </td>
               <td class="cell-size">
                 <div class="numeric">{{ formatBytes(item.size_bytes) }}</div>
@@ -135,12 +135,12 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
 
     <div class="actionbar">
       <span :class="selectionCount > 0 ? 'muted' : 'faint'">
-        已选 {{ selectionCount }} 项 · 预计释放 <strong>{{ formatBytes(selectedSummary.bytes) }}</strong>
+        Selected {{ selectionCount }} items · Estimated reclaimable <strong>{{ formatBytes(selectedSummary.bytes) }}</strong>
       </span>
-      <span v-if="selectionCount === 0" class="faint tiny">先在 Worktree 或构建产物页勾选，Safe 项已默认选中</span>
+      <span v-if="selectionCount === 0" class="faint tiny">Select items on the Worktree or Build artifacts page; Safe items are selected by default</span>
       <span style="flex: 1"></span>
-      <button class="btn" :disabled="selectionCount === 0" @click="goTo('worktrees')">调整选择</button>
-      <button class="btn btn--primary" :disabled="selectionCount === 0" @click="goTo('plan')">生成清理计划</button>
+      <button class="btn" :disabled="selectionCount === 0" @click="goTo('worktrees')">Adjust selection</button>
+      <button class="btn btn--primary" :disabled="selectionCount === 0" @click="goTo('plan')">Generate cleanup plan</button>
     </div>
   </div>
 </template>

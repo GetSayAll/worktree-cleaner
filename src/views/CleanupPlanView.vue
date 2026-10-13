@@ -30,21 +30,21 @@ const gates = computed(() => {
   return [
     {
       ok: true,
-      label: `路径校验通过：非空绝对路径、符号链接已解析、无 .. 组件、未指向系统目录（共 ${itemCount} 项）`
+      label: `Path check passed: non-empty absolute paths, symlinks resolved, no .. components, none pointing at system directories (${itemCount} items)`
     },
     {
       ok: plan.value.blockers.length === 0,
       label:
         plan.value.blockers.length === 0
-          ? "白名单检查通过：没有条目命中保护规则"
-          : `白名单命中 ${plan.value.blockers.length} 项，这些条目已被阻断`
+          ? "Whitelist check passed: no item matches a protection rule"
+          : `${plan.value.blockers.length} items matched the whitelist and have been blocked`
     },
     {
       ok: true,
-      label: `重复删除检查通过：${bundledCount.value} 个产物随所属 worktree 一并移除，体积只计一次`
+      label: `Duplicate-deletion check passed: ${bundledCount.value} artifacts are removed with their owning worktree and counted only once`
     },
-    { ok: true, label: "目标身份复核通过：路径、体积、最后修改时间与扫描时一致" },
-    { ok: true, label: "活跃度复核通过：计划生成后没有新的写入" }
+    { ok: true, label: "Target identity re-check passed: path, size, and last-modified time match the scan" },
+    { ok: true, label: "Activity re-check passed: no new writes since the plan was generated" }
   ];
 });
 
@@ -69,38 +69,38 @@ async function copyPlan() {
   <div class="stack">
     <div class="spread">
       <div>
-        <h1>清理计划</h1>
-        <p class="faint tiny">执行前请逐条核对；本页只描述将要做什么，尚未执行任何操作。</p>
+        <h1>Cleanup plan</h1>
+        <p class="faint tiny">Review each item before executing; this page only describes what will happen and has not performed any operation yet.</p>
       </div>
-      <button class="btn" @click="goTo('overview')">返回调整选择</button>
+      <button class="btn" @click="goTo('overview')">Back to adjust selection</button>
     </div>
 
     <div class="stat-grid stat-grid--4">
-      <StatCard label="移除 Worktree" :value="`${plan.worktree_removals.length}`" sub="git worktree remove" />
+      <StatCard label="Remove Worktree" :value="`${plan.worktree_removals.length}`" sub="git worktree remove" />
       <StatCard
-        label="移入废纸篓"
+        label="Move to Trash"
         :value="`${independentMoves.length}`"
-        :sub="`另有 ${bundledCount} 项随 worktree 一并移除`"
+        :sub="`plus ${bundledCount} items removed with their worktree`"
       />
-      <StatCard label="预计释放" tone="accent" :value="formatBytes(plan.total_bytes)" sub="按扫描时测得的体积" />
+      <StatCard label="Estimated reclaimable" tone="accent" :value="formatBytes(plan.total_bytes)" sub="based on sizes measured at scan time" />
       <StatCard
-        label="自动排除"
+        label="Auto-excluded"
         tone="unsafe"
         value-tone
         :value="`${plan.excluded_unsafe}`"
-        sub="不可删除项，未进入计划"
+        sub="Must not delete items are excluded from the plan"
       />
     </div>
 
     <div v-for="blocker in plan.blockers" :key="blocker" class="banner banner--danger">
       <span>✕</span>
-      <span><span class="banner__title">先决条件未通过 · </span>{{ blocker }}</span>
+      <span><span class="banner__title">Precondition failed · </span>{{ blocker }}</span>
     </div>
 
     <div class="card">
       <div class="card__head">
-        <h2>先决条件校验（预演）</h2>
-        <span class="faint tiny">全部通过才会启用「执行清理」</span>
+        <h2>Precondition checks (dry run)</h2>
+        <span class="faint tiny">Cleanup is enabled only when all checks pass</span>
       </div>
       <div class="card__body">
         <div class="gate">
@@ -114,11 +114,11 @@ async function copyPlan() {
 
     <div class="card">
       <div class="card__head">
-        <h2>通道 A · 移除 Worktree</h2>
-        <span class="faint tiny">{{ plan.worktree_removals.length }} 项</span>
+        <h2>Channel A · Remove worktrees</h2>
+        <span class="faint tiny">{{ plan.worktree_removals.length }} items</span>
       </div>
       <div class="card__body">
-        <div v-if="plan.worktree_removals.length === 0" class="faint tiny">没有选中任何 Worktree。</div>
+        <div v-if="plan.worktree_removals.length === 0" class="faint tiny">No worktrees selected.</div>
         <div class="stack stack--tight">
           <div
             v-for="item in plan.worktree_removals"
@@ -129,21 +129,24 @@ async function copyPlan() {
             <div class="plan-item__main">
               <div class="row-wrap">
                 <span class="mono">{{ displayPath(item.path, root) }}</span>
-                <span class="chip">{{ item.branch || "（detached）" }}</span>
-                <span v-if="item.force" class="badge badge--review">需要 --force</span>
-                <span v-else class="badge badge--safe">可直接移除</span>
+                <span class="chip">{{ item.branch || "(detached)" }}</span>
+                <span v-if="item.force" class="badge badge--review">Needs --force</span>
+                <span v-else class="badge badge--safe">Removable directly</span>
               </div>
               <div class="code">{{ item.command }}</div>
               <div v-if="item.force">
                 <div class="field__label">
-                  --force 会同时删除以下未跟踪文件（共 {{ item.untracked_files.length }} 个），
-                  这些文件不在 Git 里，删掉后无法从仓库恢复：
+                  --force also deletes the following untracked files ({{ item.untracked_files.length }} in total),
+                  which are not tracked in Git and cannot be recovered from the repository once deleted:
                 </div>
                 <div class="untracked-list">
                   <div v-for="file in item.untracked_files" :key="file">{{ file }}</div>
                 </div>
               </div>
-              <p v-if="!item.force" class="faint tiny">工作区干净，不会丢失任何未保存内容。</p>
+              <p v-if="item.command.startsWith('git worktree prune')" class="faint tiny">
+                The working directory is already gone. Only the Git metadata is pruned; no files are touched.
+              </p>
+              <p v-else-if="!item.force" class="faint tiny">The working tree is clean; no unsaved content will be lost.</p>
             </div>
             <div class="numeric nowrap faint tiny">{{ formatBytes(item.size_bytes) }}</div>
           </div>
@@ -153,17 +156,17 @@ async function copyPlan() {
 
     <div class="card">
       <div class="card__head">
-        <h2>通道 B · 移入系统废纸篓</h2>
-        <span class="faint tiny">{{ independentMoves.length }} 项 · {{ formatBytes(independentMoves.reduce((s, i) => s + (i.size_bytes ?? 0), 0)) }}</span>
+        <h2>Channel B · Move to system Trash</h2>
+        <span class="faint tiny">{{ independentMoves.length }} items · {{ formatBytes(independentMoves.reduce((s, i) => s + (i.size_bytes ?? 0), 0)) }}</span>
       </div>
       <div class="card__body card__body--flush">
         <table class="table">
           <thead>
             <tr>
-              <th>目录</th>
-              <th class="cell-size">文件数</th>
-              <th class="cell-size">体积</th>
-              <th>可恢复性</th>
+              <th>Directory</th>
+              <th class="cell-size">Files</th>
+              <th class="cell-size">Size</th>
+              <th>Recoverability</th>
             </tr>
           </thead>
           <tbody>
@@ -174,15 +177,15 @@ async function copyPlan() {
                   <span class="mono">{{ displayPath(item.path, root) }}</span>
                 </div>
               </td>
-              <td class="cell-size numeric">{{ item.file_count > 0 ? formatCount(item.file_count) : "未知" }}</td>
+              <td class="cell-size numeric">{{ item.file_count > 0 ? formatCount(item.file_count) : "unknown" }}</td>
               <td class="cell-size numeric">{{ formatBytes(item.size_bytes) }}</td>
               <td class="tiny">
-                <span v-if="item.bundled_with_worktree" class="faint">随 worktree 一并移除</span>
-                <span v-else class="muted">可在废纸篓中找回</span>
+                <span v-if="item.bundled_with_worktree" class="faint">Removed with worktree</span>
+                <span v-else class="muted">Recoverable from Trash</span>
               </td>
             </tr>
             <tr v-if="plan.trash_moves.length === 0">
-              <td colspan="4"><div class="empty">没有选中任何产物目录</div></td>
+              <td colspan="4"><div class="empty">No artifact directories selected</div></td>
             </tr>
           </tbody>
         </table>
@@ -190,22 +193,22 @@ async function copyPlan() {
     </div>
 
     <div v-if="needsAck || needsName" class="card">
-      <div class="card__head"><h2>执行前确认</h2></div>
+      <div class="card__head"><h2>Confirmation before execution</h2></div>
       <div class="card__body stack stack--tight">
         <div v-if="needsAck" class="banner banner--warn">
           <span>⚠</span>
           <span class="stack stack--tight">
-            <span>本次操作满足以下高风险条件，需要手动确认：</span>
+            <span>This operation meets the following high-risk conditions and requires manual confirmation:</span>
             <span v-for="reason in plan.ack_reasons" :key="reason" class="tiny">· {{ reason }}</span>
           </span>
         </div>
         <label v-if="needsAck" class="row-wrap" style="gap: 8px">
           <input v-model="acknowledged" class="check" type="checkbox" />
-          <span>我已确认上面列出的内容，包括 {{ forceItems.length }} 个 Worktree 中被强制删除的未跟踪文件</span>
+          <span>I have reviewed the items listed above, including the untracked files force-deleted in {{ forceItems.length }} worktrees</span>
         </label>
         <div v-if="needsName" class="field">
           <label class="field__label">
-            需键入项目目录名 <span class="mono">{{ projectPath.split("/").pop() }}</span> 才能执行
+            Type the project directory name <span class="mono">{{ projectPath.split("/").pop() }}</span> to proceed
           </label>
           <input v-model="confirmText" class="input input--mono setting-row__control--narrow" style="max-width: 320px" />
         </div>
@@ -214,8 +217,8 @@ async function copyPlan() {
 
     <div v-if="showExport" class="card">
       <div class="card__head">
-        <h2>计划导出（JSON）</h2>
-        <button class="btn btn--ghost" @click="copyPlan">{{ copied ? "已复制" : "复制" }}</button>
+        <h2>Plan export (JSON)</h2>
+        <button class="btn btn--ghost" @click="copyPlan">{{ copied ? "Copied" : "Copy" }}</button>
       </div>
       <div class="card__body">
         <pre class="code">{{ planJson }}</pre>
@@ -224,12 +227,12 @@ async function copyPlan() {
 
     <div class="actionbar">
       <button class="btn btn--ghost" @click="showExport = !showExport">
-        {{ showExport ? "隐藏导出" : "导出计划" }}
+        {{ showExport ? "Hide export" : "Export plan" }}
       </button>
-      <span class="faint tiny">不可删除的 {{ plan.excluded_unsafe }} 项已自动排除，可回到列表查看原因</span>
+      <span class="faint tiny">{{ plan.excluded_unsafe }} must-not-delete items were auto-excluded; return to the list to see why</span>
       <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('artifacts')">返回调整</button>
-      <button class="btn btn--danger btn--lg" :disabled="!canExecute" @click="executeCleanup">执行清理</button>
+      <button class="btn" @click="goTo('artifacts')">Back to adjust</button>
+      <button class="btn btn--danger btn--lg" :disabled="!canExecute" @click="executeCleanup">Run cleanup</button>
     </div>
   </div>
 </template>

@@ -43,14 +43,14 @@ const VIEWS = {
 const currentView = computed(() => VIEWS[view.value]);
 
 const NAV: Array<{ key: ViewKey; label: string }> = [
-  { key: "welcome", label: "项目" },
-  { key: "overview", label: "概览" },
+  { key: "welcome", label: "Project" },
+  { key: "overview", label: "Overview" },
   { key: "worktrees", label: "Worktree" },
-  { key: "artifacts", label: "构建产物" },
-  { key: "plan", label: "清理计划" },
-  { key: "result", label: "执行结果" },
-  { key: "history", label: "历史" },
-  { key: "settings", label: "设置" }
+  { key: "artifacts", label: "Build artifacts" },
+  { key: "plan", label: "Cleanup plan" },
+  { key: "result", label: "Result" },
+  { key: "history", label: "History" },
+  { key: "settings", label: "Settings" }
 ];
 
 const totals = computed(() => ({
@@ -90,7 +90,7 @@ function rescan() {
     <aside class="sidebar">
       <div class="brand">
         <div class="brand__name">Worktree Cleaner</div>
-        <div class="brand__sub">安全清理审计</div>
+        <div class="brand__sub">Safe cleanup audit</div>
       </div>
 
       <nav class="nav">
@@ -108,8 +108,8 @@ function rescan() {
       </nav>
 
       <div class="sidebar__foot">
-        <p class="sidebar__note">扫描阶段只跑 Git 只读命令；删除统一走系统废纸篓，不永久删除。</p>
-        <p class="sidebar__note">v0.1.0 · 界面原型</p>
+        <p class="sidebar__note">The scan phase runs only read-only Git commands; deletions always go to the system Trash and are never permanent.</p>
+        <p class="sidebar__note">v0.1.0 · UI prototype</p>
       </div>
     </aside>
 
@@ -117,18 +117,18 @@ function rescan() {
       <header class="topbar">
         <template v-if="hasSnapshot">
           <span class="topbar__path" :title="projectPath">{{ homePath(projectPath) }}</span>
-          <span v-if="isDemoData" class="badge badge--accent">示例数据</span>
+          <span v-if="isDemoData" class="badge badge--accent">Sample data</span>
           <div class="topbar__group">
-            <span class="badge badge--safe">可删 {{ totals.safe }}</span>
-            <span class="badge badge--review">待确认 {{ totals.review }}</span>
-            <span class="badge badge--unsafe">不可删 {{ totals.unsafe }}</span>
+            <span class="badge badge--safe">Safe {{ totals.safe }}</span>
+            <span class="badge badge--review">Review {{ totals.review }}</span>
+            <span class="badge badge--unsafe">Blocked {{ totals.unsafe }}</span>
           </div>
-          <button class="btn" @click="rescan">重新扫描</button>
-          <button class="btn" @click="resetToWelcome">切换项目</button>
+          <button class="btn" @click="rescan">Rescan</button>
+          <button class="btn" @click="resetToWelcome">Switch project</button>
         </template>
         <template v-else>
-          <span class="topbar__path">未选择项目</span>
-          <span class="faint tiny">选择一个仓库开始扫描</span>
+          <span class="topbar__path">No project selected</span>
+          <span class="faint tiny">Pick a repository to start scanning</span>
         </template>
       </header>
 

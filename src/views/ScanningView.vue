@@ -22,7 +22,7 @@ function stageMark(index: number): string {
 <template>
   <div class="scan">
     <div class="stack stack--tight">
-      <h1>正在扫描</h1>
+      <h1>Scanning</h1>
       <p class="mono faint">{{ projectPath }}</p>
     </div>
 
@@ -40,8 +40,8 @@ function stageMark(index: number): string {
       </div>
       <div class="card__foot">
         <div class="spread">
-          <span class="faint tiny">已用时 {{ formatClock(scanState.elapsed) }}</span>
-          <button class="btn" @click="cancelScan">取消</button>
+          <span class="faint tiny">Elapsed {{ formatClock(scanState.elapsed) }}</span>
+          <button class="btn" @click="cancelScan">Cancel</button>
         </div>
       </div>
     </div>
@@ -51,7 +51,7 @@ function stageMark(index: number): string {
     </div>
 
     <p class="faint tiny">
-      单个目录探测有超时，整轮扫描有总预算；预算耗尽会如实报告「未扫完」，并把相关条目判为「需要确认」，不会静默补全。
+      Each directory probe has a timeout and the whole scan has a total budget; if the budget runs out it honestly reports "scan incomplete" and marks the affected items as "Needs review" instead of filling them in silently.
     </p>
   </div>
 </template>

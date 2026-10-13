@@ -1,7 +1,7 @@
 const KB = 1024;
 
 export function formatBytes(bytes: number | null, opts: { approximate?: boolean } = {}): string {
-  if (bytes === null || bytes === undefined) return "未知";
+  if (bytes === null || bytes === undefined) return "unknown";
   const prefix = opts.approximate ? "≥ " : "";
   if (bytes < KB) return `${prefix}${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -20,18 +20,18 @@ export function formatCount(n: number): string {
 }
 
 export function formatRelTime(iso: string | null): string {
-  if (!iso) return "未知";
+  if (!iso) return "unknown";
   const diff = Date.now() - new Date(iso).getTime();
   const days = Math.floor(diff / 86400_000);
   if (days <= 0) {
     const hours = Math.floor(diff / 3600_000);
-    return hours <= 0 ? "刚刚" : `${hours} 小时前`;
+    return hours <= 0 ? "just now" : `${hours} hours ago`;
   }
-  if (days === 1) return "1 天前";
-  if (days < 30) return `${days} 天前`;
+  if (days === 1) return "1 day ago";
+  if (days < 30) return `${days} days ago`;
   const months = Math.floor(days / 30);
-  if (months < 12) return `${months} 个月前`;
-  return `${Math.floor(months / 12)} 年前`;
+  if (months < 12) return `${months} months ago`;
+  return `${Math.floor(months / 12)} years ago`;
 }
 
 export function formatClock(seconds: number): string {
@@ -52,7 +52,7 @@ export function shortenPath(path: string, root: string): string {
 }
 
 export function displayPath(path: string, root: string): string {
-  if (path === root) return `${basename(root)} （主工作区）`;
+  if (path === root) return `${basename(root)} (main worktree)`;
   return shortenPath(path, root);
 }
 

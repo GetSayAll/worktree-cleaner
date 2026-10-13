@@ -1,10 +1,11 @@
-//! 路径校验器的对抗测试。
+//! Adversarial tests for the path validator.
 //!
-//! 两部分：
-//! 1. 语料驱动：`tests/fuzz_corpus/dangerous_paths.txt` 里每一条都必须被拒绝；
-//! 2. 生成式：用确定性伪随机拼出大量路径，断言不变量——
-//!    **任何通过校验的路径必须是绝对路径、不含 NUL、不含 `..` 组件，
-//!    且不是顶层根目录。**
+//! Two parts:
+//! 1. Corpus-driven: every entry in `tests/fuzz_corpus/dangerous_paths.txt` must be
+//!    rejected;
+//! 2. Generative: build many paths from a deterministic pseudo-random generator and
+//!    assert the invariant — **any path that passes validation must be absolute,
+//!    contain no NUL, contain no `..` component, and not be a top-level root.**
 
 use std::path::{Component, Path, PathBuf};
 
@@ -12,7 +13,7 @@ use worktree_core::{validate_path_for_deletion, DeletionContext};
 
 const CORPUS: &str = include_str!("fuzz_corpus/dangerous_paths.txt");
 
-/// 语料条数的下限（P0 验收标准：≥ 60 条）。
+/// Lower bound on the number of corpus entries (P0 acceptance criterion: ≥ 60).
 const MIN_CORPUS_ENTRIES: usize = 60;
 
 fn corpus_entries() -> Vec<&'static str> {
@@ -29,7 +30,7 @@ fn corpus_is_large_enough() {
     let entries = corpus_entries();
     assert!(
         entries.len() >= MIN_CORPUS_ENTRIES,
-        "对抗语料至少需要 {MIN_CORPUS_ENTRIES} 条，当前 {} 条",
+        "the adversarial corpus needs at least {MIN_CORPUS_ENTRIES} entries, currently {}",
         entries.len()
     );
 }
@@ -45,32 +46,36 @@ fn every_corpus_entry_is_rejected() {
     }
     assert!(
         accepted.is_empty(),
-        "以下语料条目本应被拒绝却通过了校验：{:#?}",
+        "the following corpus entries should have been rejected but passed validation: {:#?}",
         accepted
     );
 }
 
 #[test]
 fn corpus_covers_each_required_category() {
-    // 语料必须覆盖 P0 验收要求声明过的类别，避免后续被悄悄删空。
+    // The corpus must cover the categories claimed by the P0 acceptance requirements,
+    // so they cannot be silently emptied later.
     let joined = corpus_entries().join("\n");
     for needle in ["/", "..", "/System", "/etc", "/usr"] {
         assert!(
             joined.contains(needle),
-            "语料应当覆盖类别：{needle}"
+            "the corpus should cover the category: {needle}"
         );
     }
     assert!(
         corpus_entries().iter().any(|entry| entry.contains('\t')),
-        "语料应当包含控制字符用例"
+        "the corpus should include a control-character case"
     );
     assert!(
-        corpus_entries().iter().any(|entry| !Path::new(entry).is_absolute()),
-        "语料应当包含相对路径用例"
+        corpus_entries()
+            .iter()
+            .any(|entry| !Path::new(entry).is_absolute()),
+        "the corpus should include a relative-path case"
     );
 }
 
-/// 确定性伪随机数发生器（xorshift64*），避免为一个属性测试引入额外依赖。
+/// Deterministic pseudo-random generator (xorshift64*), to avoid pulling in an extra
+/// dependency for a single property test.
 struct XorShift(u64);
 
 impl XorShift {
@@ -89,9 +94,32 @@ impl XorShift {
 }
 
 const TOKENS: &[&str] = &[
-    "..", ".", "a", "bb", "etc", "System", "usr", "usr/local", "bin", "tmp", "Users", "andy",
-    "MySrc", "node_modules", "target", "dev", "var", "db", "db", "Library", "Extensions",
-    "name..files", " ", "\t", "\0", "passwd",
+    "..",
+    ".",
+    "a",
+    "bb",
+    "etc",
+    "System",
+    "usr",
+    "usr/local",
+    "bin",
+    "tmp",
+    "Users",
+    "andy",
+    "MySrc",
+    "node_modules",
+    "target",
+    "dev",
+    "var",
+    "db",
+    "db",
+    "Library",
+    "Extensions",
+    "name..files",
+    " ",
+    "\t",
+    "\0",
+    "passwd",
 ];
 
 fn random_candidate(rng: &mut XorShift) -> PathBuf {
@@ -122,33 +150,47 @@ fn accepted_paths_always_satisfy_the_invariant() {
         };
         accepted += 1;
 
-        // 契约：通过校验的原始路径必须是绝对路径、不含 NUL、不含 `..` 组件。
-        assert!(candidate.is_absolute(), "放行了相对路径：{:?}", candidate);
+        // Contract: the raw path that passes validation must be absolute, contain no
+        // NUL, and contain no `..` component.
+        assert!(
+            candidate.is_absolute(),
+            "accepted a relative path: {:?}",
+            candidate
+        );
         assert!(
             !candidate.to_string_lossy().contains('\0'),
-            "放行了含 NUL 的路径：{:?}",
+            "accepted a path containing NUL: {:?}",
             candidate
         );
         assert!(
             !candidate
                 .components()
                 .any(|component| matches!(component, Component::ParentDir)),
-            "放行了含 .. 组件的路径：{:?}",
+            "accepted a path containing a .. component: {:?}",
             candidate
         );
 
-        // 归一化后的目标同样必须满足，且不能是顶层根。
+        // The normalised target must satisfy the same constraints, and must not be a
+        // top-level root.
         let target = validated.as_path();
-        assert!(target.is_absolute(), "归一化结果不是绝对路径：{:?}", target);
+        assert!(
+            target.is_absolute(),
+            "normalised result is not an absolute path: {:?}",
+            target
+        );
         assert!(
             target.components().count() > 2,
-            "放行了顶层根目录：{:?}",
+            "accepted a top-level root: {:?}",
             target
         );
     }
 
-    // 生成器必须真的既产生拒绝也产生通过，否则这个测试没有意义。
-    assert!(accepted > 100, "生成式测试放行样本过少（{accepted} 条），用例可能失效");
+    // The generator must genuinely produce both rejections and acceptances, otherwise
+    // this test is meaningless.
+    assert!(
+        accepted > 100,
+        "the generative test accepted too few samples ({accepted}), the case may be ineffective"
+    );
 }
 
 #[test]
@@ -161,7 +203,7 @@ fn generated_paths_never_accept_control_characters() {
             let rendered = candidate.to_string_lossy();
             assert!(
                 !rendered.chars().any(|c| c == '\0' || c.is_control()),
-                "放行了含控制字符的路径：{:?}",
+                "accepted a path containing control characters: {:?}",
                 candidate
             );
         }
