@@ -46,7 +46,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
 </script>
 
 <template>
-  <div class="stack">
+  <div class="stack page--reading">
     <div class="spread">
       <div>
         <h1>{{ messages.overview.title }}</h1>

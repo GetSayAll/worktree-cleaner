@@ -68,7 +68,7 @@ const logFailure = computed(() => {
 </script>
 
 <template>
-  <div class="stack">
+  <div class="stack page--wide">
     <div class="spread">
       <div>
         <h1>{{ messages.result.title }}</h1>

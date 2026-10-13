@@ -14,10 +14,20 @@ interface Block {
   declarations: Record<string, string>;
 }
 
-/** Flattens `selector { declarations }` pairs; nested blocks keep their outer text. */
-function parseBlocks(css: string): Block[] {
+/**
+ * Flattens `selector { declarations }` pairs; nested blocks keep their outer text.
+ *
+ * Comments are stripped first. Without that, a comment sitting between a
+ * declaration and the next one is read as the start of that declaration's name
+ * and the token silently vanishes from the parsed set — which is how a comment
+ * on `--sp-7` took `--shadow` out of this test's view while the stylesheet itself
+ * stayed perfectly valid. A comment before a selector leaked into the selector
+ * text for the same reason. Both failures were invisible in the browser.
+ */
+function parseBlocks(source: string): Block[] {
+  const withoutComments = source.replace(/\/\*[\s\S]*?\*\//g, " ");
   const blocks: Block[] = [];
-  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+  for (const match of withoutComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     const declarations: Record<string, string> = {};
     for (const entry of match[2].split(";")) {
       const colon = entry.indexOf(":");
@@ -60,7 +70,6 @@ function block(predicate: (selector: string) => boolean, label: string): Block {
   if (!found) throw new Error(`no CSS block found for ${label}`);
   return found;
 }
-
 const light = block((selector) => selector === ":root", "the light :root block");
 const mediaDark = block(
   (selector) => selector.includes(':root:not([data-theme="light"])'),
@@ -109,6 +118,42 @@ describe("theme stylesheet", () => {
     // Guards against a "dark" palette that is really the light one.
     expect(mediaDark.declarations["--bg"]).not.toBe(light.declarations["--bg"]);
     expect(mediaDark.declarations["--text"]).not.toBe(light.declarations["--text"]);
+  });
+
+  it("keeps the spacing scale out of the dark overrides", () => {
+    // The scale is layout, not palette: overriding it per theme would make two
+    // dark modes space a page differently from each other.
+    for (const block of [mediaDark, attributeDark]) {
+      for (const name of Object.keys(light.declarations).filter((n) => n.startsWith("--sp-"))) {
+        expect(block.declarations, `${name} must not be a theme token`).not.toHaveProperty(name);
+      }
+    }
+  });
+
+  it("reads every token the stylesheet declares", () => {
+    // A guard on the guard. `parseBlocks` had no notion of comments, so one
+    // sitting between two declarations was read as the start of the next
+    // declaration's name and the token vanished from the parsed set — `--shadow`
+    // went missing while a spacing scale was being added, and the only symptom
+    // was a failure far from the cause. It strips comments now; this asserts the
+    // strip holds in both directions.
+    //
+    // Read from the source text rather than from `parseBlocks`, so the two sides
+    // are genuinely independent. Only the light block: the dark ones are checked
+    // against it by the tests above. A scan of the whole file would pick up
+    // `--primary` in `.btn--primary`, which is a class modifier, not a token.
+    const body = atRuleBody(":root {");
+    const written = [...body.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((match) => match[1]);
+    expect(written.length, "the light block declares no tokens at all?").toBeGreaterThan(0);
+    for (const name of new Set(written)) {
+      expect(light.declarations, `${name} is declared but unreadable`).toHaveProperty(name);
+    }
+
+    // And nothing parsed carries a comment or a fragment in its name. Ordinary
+    // properties (`color-scheme`) live alongside the tokens and are left alone.
+    for (const name of Object.keys(light.declarations).filter((n) => n.startsWith("-"))) {
+      expect(name, "a parsed token name must be a bare identifier").toMatch(/^--[a-z0-9-]+$/);
+    }
   });
 
   it("keeps the OS-preference palette inside its media query", () => {

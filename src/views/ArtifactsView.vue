@@ -90,7 +90,7 @@ function sizeText(item: ArtifactRecord): string {
 </script>
 
 <template>
-  <div class="stack">
+  <div class="stack page--wide">
     <div class="spread">
       <h1>{{ messages.artifacts.title }}</h1>
       <span class="faint tiny">{{ " " + messages.artifacts.caption + " " }}</span>

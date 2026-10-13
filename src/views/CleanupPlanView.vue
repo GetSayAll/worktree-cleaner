@@ -116,7 +116,7 @@ async function copyPlan() {
 </script>
 
 <template>
-  <div class="stack">
+  <div class="stack page--reading">
     <div class="spread">
       <div>
         <h1>{{ messages.plan.title }}</h1>

@@ -87,7 +87,7 @@ function stateText(item: WorktreeRecord): string {
 </script>
 
 <template>
-  <div class="stack">
+  <div class="stack page--wide">
     <div class="spread">
       <h1>{{ messages.worktrees.title }}</h1>
       <span class="faint tiny">{{ " " + messages.worktrees.dataSource + " " }}</span>
