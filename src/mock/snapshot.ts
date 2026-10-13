@@ -7,6 +7,7 @@ import type {
   WorktreeRecord
 } from "../types";
 import { assess } from "../types";
+import { messages } from "../i18n";
 
 const DAY = 86400_000;
 
@@ -16,14 +17,18 @@ function daysAgo(days: number): string {
 
 export const mockRoot = "/Users/andy/MySrc/remote-mic-app";
 
+// Scan output, i.e. data rather than UI chrome: the scanner produces the warning
+// text and it travels with the record (development contract D23 / section 3).
+// Only the "Scan incomplete · " label in front of it lives in src/i18n/en.ts.
+const mockScanWarning =
+  "Scanning the .nuxt directory under worktree cursor/perf-audio timed out; the size is recorded as unknown and treated as Needs review.";
+
 export const mockSnapshot: ProjectSnapshot = {
   schema_version: 1,
   root: mockRoot,
   scanned_at: new Date().toISOString(),
   default_branch: "main",
-  warnings: [
-    "Scanning the .nuxt directory under worktree cursor/perf-audio timed out; the size is recorded as unknown and treated as Needs review."
-  ],
+  warnings: [mockScanWarning],
   worktrees: [
     {
       path: mockRoot,
@@ -500,7 +505,7 @@ export const defaultSettings: Settings = {
   per_dir_timeout_sec: 30,
   scan_budget_sec: 600,
   extra_scan_paths: ["~/MySrc", "~/dev", "~/Projects"],
-  whitelist_paths: ["~/MySrc/remote-mic-app--review-locked"],
+  whitelist_paths: [`${mockRoot}--review-locked`],
   protected_branches: ["main", "release/*"],
   recent_projects: [mockRoot, "/Users/andy/MySrc/private-marketing-toolkit", "/Users/andy/MySrc/worktree-cleaner"],
   theme: "system",
@@ -508,10 +513,10 @@ export const defaultSettings: Settings = {
 };
 
 export const scanStages = [
-  { key: "worktrees", label: "Parse Git worktrees", detail: "git worktree list --porcelain" },
-  { key: "status", label: "Check each worktree's status", detail: "status · merge-base · stash · upstream" },
-  { key: "artifacts", label: "Scan build artifacts", detail: "walk a list of artifact kinds within project boundaries" },
-  { key: "verify", label: "Verify and summarize", detail: "activity re-check · reason merge · size rollup" }
+  { key: "worktrees", label: messages.scan.stages.worktrees.label, detail: messages.scan.stages.worktrees.detail },
+  { key: "status", label: messages.scan.stages.status.label, detail: messages.scan.stages.status.detail },
+  { key: "artifacts", label: messages.scan.stages.artifacts.label, detail: messages.scan.stages.artifacts.detail },
+  { key: "verify", label: messages.scan.stages.verify.label, detail: messages.scan.stages.verify.detail }
 ];
 
 export const scanTrace = [

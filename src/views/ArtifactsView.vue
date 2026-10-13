@@ -16,6 +16,7 @@ import {
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import { formatBytes, formatCount, formatRelTime, shortenPath } from "../format";
+import { messages } from "../i18n";
 
 const sortMode = ref<"size" | "time">("size");
 const collapsed = ref<string[]>([]);
@@ -25,7 +26,7 @@ const root = computed(() => snapshot.value?.root ?? "");
 const groups = computed(() => {
   const buckets = new Map<string, ArtifactRecord[]>();
   for (const item of visibleArtifacts.value) {
-    const key = item.worktree_path ?? "(not owned by any worktree)";
+    const key = item.worktree_path ?? messages.artifacts.unowned;
     const list = buckets.get(key) ?? [];
     list.push(item);
     buckets.set(key, list);
@@ -40,7 +41,7 @@ const groups = computed(() => {
     );
     return {
       key,
-      label: key === root.value ? `${shortenPath(key, root.value)} (main worktree)` : shortBounded(key),
+      label: key === root.value ? messages.common.mainWorktree(shortenPath(key, root.value)) : shortBounded(key),
       items,
       bytes: items.reduce((sum, a) => sum + (a.size_bytes ?? 0), 0),
       selectable: items.filter((a) => a.safety.status !== "Unsafe" && bundledOwner(a) === null).map((a) => a.path)
@@ -49,7 +50,7 @@ const groups = computed(() => {
 });
 
 function shortBounded(path: string): string {
-  if (path.startsWith(`${root.value}--`)) return `${path.slice(root.value.length - 1)} (worktree)`;
+  if (path.startsWith(`${root.value}--`)) return messages.artifacts.worktreeSuffix(path.slice(root.value.length - 1));
   return shortenPath(path, root.value);
 }
 
@@ -66,10 +67,10 @@ function groupAllSelected(paths: string[]): boolean {
 }
 
 function gitState(item: ArtifactRecord): string {
-  if (item.git_tracked) return "tracked";
-  if (item.git_ignored) return "ignored";
-  if (item.git_ignored === null) return "unverified";
-  return "untracked";
+  if (item.git_tracked) return messages.artifacts.gitTracked;
+  if (item.git_ignored) return messages.artifacts.gitIgnored;
+  if (item.git_ignored === null) return messages.artifacts.gitUnverified;
+  return messages.artifacts.gitUntracked;
 }
 
 function sizeText(item: ArtifactRecord): string {
@@ -80,25 +81,22 @@ function sizeText(item: ArtifactRecord): string {
 <template>
   <div class="stack">
     <div class="spread">
-      <h1>Build artifacts</h1>
-      <span class="faint tiny">
-        Candidate directory names are only hints; the final call is based on whether it is Git-tracked, whether it contains authored content, and its activity
-      </span>
+      <h1>{{ messages.artifacts.title }}</h1>
+      <span class="faint tiny">{{ " " + messages.artifacts.caption + " " }}</span>
     </div>
 
     <div class="row-wrap">
       <div class="segmented">
-        <button :class="sortMode === 'size' ? 'is-active' : ''" @click="sortMode = 'size'">By size</button>
-        <button :class="sortMode === 'time' ? 'is-active' : ''" @click="sortMode = 'time'">By last activity</button>
+        <button :class="sortMode === 'size' ? 'is-active' : ''" @click="sortMode = 'size'">{{ messages.artifacts.bySize }}</button>
+        <button :class="sortMode === 'time' ? 'is-active' : ''" @click="sortMode = 'time'">{{ messages.artifacts.byLastActivity }}</button>
       </div>
       <div class="row-wrap" style="flex: 1; min-width: 240px">
-        <span class="faint tiny nowrap">Show only larger than</span>
+        <span class="faint tiny nowrap">{{ messages.artifacts.showOnlyLargerThan }}</span>
         <input v-model.number="settings.min_artifact_mb" class="slider" type="range" min="0" max="500" step="10" style="max-width: 200px" />
-        <span class="tiny numeric nowrap">{{ settings.min_artifact_mb }} MB</span>
+        <span class="tiny numeric nowrap">{{ settings.min_artifact_mb }} {{ messages.units.megabytes }}</span>
       </div>
       <span class="faint tiny nowrap">
-        {{ visibleArtifacts.length }} total · Safe {{ statusCount(visibleArtifacts, "Safe") }} · Review
-        {{ statusCount(visibleArtifacts, "Review") }} · Blocked {{ statusCount(visibleArtifacts, "Unsafe") }}
+        {{ messages.artifacts.summary(visibleArtifacts.length, statusCount(visibleArtifacts, "Safe"), statusCount(visibleArtifacts, "Review"), statusCount(visibleArtifacts, "Unsafe")) }}
       </span>
     </div>
 
@@ -107,7 +105,7 @@ function sizeText(item: ArtifactRecord): string {
         <button class="btn btn--ghost" @click="toggleCollapsed(group.key)">
           <span>{{ isCollapsed(group.key) ? "▸" : "▾" }}</span>
           <span class="group-head__path">{{ group.label }}</span>
-          <span class="faint tiny">{{ group.items.length }} items · {{ formatBytes(group.bytes) }}</span>
+          <span class="faint tiny">{{ messages.artifacts.groupMeta(group.items.length, formatBytes(group.bytes)) }}</span>
         </button>
         <span style="flex: 1"></span>
         <label class="row-wrap tiny faint" style="gap: 6px; padding-right: 12px">
@@ -118,7 +116,7 @@ function sizeText(item: ArtifactRecord): string {
             :disabled="group.selectable.length === 0"
             @change="toggleGroupArtifacts(group.selectable, !groupAllSelected(group.selectable))"
           />
-          Select all safe items
+          {{ messages.artifacts.selectAllSafe + " " }}
         </label>
       </div>
 
@@ -135,9 +133,9 @@ function sizeText(item: ArtifactRecord): string {
                     :disabled="item.safety.status === 'Unsafe' || bundledOwner(item) !== null"
                     :title="
                       item.safety.status === 'Unsafe'
-                        ? 'Must not delete items cannot be selected'
+                        ? messages.common.unsafeTooltip
                         : bundledOwner(item) !== null
-                          ? 'Removed together with its owning worktree'
+                          ? messages.artifacts.bundledTitle
                           : ''
                     "
                     @change="toggleArtifact(item.path)"
@@ -147,11 +145,11 @@ function sizeText(item: ArtifactRecord): string {
                   <div class="row-wrap">
                     <span class="chip">{{ item.kind }}</span>
                     <span class="mono">{{ shortenPath(item.path, root) }}</span>
-                    <span v-if="bundledOwner(item) !== null" class="badge badge--neutral">Removed with worktree</span>
+                    <span v-if="bundledOwner(item) !== null" class="badge badge--neutral">{{ messages.artifacts.bundledBadge }}</span>
                   </div>
                   <div class="tiny faint">
-                    {{ item.ecosystem }} · {{ item.file_count > 0 ? `${formatCount(item.file_count)} files` : "file count unknown" }}
-                    <span v-if="item.is_symlink"> · symlink → {{ item.symlink_target }}</span>
+                    {{ item.ecosystem }} · {{ item.file_count > 0 ? messages.units.fileCount(formatCount(item.file_count)) : messages.artifacts.fileCountUnknown }}
+                    <span v-if="item.is_symlink">{{ messages.artifacts.symlink(item.symlink_target ?? "") }}</span>
                   </div>
                 </td>
                 <td class="nowrap tiny">{{ gitState(item) }}</td>
@@ -167,22 +165,21 @@ function sizeText(item: ArtifactRecord): string {
     </div>
 
     <div v-if="groups.length === 0" class="card">
-      <div class="empty">No artifact directories exceed the current size threshold</div>
+      <div class="empty">{{ messages.artifacts.empty }}</div>
     </div>
 
     <div class="actionbar">
       <span class="muted">
-        Selected {{ selectedSummary.artifacts }} artifacts · {{ selectedSummary.worktrees }} worktrees · Estimated reclaimable
-        <strong>{{ formatBytes(selectedSummary.bytes) }}</strong>
+        {{ " " + messages.artifacts.selectedSummary(selectedSummary.artifacts, selectedSummary.worktrees) }} <strong>{{ formatBytes(selectedSummary.bytes) }}</strong>
       </span>
       <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('worktrees')">Back to Worktree</button>
+      <button class="btn" @click="goTo('worktrees')">{{ messages.artifacts.backToWorktrees }}</button>
       <button
         class="btn btn--primary"
         :disabled="selectedSummary.worktrees + selectedSummary.artifacts === 0"
         @click="goTo('plan')"
       >
-        Generate cleanup plan
+        {{ " " + messages.artifacts.generatePlan + " " }}
       </button>
     </div>
   </div>

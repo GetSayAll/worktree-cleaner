@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { cancelScan, projectPath, scanState } from "../state";
 import { scanStages, scanTrace } from "../mock/snapshot";
 import { formatClock } from "../format";
+import { messages } from "../i18n";
 
 const visibleTrace = computed(() => scanTrace.slice(Math.max(0, scanState.traceLine - 4), scanState.traceLine + 1));
 
@@ -22,7 +23,7 @@ function stageMark(index: number): string {
 <template>
   <div class="scan">
     <div class="stack stack--tight">
-      <h1>Scanning</h1>
+      <h1>{{ messages.scan.title }}</h1>
       <p class="mono faint">{{ projectPath }}</p>
     </div>
 
@@ -40,8 +41,8 @@ function stageMark(index: number): string {
       </div>
       <div class="card__foot">
         <div class="spread">
-          <span class="faint tiny">Elapsed {{ formatClock(scanState.elapsed) }}</span>
-          <button class="btn" @click="cancelScan">Cancel</button>
+          <span class="faint tiny">{{ messages.scan.elapsed(formatClock(scanState.elapsed)) }}</span>
+          <button class="btn" @click="cancelScan">{{ messages.scan.cancel }}</button>
         </div>
       </div>
     </div>
@@ -50,8 +51,6 @@ function stageMark(index: number): string {
       <div v-for="line in visibleTrace" :key="line" class="trace__line">{{ line }}</div>
     </div>
 
-    <p class="faint tiny">
-      Each directory probe has a timeout and the whole scan has a total budget; if the budget runs out it honestly reports "scan incomplete" and marks the affected items as "Needs review" instead of filling them in silently.
-    </p>
+    <p class="faint tiny">{{ " " + messages.scan.budgetNote + " " }}</p>
   </div>
 </template>

@@ -1,63 +1,74 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { goTo, lastResult, projectPath, resetToWelcome, resultSummary, snapshot, startScan } from "../state";
+import { computed, ref } from "vue";
+import { goTo, lastResult, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
 import { formatBytes, displayPath } from "../format";
+import { messages } from "../i18n";
 
 const root = computed(() => snapshot.value?.root ?? "");
+const trashNotice = ref(false);
 
 const ACTION_LABEL: Record<string, string> = {
-  "worktree-remove": "Remove Worktree",
-  "trash-move": "Move to Trash",
-  prune: "Clean up metadata"
+  "worktree-remove": messages.common.action.worktreeRemove,
+  "trash-move": messages.common.action.trashMove,
+  prune: messages.common.action.prune
 };
 
 const OUTCOME_LABEL: Record<string, string> = {
-  ok: "Succeeded",
-  skipped: "Skipped",
-  failed: "Failed"
+  ok: messages.common.outcome.ok,
+  skipped: messages.common.outcome.skipped,
+  failed: messages.common.outcome.failed
 };
 
 const okCount = computed(() => lastResult.value.filter((item) => item.result === "ok").length);
+
+// The prototype has no system integration, so this only surfaces a notice. It must
+// not reset the session: an earlier version called resetToWelcome and wiped the
+// results the user is looking at.
+function openTrash() {
+  trashNotice.value = true;
+  window.setTimeout(() => (trashNotice.value = false), 2400);
+}
 </script>
 
 <template>
   <div class="stack">
     <div class="spread">
       <div>
-        <h1>Result</h1>
+        <h1>{{ messages.result.title }}</h1>
         <p class="faint tiny mono">{{ projectPath }}</p>
       </div>
       <div class="row-wrap">
-        <button class="btn" title="Prototype does not call into the system" @click="resetToWelcome">Open Trash</button>
-        <button class="btn" title="Prototype does not call into the system" @click="goTo('history')">Open log</button>
-        <button class="btn btn--primary" @click="startScan(projectPath)">Rescan</button>
+        <button class="btn" :title="messages.result.prototypeTitle" @click="openTrash">{{ messages.result.openTrash }}</button>
+        <button class="btn" :title="messages.result.prototypeTitle" @click="goTo('history')">{{ messages.result.openLog }}</button>
+        <button class="btn btn--primary" @click="startScan(projectPath)">{{ messages.common.rescan }}</button>
+        <span v-if="trashNotice" class="faint tiny">{{ messages.result.trashNotice }}</span>
       </div>
     </div>
 
     <div class="stat-grid stat-grid--4">
-      <StatCard label="Space freed" tone="accent" :value="formatBytes(resultSummary.freed)" sub="includes Trash moves and worktrees" />
-      <StatCard label="Succeeded" tone="safe" value-tone :value="String(okCount)" sub="includes metadata cleanup" />
-      <StatCard label="Moved to Trash" :value="String(resultSummary.trashed)" sub="recoverable from Trash" />
+      <StatCard :label="messages.result.stats.spaceFreed" tone="accent" :value="formatBytes(resultSummary.freed)" :sub="messages.result.stats.spaceFreedSub" />
+      <StatCard :label="messages.result.stats.succeeded" tone="safe" value-tone :value="String(okCount)" :sub="messages.result.stats.succeededSub" />
+      <StatCard :label="messages.result.stats.movedToTrash" :value="String(resultSummary.trashed)" :sub="messages.result.stats.movedToTrashSub" />
       <StatCard
-        label="Skipped / failed"
+        :label="messages.result.stats.skippedFailed"
         :value="String(resultSummary.failed)"
         :tone="resultSummary.failed > 0 ? 'unsafe' : 'plain'"
-        sub="see the table below for reasons"
+        :sub="messages.result.stats.skippedFailedSub"
       />
     </div>
 
     <div class="card">
-      <div class="card__head"><h2>Per-item results</h2></div>
+      <div class="card__head"><h2>{{ messages.result.perItemTitle }}</h2></div>
       <div class="card__body card__body--flush">
         <table class="table">
           <thead>
             <tr>
-              <th>Action</th>
-              <th>Target</th>
-              <th>Detail</th>
-              <th class="cell-outcome">Result</th>
-              <th class="cell-size">Size</th>
+              <th>{{ messages.result.columns.action }}</th>
+              <th>{{ messages.result.columns.target }}</th>
+              <th>{{ messages.result.columns.detail }}</th>
+              <th class="cell-outcome">{{ messages.result.columns.result }}</th>
+              <th class="cell-size">{{ messages.result.columns.size }}</th>
             </tr>
           </thead>
           <tbody>
@@ -71,23 +82,23 @@ const okCount = computed(() => lastResult.value.filter((item) => item.result ===
               <td class="cell-size numeric">{{ formatBytes(item.size_bytes) }}</td>
             </tr>
             <tr v-if="lastResult.length === 0">
-              <td colspan="5"><div class="empty">No execution records</div></td>
+              <td colspan="5"><div class="empty">{{ messages.result.empty }}</div></td>
             </tr>
           </tbody>
         </table>
       </div>
       <div class="card__foot">
         <span class="faint tiny">
-          Failed items do not affect the others; every action is written to the local operation log. Deletions are not permanent, and directory targets can be recovered from Trash.
+          {{ " " + messages.result.footer + " " }}
         </span>
       </div>
     </div>
 
     <div class="actionbar">
-      <span class="muted">Cleanup complete; rescan to confirm the result</span>
+      <span class="muted">{{ messages.result.complete }}</span>
       <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('history')">View history</button>
-      <button class="btn btn--primary" @click="goTo('overview')">Back to overview</button>
+      <button class="btn" @click="goTo('history')">{{ messages.result.viewHistory }}</button>
+      <button class="btn btn--primary" @click="goTo('overview')">{{ messages.result.backToOverview }}</button>
     </div>
   </div>
 </template>

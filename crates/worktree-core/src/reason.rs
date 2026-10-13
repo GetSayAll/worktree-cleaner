@@ -145,11 +145,6 @@ impl ReasonCode {
             ReasonCode::AfRebuildable => "af.rebuildable",
         }
     }
-
-    /// Whether the reason belongs to a worktree decision or an artifact decision.
-    pub fn is_worktree(self) -> bool {
-        self.as_str().starts_with("wt.")
-    }
 }
 
 /// A single decision reason. All four fields are required (D9):
@@ -214,10 +209,34 @@ impl Reason {
 }
 
 /// A set of reasons together with the overall level derived from them.
+///
+/// The level is always **derived** from `reasons` and never scored independently (D2),
+/// so deserialization recomputes it instead of trusting an incoming `status`: a payload
+/// such as `{"status":"Safe","reasons":[{"severity":"Unsafe", ...}]}` would otherwise
+/// let a consumer that trusts `status` get a wrong answer. Serialization is unchanged.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "SafetyAssessmentRepr")]
 pub struct SafetyAssessment {
     pub status: SafetyStatus,
     pub reasons: Vec<Reason>,
+}
+
+/// Deserialization shape for [`SafetyAssessment`]. It accepts the wire `status` field
+/// (so the JSON shape stays the same) but the value is discarded and recomputed.
+#[derive(Deserialize)]
+struct SafetyAssessmentRepr {
+    status: SafetyStatus,
+    reasons: Vec<Reason>,
+}
+
+impl From<SafetyAssessmentRepr> for SafetyAssessment {
+    fn from(repr: SafetyAssessmentRepr) -> Self {
+        // The incoming `status` is read only to consume the field; the authoritative
+        // level is recomputed from `reasons` (D2).
+        let SafetyAssessmentRepr { status, reasons } = repr;
+        let _ = status;
+        Self::from_reasons(reasons)
+    }
 }
 
 impl SafetyAssessment {
@@ -237,10 +256,6 @@ impl SafetyAssessment {
     /// Convenience constructor: a single-item decision.
     pub fn single(reason: Reason) -> Self {
         Self::from_reasons(vec![reason])
-    }
-
-    pub fn is_safe(&self) -> bool {
-        self.status == SafetyStatus::Safe
     }
 
     pub fn is_unsafe(&self) -> bool {
@@ -373,6 +388,63 @@ mod tests {
         let back: Reason = serde_json::from_str(&json).expect("deserialize reason");
         assert_eq!(reason, back);
         assert!(json.contains("\"af.cannot_verify\""));
+    }
+
+    #[test]
+    fn assessment_serializes_with_status_and_reasons() {
+        // The wire shape is unchanged by the `from` deserializer: the same two keys.
+        let assessment = SafetyAssessment::single(Reason::blocking(
+            ReasonCode::WtDirty,
+            "has uncommitted changes",
+            "3 files have uncommitted changes",
+        ));
+        let json = serde_json::to_value(&assessment).expect("serialize assessment");
+        assert_eq!(json["status"], "Unsafe");
+        assert!(json["reasons"].is_array());
+        assert_eq!(json.as_object().map(|object| object.len()), Some(2));
+    }
+
+    #[test]
+    fn deserialization_recomputes_status_from_reasons() {
+        // D2: the level is derived, never scored independently. A payload whose `status`
+        // disagrees with its reasons must come back with the recomputed level, so a
+        // consumer that trusts `status` cannot be misled.
+        let payload = r#"{
+            "status": "Safe",
+            "reasons": [
+                {
+                    "code": "wt.dirty",
+                    "severity": "Unsafe",
+                    "text": "has uncommitted changes",
+                    "evidence": "3 files have uncommitted changes"
+                }
+            ]
+        }"#;
+        let assessment: SafetyAssessment =
+            serde_json::from_str(payload).expect("deserialize assessment");
+        assert_eq!(assessment.status, SafetyStatus::Unsafe);
+        assert_eq!(assessment.reasons.len(), 1);
+        assert!(assessment.is_unsafe());
+    }
+
+    #[test]
+    fn deserialization_of_an_honest_payload_matches_from_reasons() {
+        let original = SafetyAssessment::from_reasons(vec![
+            Reason::safe(
+                ReasonCode::WtClean,
+                "clean working tree",
+                "no uncommitted changes",
+            ),
+            Reason::review(
+                ReasonCode::WtRecentActivity,
+                "changed within the last 7 days",
+                "last activity: 2 days ago",
+            ),
+        ]);
+        let json = serde_json::to_string(&original).expect("serialize assessment");
+        let back: SafetyAssessment = serde_json::from_str(&json).expect("deserialize assessment");
+        assert_eq!(original, back);
+        assert_eq!(back.status, SafetyStatus::Review);
     }
 
     #[test]

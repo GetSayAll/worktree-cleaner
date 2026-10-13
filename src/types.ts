@@ -1,3 +1,5 @@
+import { messages } from "./i18n";
+
 export type SafetyStatus = "Safe" | "Review" | "Unsafe";
 
 export type ReasonCode =
@@ -152,11 +154,7 @@ export interface Settings {
   require_project_name: boolean;
 }
 
-export const STATUS_LABEL: Record<SafetyStatus, string> = {
-  Safe: "Safe to delete",
-  Review: "Needs review",
-  Unsafe: "Must not delete"
-};
+export const STATUS_LABEL: Record<SafetyStatus, string> = messages.status.label;
 
 export const SEVERITY_RANK: Record<SafetyStatus, number> = {
   Safe: 0,
@@ -164,10 +162,20 @@ export const SEVERITY_RANK: Record<SafetyStatus, number> = {
   Unsafe: 2
 };
 
+/**
+ * Derive a safety assessment from a set of reasons: the level is the most severe
+ * one (D2), and an empty list is `Review`, never `Safe` (D3 — silence without
+ * evidence cannot be called safe).
+ *
+ * This helper exists **only** to build the mock snapshot in `src/mock/snapshot.ts`.
+ * Production code must consume the `status` produced by the scanner
+ * (`crates/worktree-core/src/reason.rs`, `from_reasons`) instead of recomputing it
+ * here: two implementations of the same rule will drift.
+ */
 export function assess(reasons: Reason[]): SafetyAssessment {
   const status = reasons.reduce<SafetyStatus>(
     (worst, reason) => (SEVERITY_RANK[reason.severity] > SEVERITY_RANK[worst] ? reason.severity : worst),
-    "Safe"
+    reasons.length === 0 ? "Review" : "Safe"
   );
   return { status, reasons };
 }

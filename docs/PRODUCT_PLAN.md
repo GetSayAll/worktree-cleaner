@@ -131,7 +131,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 
 **High-risk confirmation**
 
-- When `--force` appears, or the number of deleted items exceeds a threshold (default 5), or the space released in a single run exceeds a threshold (default 10 GB), the user must manually check "I have confirmed the contents listed above".
+- When `--force` appears, or the number of independently deleted items reaches a threshold (default 5), or the space released in a single run exceeds a threshold (default 10 GB), the user must manually check "I have confirmed the contents listed above". Artifacts that disappear together with a worktree do not count towards the item threshold.
 - Optional strong protection (a setting, off by default): the user must type the project directory name into the input field to enable "Execute".
 
 **Export**: export the plan as plain text / JSON, for prior manual review or script-based auditing.

@@ -7,11 +7,13 @@ import {
   executeCleanup,
   goTo,
   projectPath,
+  selectedWorktrees,
   settings,
   snapshot
 } from "../state";
 import StatCard from "../components/StatCard.vue";
-import { formatBytes, formatCount, displayPath } from "../format";
+import { basename, displayPath, formatBytes, formatCount, isAbsolutePath, normalizePathKey } from "../format";
+import { messages } from "../i18n";
 
 const showExport = ref(false);
 const copied = ref(false);
@@ -24,32 +26,68 @@ const independentMoves = computed(() => plan.value.trash_moves.filter((item) => 
 const forceItems = computed(() => plan.value.worktree_removals.filter((item) => item.force));
 const needsAck = computed(() => plan.value.ack_reasons.length > 0);
 const needsName = computed(() => settings.require_project_name);
+const projectName = computed(() => basename(projectPath.value));
+
+/** Paths the plan is about to touch, used by the path precondition check. */
+const itemPaths = computed(() => [
+  ...plan.value.worktree_removals.map((item) => item.path),
+  ...independentMoves.value.map((item) => item.path)
+]);
+
+function isVerifiedPath(path: string): boolean {
+  if (!path || path.includes("\0")) return false;
+  if (!isAbsolutePath(path)) return false;
+  return !normalizePathKey(path).split("/").some((segment) => segment === "..");
+}
+
+const pathsVerified = computed(() => itemPaths.value.every(isVerifiedPath));
+
+/**
+ * The plan already marks every artifact owned by a selected worktree as bundled;
+ * this re-derives the marking from the snapshot so the gate reflects the data
+ * rather than a constant.
+ */
+const dedupOk = computed(() =>
+  plan.value.trash_moves.every((move) => {
+    const owner = snapshot.value?.artifacts.find((item) => item.path === move.path)?.worktree_path ?? null;
+    const bundled = owner !== null && selectedWorktrees.value.includes(owner);
+    return bundled === (move.bundled_with_worktree !== null);
+  })
+);
 
 const gates = computed(() => {
   const itemCount = plan.value.worktree_removals.length + independentMoves.value.length;
   return [
     {
-      ok: true,
-      label: `Path check passed: non-empty absolute paths, symlinks resolved, no .. components, none pointing at system directories (${itemCount} items)`
+      ok: pathsVerified.value,
+      pending: false,
+      label: messages.plan.checks.pathCheck(itemCount)
     },
     {
       ok: plan.value.blockers.length === 0,
+      pending: false,
       label:
         plan.value.blockers.length === 0
-          ? "Whitelist check passed: no item matches a protection rule"
-          : `${plan.value.blockers.length} items matched the whitelist and have been blocked`
+          ? messages.plan.checks.whitelistPassed
+          : messages.plan.checks.whitelistBlocked(plan.value.blockers.length)
     },
     {
-      ok: true,
-      label: `Duplicate-deletion check passed: ${bundledCount.value} artifacts are removed with their owning worktree and counted only once`
+      ok: dedupOk.value,
+      pending: false,
+      label: messages.plan.checks.duplicateCheck(bundledCount.value)
     },
-    { ok: true, label: "Target identity re-check passed: path, size, and last-modified time match the scan" },
-    { ok: true, label: "Activity re-check passed: no new writes since the plan was generated" }
+    // Target identity and activity cannot be re-checked before execution (D11:
+    // the re-check happens between plan generation and execution); say so instead
+    // of claiming a check that never ran.
+    { ok: false, pending: true, label: messages.plan.checks.identityNotRun },
+    { ok: false, pending: true, label: messages.plan.checks.activityNotRun }
   ];
 });
 
+const hasPlanItems = computed(() => plan.value.worktree_removals.length + plan.value.trash_moves.length > 0);
+
 const canExecute = computed(
-  () => !plan.value.blockers.length && (!needsAck.value || acknowledged.value) && (!needsName.value || confirmText.value.trim() === projectPath.value.split("/").pop())
+  () => hasPlanItems.value && !plan.value.blockers.length && (!needsAck.value || acknowledged.value) && (!needsName.value || confirmText.value.trim() === projectName.value)
 );
 
 const planJson = computed(() => JSON.stringify(plan.value, null, 2));
@@ -69,44 +107,44 @@ async function copyPlan() {
   <div class="stack">
     <div class="spread">
       <div>
-        <h1>Cleanup plan</h1>
-        <p class="faint tiny">Review each item before executing; this page only describes what will happen and has not performed any operation yet.</p>
+        <h1>{{ messages.plan.title }}</h1>
+        <p class="faint tiny">{{ messages.plan.lede }}</p>
       </div>
-      <button class="btn" @click="goTo('overview')">Back to adjust selection</button>
+      <button class="btn" @click="goTo('overview')">{{ messages.plan.backToAdjustSelection }}</button>
     </div>
 
     <div class="stat-grid stat-grid--4">
-      <StatCard label="Remove Worktree" :value="`${plan.worktree_removals.length}`" sub="git worktree remove" />
+      <StatCard :label="messages.plan.stats.removeWorktree" :value="`${plan.worktree_removals.length}`" :sub="messages.plan.stats.removeWorktreeSub" />
       <StatCard
-        label="Move to Trash"
+        :label="messages.plan.stats.moveToTrash"
         :value="`${independentMoves.length}`"
-        :sub="`plus ${bundledCount} items removed with their worktree`"
+        :sub="messages.plan.stats.moveToTrashSub(bundledCount)"
       />
-      <StatCard label="Estimated reclaimable" tone="accent" :value="formatBytes(plan.total_bytes)" sub="based on sizes measured at scan time" />
+      <StatCard :label="messages.plan.stats.reclaimable" tone="accent" :value="formatBytes(plan.total_bytes)" :sub="messages.plan.stats.reclaimableSub" />
       <StatCard
-        label="Auto-excluded"
+        :label="messages.plan.stats.autoExcluded"
         tone="unsafe"
         value-tone
         :value="`${plan.excluded_unsafe}`"
-        sub="Must not delete items are excluded from the plan"
+        :sub="messages.plan.stats.autoExcludedSub"
       />
     </div>
 
     <div v-for="blocker in plan.blockers" :key="blocker" class="banner banner--danger">
       <span>✕</span>
-      <span><span class="banner__title">Precondition failed · </span>{{ blocker }}</span>
+      <span><span class="banner__title">{{ messages.plan.blockerTitle }}</span>{{ blocker }}</span>
     </div>
 
     <div class="card">
       <div class="card__head">
-        <h2>Precondition checks (dry run)</h2>
-        <span class="faint tiny">Cleanup is enabled only when all checks pass</span>
+        <h2>{{ messages.plan.checks.title }}</h2>
+        <span class="faint tiny">{{ messages.plan.checks.note }}</span>
       </div>
       <div class="card__body">
         <div class="gate">
           <div v-for="gate in gates" :key="gate.label" class="gate__item">
-            <span class="gate__mark" :class="gate.ok ? 'gate__mark--ok' : 'gate__mark--bad'">{{ gate.ok ? "✓" : "✕" }}</span>
-            <span :class="gate.ok ? 'muted' : ''">{{ gate.label }}</span>
+            <span class="gate__mark" :class="gate.pending ? '' : gate.ok ? 'gate__mark--ok' : 'gate__mark--bad'">{{ gate.pending ? "–" : gate.ok ? "✓" : "✕" }}</span>
+            <span :class="gate.pending ? 'faint' : gate.ok ? 'muted' : ''">{{ gate.label }}</span>
           </div>
         </div>
       </div>
@@ -114,11 +152,11 @@ async function copyPlan() {
 
     <div class="card">
       <div class="card__head">
-        <h2>Channel A · Remove worktrees</h2>
-        <span class="faint tiny">{{ plan.worktree_removals.length }} items</span>
+        <h2>{{ messages.plan.channelA }}</h2>
+        <span class="faint tiny">{{ messages.plan.items(plan.worktree_removals.length) }}</span>
       </div>
       <div class="card__body">
-        <div v-if="plan.worktree_removals.length === 0" class="faint tiny">No worktrees selected.</div>
+        <div v-if="plan.worktree_removals.length === 0" class="faint tiny">{{ messages.plan.noWorktrees }}</div>
         <div class="stack stack--tight">
           <div
             v-for="item in plan.worktree_removals"
@@ -129,24 +167,23 @@ async function copyPlan() {
             <div class="plan-item__main">
               <div class="row-wrap">
                 <span class="mono">{{ displayPath(item.path, root) }}</span>
-                <span class="chip">{{ item.branch || "(detached)" }}</span>
-                <span v-if="item.force" class="badge badge--review">Needs --force</span>
-                <span v-else class="badge badge--safe">Removable directly</span>
+                <span class="chip">{{ item.branch || messages.common.detached }}</span>
+                <span v-if="item.force" class="badge badge--review">{{ messages.plan.needForce }}</span>
+                <span v-else class="badge badge--safe">{{ messages.plan.removable }}</span>
               </div>
               <div class="code">{{ item.command }}</div>
               <div v-if="item.force">
                 <div class="field__label">
-                  --force also deletes the following untracked files ({{ item.untracked_files.length }} in total),
-                  which are not tracked in Git and cannot be recovered from the repository once deleted:
+                  {{ " " + messages.plan.forceNote(item.untracked_files.length) + " " }}
                 </div>
                 <div class="untracked-list">
                   <div v-for="file in item.untracked_files" :key="file">{{ file }}</div>
                 </div>
               </div>
               <p v-if="item.command.startsWith('git worktree prune')" class="faint tiny">
-                The working directory is already gone. Only the Git metadata is pruned; no files are touched.
+                {{ " " + messages.plan.prunableNote + " " }}
               </p>
-              <p v-else-if="!item.force" class="faint tiny">The working tree is clean; no unsaved content will be lost.</p>
+              <p v-else-if="!item.force" class="faint tiny">{{ messages.plan.cleanNote }}</p>
             </div>
             <div class="numeric nowrap faint tiny">{{ formatBytes(item.size_bytes) }}</div>
           </div>
@@ -156,17 +193,17 @@ async function copyPlan() {
 
     <div class="card">
       <div class="card__head">
-        <h2>Channel B · Move to system Trash</h2>
-        <span class="faint tiny">{{ independentMoves.length }} items · {{ formatBytes(independentMoves.reduce((s, i) => s + (i.size_bytes ?? 0), 0)) }}</span>
+        <h2>{{ messages.plan.channelB }}</h2>
+        <span class="faint tiny">{{ messages.plan.trashHeader(independentMoves.length, formatBytes(independentMoves.reduce((s, i) => s + (i.size_bytes ?? 0), 0))) }}</span>
       </div>
       <div class="card__body card__body--flush">
         <table class="table">
           <thead>
             <tr>
-              <th>Directory</th>
-              <th class="cell-size">Files</th>
-              <th class="cell-size">Size</th>
-              <th>Recoverability</th>
+              <th>{{ messages.plan.columns.directory }}</th>
+              <th class="cell-size">{{ messages.plan.columns.files }}</th>
+              <th class="cell-size">{{ messages.plan.columns.size }}</th>
+              <th>{{ messages.plan.columns.recoverability }}</th>
             </tr>
           </thead>
           <tbody>
@@ -177,15 +214,15 @@ async function copyPlan() {
                   <span class="mono">{{ displayPath(item.path, root) }}</span>
                 </div>
               </td>
-              <td class="cell-size numeric">{{ item.file_count > 0 ? formatCount(item.file_count) : "unknown" }}</td>
+              <td class="cell-size numeric">{{ item.file_count > 0 ? formatCount(item.file_count) : messages.common.unknown }}</td>
               <td class="cell-size numeric">{{ formatBytes(item.size_bytes) }}</td>
               <td class="tiny">
-                <span v-if="item.bundled_with_worktree" class="faint">Removed with worktree</span>
-                <span v-else class="muted">Recoverable from Trash</span>
+                <span v-if="item.bundled_with_worktree" class="faint">{{ messages.plan.removedWithWorktree }}</span>
+                <span v-else class="muted">{{ messages.plan.recoverable }}</span>
               </td>
             </tr>
             <tr v-if="plan.trash_moves.length === 0">
-              <td colspan="4"><div class="empty">No artifact directories selected</div></td>
+              <td colspan="4"><div class="empty">{{ messages.plan.noArtifacts }}</div></td>
             </tr>
           </tbody>
         </table>
@@ -193,22 +230,22 @@ async function copyPlan() {
     </div>
 
     <div v-if="needsAck || needsName" class="card">
-      <div class="card__head"><h2>Confirmation before execution</h2></div>
+      <div class="card__head"><h2>{{ messages.plan.confirmationTitle }}</h2></div>
       <div class="card__body stack stack--tight">
         <div v-if="needsAck" class="banner banner--warn">
           <span>⚠</span>
           <span class="stack stack--tight">
-            <span>This operation meets the following high-risk conditions and requires manual confirmation:</span>
+            <span>{{ messages.plan.confirmationIntro }}</span>
             <span v-for="reason in plan.ack_reasons" :key="reason" class="tiny">· {{ reason }}</span>
           </span>
         </div>
         <label v-if="needsAck" class="row-wrap" style="gap: 8px">
           <input v-model="acknowledged" class="check" type="checkbox" />
-          <span>I have reviewed the items listed above, including the untracked files force-deleted in {{ forceItems.length }} worktrees</span>
+          <span>{{ messages.plan.ackConfirm(forceItems.length) }}</span>
         </label>
         <div v-if="needsName" class="field">
           <label class="field__label">
-            Type the project directory name <span class="mono">{{ projectPath.split("/").pop() }}</span> to proceed
+            {{ " " + messages.plan.typeNameBefore }} <span class="mono">{{ projectName }}</span> {{ messages.plan.typeNameAfter + " " }}
           </label>
           <input v-model="confirmText" class="input input--mono setting-row__control--narrow" style="max-width: 320px" />
         </div>
@@ -217,8 +254,8 @@ async function copyPlan() {
 
     <div v-if="showExport" class="card">
       <div class="card__head">
-        <h2>Plan export (JSON)</h2>
-        <button class="btn btn--ghost" @click="copyPlan">{{ copied ? "Copied" : "Copy" }}</button>
+        <h2>{{ messages.plan.exportTitle }}</h2>
+        <button class="btn btn--ghost" @click="copyPlan">{{ copied ? messages.common.copied : messages.plan.copy }}</button>
       </div>
       <div class="card__body">
         <pre class="code">{{ planJson }}</pre>
@@ -227,12 +264,12 @@ async function copyPlan() {
 
     <div class="actionbar">
       <button class="btn btn--ghost" @click="showExport = !showExport">
-        {{ showExport ? "Hide export" : "Export plan" }}
+        {{ showExport ? messages.plan.hideExport : messages.plan.exportPlan }}
       </button>
-      <span class="faint tiny">{{ plan.excluded_unsafe }} must-not-delete items were auto-excluded; return to the list to see why</span>
+      <span class="faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
       <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('artifacts')">Back to adjust</button>
-      <button class="btn btn--danger btn--lg" :disabled="!canExecute" @click="executeCleanup">Run cleanup</button>
+      <button class="btn" @click="goTo('artifacts')">{{ messages.plan.backToAdjust }}</button>
+      <button class="btn btn--danger btn--lg" :disabled="!canExecute" @click="executeCleanup">{{ messages.plan.runCleanup }}</button>
     </div>
   </div>
 </template>

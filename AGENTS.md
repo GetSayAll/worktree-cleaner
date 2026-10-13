@@ -2,14 +2,17 @@
 
 ## Language
 
-**English only.** Everything that lands in this repository is written in English:
-README, commit messages, code comments, documentation, identifiers, and file
-names. This project is an international open-source project, so English is the
-single language of the codebase.
+**Everything that ships as open source is written in English**: README, commit
+messages, code comments, documentation, identifiers, file names, and user-visible
+strings. English is the default and the source locale.
 
-User-visible application strings follow the same rule. English is the default and
-the source locale. Every string a user can see must live in one place so other
-locales can be added later — do not scatter display literals across templates.
+Content that is deliberately kept out of the open-source distribution — local
+working notes, private configuration, internal scratch material — may be written
+in Chinese. `.workbuddy/` is gitignored and is the only such case today.
+
+User-visible application strings live in the message table under `src/i18n/` and
+are read through `src/i18n/index.ts`. Never scatter display literals across
+templates; add them to the table so other locales can be added later.
 
 ## Project rules
 

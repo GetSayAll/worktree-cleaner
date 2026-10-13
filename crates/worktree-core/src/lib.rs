@@ -139,4 +139,95 @@ mod tests {
             );
         }
     }
+
+    fn sample_assessment() -> SafetyAssessment {
+        SafetyAssessment::from_reasons(vec![Reason::review(
+            ReasonCode::WtUnmerged,
+            "not merged into main",
+            "merge-base does not report an ancestor",
+        )])
+    }
+
+    fn sample_worktree() -> WorktreeRecord {
+        WorktreeRecord {
+            path: "/Users/andy/MySrc/proj".to_string(),
+            branch: Some("feature/x".to_string()),
+            head: Some("abc1234".to_string()),
+            is_main: false,
+            is_detached: false,
+            is_locked: false,
+            is_prunable: false,
+            dirty_files: 2,
+            untracked_files: 1,
+            untracked_file_list: vec!["scratch.txt".to_string()],
+            ahead: 1,
+            behind: 0,
+            has_upstream: true,
+            merged_into_default: Some(false),
+            stash_count: 0,
+            last_updated_at: Some("2026-01-01T00:00:00Z".to_string()),
+            agent: Some("codex".to_string()),
+            size_bytes: 1234,
+            safety: sample_assessment(),
+        }
+    }
+
+    fn sample_artifact() -> ArtifactRecord {
+        ArtifactRecord {
+            path: "/Users/andy/MySrc/proj/node_modules".to_string(),
+            kind: "node_modules".to_string(),
+            ecosystem: "node".to_string(),
+            project_root: "/Users/andy/MySrc/proj".to_string(),
+            worktree_path: Some("/Users/andy/MySrc/proj".to_string()),
+            // `None` = unmeasurable, which must survive the round trip as `null` and not
+            // collapse to `0`.
+            size_bytes: None,
+            file_count: 10,
+            last_updated_at: None,
+            git_ignored: Some(true),
+            git_tracked: Some(false),
+            is_symlink: false,
+            symlink_target: None,
+            safety: sample_assessment(),
+        }
+    }
+
+    #[test]
+    fn worktree_record_round_trips_through_json() {
+        let record = sample_worktree();
+        let json = serde_json::to_string(&record).expect("serialize worktree record");
+        assert!(json.contains("\"merged_into_default\":false"));
+        assert!(json.contains("\"safety\""));
+        let back: WorktreeRecord =
+            serde_json::from_str(&json).expect("deserialize worktree record");
+        assert_eq!(record, back);
+    }
+
+    #[test]
+    fn artifact_record_round_trips_through_json() {
+        let record = sample_artifact();
+        let json = serde_json::to_string(&record).expect("serialize artifact record");
+        // An unmeasurable size serializes as null, distinguishable from 0.
+        assert!(json.contains("\"size_bytes\":null"));
+        let back: ArtifactRecord =
+            serde_json::from_str(&json).expect("deserialize artifact record");
+        assert_eq!(record, back);
+    }
+
+    #[test]
+    fn project_snapshot_round_trips_through_json() {
+        let snapshot = ProjectSnapshot {
+            schema_version: SNAPSHOT_SCHEMA_VERSION,
+            root: "/Users/andy/MySrc".to_string(),
+            scanned_at: "2026-01-01T00:00:00Z".to_string(),
+            default_branch: Some("main".to_string()),
+            worktrees: vec![sample_worktree()],
+            artifacts: vec![sample_artifact()],
+            warnings: vec!["size measurement timed out for .nuxt".to_string()],
+        };
+        let json = serde_json::to_string(&snapshot).expect("serialize snapshot");
+        assert!(json.contains("\"schema_version\":1"));
+        let back: ProjectSnapshot = serde_json::from_str(&json).expect("deserialize snapshot");
+        assert_eq!(snapshot, back);
+    }
 }

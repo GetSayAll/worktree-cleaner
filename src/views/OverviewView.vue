@@ -4,6 +4,7 @@ import { artifacts, counts, goTo, primaryReason, selectedSummary, snapshot, work
 import SafetyBadge from "../components/SafetyBadge.vue";
 import StatCard from "../components/StatCard.vue";
 import { formatBytes, formatCount, formatRelTime, displayPath } from "../format";
+import { messages } from "../i18n";
 
 const root = computed(() => snapshot.value?.root ?? "");
 
@@ -29,56 +30,56 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
   <div class="stack">
     <div class="spread">
       <div>
-        <h1>Overview</h1>
-        <p class="faint tiny mono">{{ root }} · default branch {{ snapshot?.default_branch || "unknown" }}</p>
+        <h1>{{ messages.overview.title }}</h1>
+        <p class="faint tiny mono">{{ messages.overview.subtitle(root, snapshot?.default_branch || messages.common.unknown) }}</p>
       </div>
       <div class="row-wrap">
-        <button class="btn" @click="goTo('worktrees')">View Worktree</button>
-        <button class="btn" @click="goTo('artifacts')">View build artifacts</button>
+        <button class="btn" @click="goTo('worktrees')">{{ messages.overview.viewWorktrees }}</button>
+        <button class="btn" @click="goTo('artifacts')">{{ messages.overview.viewArtifacts }}</button>
       </div>
     </div>
 
     <div class="stat-grid stat-grid--4">
       <StatCard
-        label="Safe to delete"
+        :label="messages.overview.stats.safeLabel"
         tone="safe"
         value-tone
         :value="String(counts.worktree.Safe + counts.artifact.Safe)"
-        :sub="`Total ${formatBytes(safeBytes)} · Safe items are selected by default`"
+        :sub="messages.overview.stats.safeSub(formatBytes(safeBytes))"
       />
       <StatCard
-        label="Needs review"
+        :label="messages.overview.stats.reviewLabel"
         tone="review"
         value-tone
         :value="String(reviewCount)"
-        sub="not merged / recently changed / check incomplete"
+        :sub="messages.overview.stats.reviewSub"
       />
       <StatCard
-        label="Must not delete"
+        :label="messages.overview.stats.unsafeLabel"
         tone="unsafe"
         value-tone
         :value="String(unsafeCount)"
-        sub="main worktree / dirty / locked / committed to the repository"
+        :sub="messages.overview.stats.unsafeSub"
       />
       <StatCard
-        label="Estimated reclaimable"
+        :label="messages.overview.stats.reclaimableLabel"
         tone="accent"
         :value="formatBytes(selectedSummary.bytes)"
-        :sub="`Selected ${selectionCount} items · Worktree ${selectedSummary.worktrees} · artifacts ${selectedSummary.artifacts}`"
+        :sub="messages.overview.stats.reclaimableSub(selectionCount, selectedSummary.worktrees, selectedSummary.artifacts)"
       />
     </div>
 
     <div v-for="warning in snapshot?.warnings || []" :key="warning" class="banner banner--warn">
       <span>⚠</span>
       <span>
-        <span class="banner__title">Scan incomplete · </span>{{ warning }}
+        <span class="banner__title">{{ messages.overview.warningTitle }}</span>{{ warning }}
       </span>
     </div>
 
     <div class="card">
       <div class="card__head">
-        <h2>Largest worktrees</h2>
-        <button class="btn btn--ghost" @click="goTo('worktrees')">View all {{ worktrees.length }}</button>
+        <h2>{{ messages.overview.largestWorktrees }}</h2>
+        <button class="btn btn--ghost" @click="goTo('worktrees')">{{ messages.overview.viewAll(worktrees.length) }}</button>
       </div>
       <div class="card__body card__body--flush">
         <table class="table">
@@ -86,10 +87,10 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
             <tr v-for="item in topWorktrees" :key="item.path">
               <td>
                 <div class="mono">{{ displayPath(item.path, root) }}</div>
-                <div class="tiny faint">{{ item.branch || "(detached)" }}{{ item.is_main ? " · main worktree" : "" }}</div>
+                <div class="tiny faint">{{ item.branch || messages.common.detached }}{{ item.is_main ? messages.overview.mainWorktreeSuffix : "" }}</div>
               </td>
               <td class="nowrap">
-                <span class="chip">{{ item.agent || "unknown agent" }}</span>
+                <span class="chip">{{ item.agent || messages.common.unknownAgent }}</span>
               </td>
               <td class="cell-size">
                 <div class="numeric">{{ formatBytes(item.size_bytes) }}</div>
@@ -107,8 +108,8 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
 
     <div class="card">
       <div class="card__head">
-        <h2>Largest build artifacts</h2>
-        <button class="btn btn--ghost" @click="goTo('artifacts')">View all {{ artifacts.length }}</button>
+        <h2>{{ messages.overview.largestArtifacts }}</h2>
+        <button class="btn btn--ghost" @click="goTo('artifacts')">{{ messages.overview.viewAll(artifacts.length) }}</button>
       </div>
       <div class="card__body card__body--flush">
         <table class="table">
@@ -119,7 +120,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
                   <span class="chip">{{ item.kind }}</span>
                   <span class="mono">{{ displayPath(item.path, root) }}</span>
                 </div>
-                <div class="tiny faint">{{ item.ecosystem }} · {{ formatCount(item.file_count) }} files</div>
+                <div class="tiny faint">{{ messages.overview.artifactMeta(item.ecosystem, formatCount(item.file_count)) }}</div>
               </td>
               <td class="cell-size">
                 <div class="numeric">{{ formatBytes(item.size_bytes) }}</div>
@@ -134,13 +135,11 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
     </div>
 
     <div class="actionbar">
-      <span :class="selectionCount > 0 ? 'muted' : 'faint'">
-        Selected {{ selectionCount }} items · Estimated reclaimable <strong>{{ formatBytes(selectedSummary.bytes) }}</strong>
-      </span>
-      <span v-if="selectionCount === 0" class="faint tiny">Select items on the Worktree or Build artifacts page; Safe items are selected by default</span>
+      <span :class="selectionCount > 0 ? 'muted' : 'faint'">{{ " " + messages.overview.selected(selectionCount) }} <strong>{{ formatBytes(selectedSummary.bytes) }}</strong></span>
+      <span v-if="selectionCount === 0" class="faint tiny">{{ messages.overview.selectHint }}</span>
       <span style="flex: 1"></span>
-      <button class="btn" :disabled="selectionCount === 0" @click="goTo('worktrees')">Adjust selection</button>
-      <button class="btn btn--primary" :disabled="selectionCount === 0" @click="goTo('plan')">Generate cleanup plan</button>
+      <button class="btn" :disabled="selectionCount === 0" @click="goTo('worktrees')">{{ messages.overview.adjustSelection }}</button>
+      <button class="btn btn--primary" :disabled="selectionCount === 0" @click="goTo('plan')">{{ messages.overview.generatePlan }}</button>
     </div>
   </div>
 </template>

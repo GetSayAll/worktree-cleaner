@@ -18,6 +18,7 @@ import {
   type ViewKey
 } from "./state";
 import { homePath } from "./format";
+import { messages } from "./i18n";
 import WelcomeView from "./views/WelcomeView.vue";
 import ScanningView from "./views/ScanningView.vue";
 import OverviewView from "./views/OverviewView.vue";
@@ -43,14 +44,14 @@ const VIEWS = {
 const currentView = computed(() => VIEWS[view.value]);
 
 const NAV: Array<{ key: ViewKey; label: string }> = [
-  { key: "welcome", label: "Project" },
-  { key: "overview", label: "Overview" },
-  { key: "worktrees", label: "Worktree" },
-  { key: "artifacts", label: "Build artifacts" },
-  { key: "plan", label: "Cleanup plan" },
-  { key: "result", label: "Result" },
-  { key: "history", label: "History" },
-  { key: "settings", label: "Settings" }
+  { key: "welcome", label: messages.nav.project },
+  { key: "overview", label: messages.nav.overview },
+  { key: "worktrees", label: messages.nav.worktrees },
+  { key: "artifacts", label: messages.nav.artifacts },
+  { key: "plan", label: messages.nav.plan },
+  { key: "result", label: messages.nav.result },
+  { key: "history", label: messages.nav.history },
+  { key: "settings", label: messages.nav.settings }
 ];
 
 const totals = computed(() => ({
@@ -89,8 +90,8 @@ function rescan() {
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand__name">Worktree Cleaner</div>
-        <div class="brand__sub">Safe cleanup audit</div>
+        <div class="brand__name">{{ messages.app.name }}</div>
+        <div class="brand__sub">{{ messages.app.tagline }}</div>
       </div>
 
       <nav class="nav">
@@ -108,8 +109,8 @@ function rescan() {
       </nav>
 
       <div class="sidebar__foot">
-        <p class="sidebar__note">The scan phase runs only read-only Git commands; deletions always go to the system Trash and are never permanent.</p>
-        <p class="sidebar__note">v0.1.0 · UI prototype</p>
+        <p class="sidebar__note">{{ messages.app.readOnlyNote }}</p>
+        <p class="sidebar__note">{{ messages.app.versionNote }}</p>
       </div>
     </aside>
 
@@ -117,18 +118,18 @@ function rescan() {
       <header class="topbar">
         <template v-if="hasSnapshot">
           <span class="topbar__path" :title="projectPath">{{ homePath(projectPath) }}</span>
-          <span v-if="isDemoData" class="badge badge--accent">Sample data</span>
+          <span v-if="isDemoData" class="badge badge--accent">{{ messages.app.sampleData }}</span>
           <div class="topbar__group">
-            <span class="badge badge--safe">Safe {{ totals.safe }}</span>
-            <span class="badge badge--review">Review {{ totals.review }}</span>
-            <span class="badge badge--unsafe">Blocked {{ totals.unsafe }}</span>
+            <span class="badge badge--safe">{{ messages.status.short.Safe }} {{ totals.safe }}</span>
+            <span class="badge badge--review">{{ messages.status.short.Review }} {{ totals.review }}</span>
+            <span class="badge badge--unsafe">{{ messages.status.short.Unsafe }} {{ totals.unsafe }}</span>
           </div>
-          <button class="btn" @click="rescan">Rescan</button>
-          <button class="btn" @click="resetToWelcome">Switch project</button>
+          <button class="btn" @click="rescan">{{ messages.common.rescan }}</button>
+          <button class="btn" @click="resetToWelcome">{{ messages.app.switchProject }}</button>
         </template>
         <template v-else>
-          <span class="topbar__path">No project selected</span>
-          <span class="faint tiny">Pick a repository to start scanning</span>
+          <span class="topbar__path">{{ messages.app.noProject }}</span>
+          <span class="faint tiny">{{ messages.app.pickRepository }}</span>
         </template>
       </header>
 

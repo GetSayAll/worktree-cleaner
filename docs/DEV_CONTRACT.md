@@ -22,9 +22,15 @@ The following content was frozen by these commits and counts as "design agreed":
 Frozen means **the UI structure and the decision semantics are not to be changed
 casually**. The freedom left at the implementation level is described in section 6.
 
-**Baseline commits**: `bdfc990` (product design and UI prototype), `a8e2edc`
+**Baseline commits**: `a45c0ea` (product design and UI prototype), `408db1d`
 (baseline record). Any later change to the files above must state its
 justification in the commit message (change control is in section 6).
+
+The five local commits made before the language convention was adopted were
+rewritten so that every commit message is English. Their content is unchanged —
+the tree hash is `f4928e0c1cb52b73eab087ada3232e0679feae4c` both before and after
+the rewrite. The earlier hashes map as bdfc990 → a45c0ea, a8e2edc → 408db1d,
+3fe4d9f → db2a517, a215f63 → 5f6f87c, 29a982c → 6f39c30.
 
 **Form-factor change record (2026-10-11)**: the delivery form was extended from
 "a Tauri desktop application" to "Form A read-only report → Form B local daemon +
@@ -33,9 +39,10 @@ same change added D17–D22, reworked the P2–P6 stages (section 5) and settled
 dependency-fix question that section 7 previously listed as open.
 
 **Language rule (2026-10-11)**: the project is an international open-source
-project, so the repository is English-only. See D23. The rule covers everything
-committed to the repository; the local agent notes under `.workbuddy/` are not
-committed and are outside its scope.
+project, so everything that ships as open source is English. See D23. Content that
+is deliberately kept out of the open-source distribution may be written in
+Chinese; the local notes under `.workbuddy/` are gitignored and are the only such
+case today.
 
 ---
 
@@ -68,7 +75,7 @@ bug. D17–D23 are form-factor and repository-wide constraints.
 | D20 | `snapshot.json` must carry `schema_version` and is the only contract between the CLI and the web page. On a higher version the page must say the viewer needs an upgrade; it must never guess at fields | Once published, an interface cannot assume both ends upgrade together | Round-trip test on the contract; feed a higher version and assert a clear error |
 | D21 | No form may weaken the existing constraints: D5 (Trash only) and D6 (`git worktree remove` only) hold in every form | Changing the form is not a reason to relax safety | One verification record per form, each covering D5 and D6 |
 | D22 | The report web page must open with no network and no server (assets inlined) and must not introduce a runtime backend dependency | The availability of a read-only form should not depend on the environment | Open it offline over `file://` and complete a full review |
-| D23 | **English only.** Every artifact committed to this repository is written in English: code, comments, identifiers, documentation, commit messages, file names, and user-visible strings. English is the default and the source locale | This is an international open-source project; a mixed-language repository is not reviewable by the community it targets | Repository scan for non-ASCII natural language outside fixtures; new commits read in English |
+| D23 | **English for everything that ships as open source.** Code, comments, identifiers, documentation, commit messages, file names, and user-visible strings in the repository are English, and English is the default and the source locale. Content deliberately kept out of the open-source distribution may be written in Chinese | This is an international open-source project; a mixed-language repository is not reviewable by the community it targets | A scan of tracked files finds no non-English natural language; every commit message reads in English |
 
 ---
 
@@ -126,6 +133,10 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   user-visible strings are all English (D23). Commit messages are written as
   `type(scope): short imperative summary`, followed by a body explaining what
   changed and why.
+- User-visible strings live in `src/i18n/en.ts` and are read through
+  `src/i18n/index.ts`, which is the single swap point for adding a locale. Domain
+  text produced by the scanner (a reason's `text` and `evidence`) is data rather
+  than UI chrome and stays with the record.
 - File names are English, lowercase, and use `kebab-case` for docs and scripts.
   Rust and TypeScript files follow their ecosystem conventions (`snake_case` for
   Rust modules, `PascalCase.vue` for components).
@@ -323,9 +334,14 @@ message):
    prototype passes its interaction check.
 2. **Delivery form**: "Form A read-only report → Form B local daemon + browser →
    Form C Tauri desktop shell (optional)". **A hosted SaaS form is not built.**
-3. **`.workbuddy/`**: stays local and is not committed.
+3. **`.workbuddy/`**: gitignored and never committed.
 4. **Single-file prototype**: not committed (`dist/` is gitignored); it is
    reproducible through `scripts/build-preview.mjs`.
+5. **UI strings (done)**: all user-visible strings were extracted into
+   `src/i18n/en.ts`, read through the single swap point in `src/i18n/index.ts`.
+   No locale switch ships yet; adding one means changing only that binding.
+6. **Commit history (done)**: the five local commits made before D23 were rewritten
+   in English with their content unchanged. Every commit from now on is English.
 
 **Open**
 
@@ -336,9 +352,9 @@ message):
    (single binary) or as a separate executable.
 3. **Where `snapshot.json` is written**: stdout or a conventional default path, and
    the artifact naming rule for CI.
-4. **UI localisation depth**: whether the English UI ships with a string table and a
-   locale switch from day one, or only with centralised strings so locales can be
-   added later.
-5. **The five commits made before D23**: their messages are in Chinese. Rewriting
-   local history is possible because nothing has been pushed, but it requires an
-   explicit decision.
+4. **How reason text becomes localisable**: a reason currently carries final English
+   `text` produced by the scanner. For other locales the UI would need to map the
+   stable `code` to a localised template and treat `evidence` as data. Decide before
+   a second locale is added.
+5. **Locale switch**: whether to ship a language picker in the settings page once a
+   second locale exists.

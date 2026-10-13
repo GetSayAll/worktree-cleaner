@@ -12,6 +12,8 @@ import type {
   WorktreeRemovalItem
 } from "./types";
 import { SEVERITY_RANK } from "./types";
+import { messages } from "./i18n";
+import { pathMatchesRule } from "./format";
 import {
   defaultSettings,
   mockHistory,
@@ -33,18 +35,16 @@ export type ViewKey =
   | "settings";
 
 export const VIEW_LABEL: Record<ViewKey, string> = {
-  welcome: "Project",
-  scanning: "Scan",
-  overview: "Overview",
-  worktrees: "Worktree",
-  artifacts: "Build artifacts",
-  plan: "Cleanup plan",
-  result: "Result",
-  history: "History",
-  settings: "Settings"
+  welcome: messages.nav.project,
+  scanning: messages.nav.scan,
+  overview: messages.nav.overview,
+  worktrees: messages.nav.worktrees,
+  artifacts: messages.nav.artifacts,
+  plan: messages.nav.plan,
+  result: messages.nav.result,
+  history: messages.nav.history,
+  settings: messages.nav.settings
 };
-
-const WORKTREE_VIEWS: ViewKey[] = ["worktrees", "artifacts", "plan", "result", "history", "settings"];
 
 export const view = ref<ViewKey>("welcome");
 export const projectPath = ref("");
@@ -153,7 +153,7 @@ export function canOpen(key: ViewKey): boolean {
   return snapshot.value !== null;
 }
 
-function applyDefaultSelection() {
+export function applyDefaultSelection() {
   const snap = snapshot.value;
   if (!snap) return;
   selectedWorktrees.value = snap.worktrees.filter((w) => w.safety.status === "Safe").map((w) => w.path);
@@ -161,6 +161,9 @@ function applyDefaultSelection() {
     .filter((a) => a.safety.status === "Safe")
     .filter((a) => (a.size_bytes ?? 0) >= settings.min_artifact_mb * 1024 * 1024)
     .map((a) => a.path);
+  // Artifacts inside a worktree that is also selected are removed with it; drop
+  // them here so `selectedSummary` and `cleanupPlan` never disagree.
+  pruneBundledArtifacts();
 }
 
 export function isSelectedWorktree(path: string): boolean {
@@ -240,7 +243,12 @@ export const worktrees = computed<WorktreeRecord[]>(() => snapshot.value?.worktr
 export const artifacts = computed<ArtifactRecord[]>(() => snapshot.value?.artifacts ?? []);
 
 export const visibleArtifacts = computed<ArtifactRecord[]>(() =>
-  artifacts.value.filter((a) => (a.size_bytes ?? 0) >= settings.min_artifact_mb * 1024 * 1024 || a.safety.status === "Unsafe")
+  artifacts.value.filter(
+    (a) =>
+      a.size_bytes === null ||
+      a.size_bytes >= settings.min_artifact_mb * 1024 * 1024 ||
+      a.safety.status === "Unsafe"
+  )
 );
 
 export const counts = computed(() => ({
@@ -262,12 +270,15 @@ export const selectedSummary = computed(() => {
   const wtBytes = snap.worktrees
     .filter((w) => selectedWorktrees.value.includes(w.path))
     .reduce((sum, w) => sum + w.size_bytes, 0);
-  const afBytes = snap.artifacts
-    .filter((a) => selectedArtifacts.value.includes(a.path))
-    .reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
+  // Artifacts removed together with a selected worktree are not counted again:
+  // their bytes are already inside the worktree's size.
+  const independentArtifacts = snap.artifacts.filter(
+    (a) => selectedArtifacts.value.includes(a.path) && bundledOwner(a) === null
+  );
+  const afBytes = independentArtifacts.reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
   return {
     worktrees: selectedWorktrees.value.length,
-    artifacts: selectedArtifacts.value.length,
+    artifacts: independentArtifacts.length,
     bytes: wtBytes + afBytes
   };
 });
@@ -288,7 +299,7 @@ function buildPlan(): CleanupPlan {
 
   const removalPaths = selectedWorktrees.value;
 
-  const worktree_removals: WorktreeRemovalItem[] = snap.worktrees
+  const selectedWorktreeRemovals: WorktreeRemovalItem[] = snap.worktrees
     .filter((w) => removalPaths.includes(w.path))
     .map((w) => {
       const needsForce = !w.is_prunable && w.untracked_files > 0;
@@ -305,7 +316,7 @@ function buildPlan(): CleanupPlan {
       };
     });
 
-  const trash_moves: TrashMoveItem[] = snap.artifacts
+  const selectedTrashMoves: TrashMoveItem[] = snap.artifacts
     .filter((a) => selectedArtifacts.value.includes(a.path))
     .map((a) => ({
       kind: "artifact" as const,
@@ -316,33 +327,39 @@ function buildPlan(): CleanupPlan {
       bundled_with_worktree: bundledOwner(a)
     }));
 
+  // A whitelist rule protects an item completely: it leaves both executable
+  // channels and stays only in `blockers`. Otherwise the exported plan would name
+  // the same path in `trash_moves` and in `blockers`, and the CLI could not accept
+  // the plan unchanged.
+  const isBlocked = (path: string) => settings.whitelist_paths.some((rule) => pathMatchesRule(path, rule));
+  const blockers: string[] = [...selectedWorktreeRemovals, ...selectedTrashMoves]
+    .filter((item) => isBlocked(item.path))
+    .map((item) => messages.plan.blocker(item.path));
+
+  const worktree_removals = selectedWorktreeRemovals.filter((w) => !isBlocked(w.path));
+  const trash_moves = selectedTrashMoves.filter((t) => !isBlocked(t.path));
+
   const excluded_unsafe =
     snap.worktrees.filter((w) => w.safety.status === "Unsafe").length +
     snap.artifacts.filter((a) => a.safety.status === "Unsafe").length;
 
+  // Only items deleted on their own are counted: an artifact marked
+  // `bundled_with_worktree` disappears together with its worktree and is not a
+  // separate deletion.
+  const independentMoves = trash_moves.filter((t) => t.bundled_with_worktree === null);
   const total_bytes =
     worktree_removals.reduce((sum, w) => sum + w.size_bytes, 0) +
-    trash_moves.filter((t) => t.bundled_with_worktree === null).reduce((sum, t) => sum + (t.size_bytes ?? 0), 0);
-
-  const blockers: string[] = [];
-  for (const item of [...worktree_removals.map((w) => w.path), ...trash_moves.map((t) => t.path)]) {
-    const home = item.replace(/^\/Users\/[^/]+/, "~");
-    for (const rule of settings.whitelist_paths) {
-      if (home === rule || home.startsWith(`${rule}/`)) {
-        blockers.push(`Blocked by whitelist protection: ${item}`);
-      }
-    }
-  }
+    independentMoves.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0);
 
   const ack_reasons: string[] = [];
-  const totalItems = worktree_removals.length + trash_moves.length;
+  const independentItems = worktree_removals.length + independentMoves.length;
   const forcedItems = worktree_removals.filter((w) => w.force);
   if (forcedItems.length > 0) {
-    ack_reasons.push(`Includes ${forcedItems.length} worktrees that need --force; their untracked files will be deleted too`);
+    ack_reasons.push(messages.plan.ack.force(forcedItems.length));
   }
-  if (totalItems > 5) ack_reasons.push(`This run will process ${totalItems} items, above the 5-item confirmation threshold`);
+  if (independentItems >= 5) ack_reasons.push(messages.plan.ack.count(independentItems));
   if (total_bytes > 10 * 1024 * 1024 * 1024) {
-    ack_reasons.push("A single run frees more than 10 GB");
+    ack_reasons.push(messages.plan.ack.size);
   }
 
   return { worktree_removals, trash_moves, excluded_unsafe, total_bytes, blockers, ack_reasons };
@@ -350,6 +367,7 @@ function buildPlan(): CleanupPlan {
 
 export function executeCleanup() {
   const plan = cleanupPlan.value;
+  if (plan.worktree_removals.length === 0 && plan.trash_moves.length === 0 && plan.blockers.length === 0) return;
   const entries: ResultEntry[] = [];
   let freed = 0;
   let trashed = 0;
@@ -374,7 +392,7 @@ export function executeCleanup() {
       action: "trash-move",
       target: item.path,
       result: "ok",
-      detail: bundled ? "Removed together with its owning worktree; no separate operation" : "Moved to the system Trash; recoverable from Trash",
+      detail: bundled ? messages.result.detail.bundled : messages.result.detail.trashed,
       size_bytes: bundled ? 0 : item.size_bytes ?? 0
     });
     if (!bundled) {
@@ -388,7 +406,7 @@ export function executeCleanup() {
       action: "prune",
       target: snapshot.value?.root ?? "",
       result: "ok",
-      detail: "git worktree prune finalizes cleanup of leftover metadata",
+      detail: messages.result.detail.pruneFinalize,
       size_bytes: 0
     });
   }
@@ -396,9 +414,9 @@ export function executeCleanup() {
   for (const blocker of plan.blockers) {
     entries.push({
       action: "trash-move",
-      target: blocker.replace("Blocked by whitelist protection: ", ""),
+      target: blocker.replace(messages.plan.blockerPrefix, ""),
       result: "skipped",
-      detail: "Precondition check failed; not executed",
+      detail: messages.result.detail.preconditionFailed,
       size_bytes: 0
     });
     failed += 1;
@@ -411,10 +429,10 @@ export function executeCleanup() {
     target: entry.target,
     reason:
       plan.worktree_removals.find((w) => w.path === entry.target)?.branch
-        ? "Executed after user confirmation"
+        ? messages.history.reason.confirmed
         : plan.trash_moves.find((t) => t.path === entry.target)
-          ? "Matched a rebuildable artifact type"
-          : "Metadata cleanup",
+          ? messages.history.reason.rebuildable
+          : messages.history.reason.metadata,
     result: entry.result,
     size_bytes: entry.size_bytes,
     detail: entry.detail
@@ -428,10 +446,6 @@ export function executeCleanup() {
   view.value = "result";
 }
 
-export function reasonClass(reason: Reason): string {
-  return `reason-${reason.severity.toLowerCase()}`;
-}
-
 export function sortReasons(reasons: Reason[]): Reason[] {
   return [...reasons].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]);
 }
@@ -441,19 +455,14 @@ export function primaryReason(reasons: Reason[]): Reason | null {
   return sorted[0] ?? null;
 }
 
-export function worktreeById(path: string | null): WorktreeRecord | null {
-  if (!path) return null;
-  return worktrees.value.find((w) => w.path === path) ?? null;
-}
-
 watch(
   () => settings.theme,
   (theme) => {
+    // Guarded so the module can be imported outside a DOM (for example by tests).
+    if (typeof document === "undefined") return;
     const root = document.documentElement;
     if (theme === "system") root.removeAttribute("data-theme");
     else root.dataset.theme = theme;
   },
   { immediate: true }
 );
-
-export { WORKTREE_VIEWS };

@@ -9,12 +9,26 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use worktree_core::{validate_path_for_deletion, DeletionContext};
+use worktree_core::{validate_path_for_deletion, DeletionContext, PathRejection};
 
 const CORPUS: &str = include_str!("fuzz_corpus/dangerous_paths.txt");
 
 /// Lower bound on the number of corpus entries (P0 acceptance criterion: ≥ 60).
 const MIN_CORPUS_ENTRIES: usize = 60;
+
+/// The unit test that covers the "ancestor symlink" category. A symlink cannot be
+/// expressed as a static corpus line, so the corpus test names the test that covers it
+/// and asserts it still exists (see `corpus_covers_each_required_category`).
+const ANCESTOR_SYMLINK_TEST: &str = "rejects_symlinked_ancestor_pointing_into_protected_location";
+
+/// The path validator source, so the coverage assertion above is enforced against the
+/// real file rather than asserted blindly.
+const PATH_SOURCE: &str = include_str!("../src/path.rs");
+
+/// A context whose expected parent never coincides with a corpus entry.
+fn ctx() -> DeletionContext {
+    DeletionContext::new("/expected/parent")
+}
 
 fn corpus_entries() -> Vec<&'static str> {
     CORPUS
@@ -37,7 +51,7 @@ fn corpus_is_large_enough() {
 
 #[test]
 fn every_corpus_entry_is_rejected() {
-    let ctx = DeletionContext::new();
+    let ctx = ctx();
     let mut accepted: Vec<String> = Vec::new();
     for entry in corpus_entries() {
         if validate_path_for_deletion(Path::new(entry), &ctx).is_ok() {
@@ -53,24 +67,56 @@ fn every_corpus_entry_is_rejected() {
 
 #[test]
 fn corpus_covers_each_required_category() {
-    // The corpus must cover the categories claimed by the P0 acceptance requirements,
-    // so they cannot be silently emptied later.
-    let joined = corpus_entries().join("\n");
-    for needle in ["/", "..", "/System", "/etc", "/usr"] {
+    // P0-3 names five categories: `..`, ancestor symlinks, control characters, system
+    // roots, and empty paths. This test enforces each one honestly: the two that cannot
+    // be expressed as a static corpus line (an empty path and a symlink) are asserted
+    // here directly instead of being claimed by a substring match.
+    let entries = corpus_entries();
+    let joined = entries.join("\n");
+
+    // 1. `..` as a full path component.
+    assert!(
+        joined.contains(".."),
+        "the corpus must cover `..` traversal"
+    );
+
+    // 2. System roots.
+    for needle in ["/System", "/etc", "/usr", "/bin"] {
         assert!(
             joined.contains(needle),
-            "the corpus should cover the category: {needle}"
+            "the corpus must cover the system root {needle}"
         );
     }
+
+    // 3. Control characters.
     assert!(
-        corpus_entries().iter().any(|entry| entry.contains('\t')),
-        "the corpus should include a control-character case"
-    );
-    assert!(
-        corpus_entries()
+        entries
             .iter()
-            .any(|entry| !Path::new(entry).is_absolute()),
-        "the corpus should include a relative-path case"
+            .any(|entry| entry.chars().any(char::is_control)),
+        "the corpus must include a control-character case"
+    );
+
+    // 4. Relative / non-absolute paths.
+    assert!(
+        entries.iter().any(|entry| !Path::new(entry).is_absolute()),
+        "the corpus must include a relative-path case"
+    );
+
+    // 5. Empty path. A line-based corpus cannot represent the empty string, so it is
+    // asserted directly; without this the category would only be claimed, never checked.
+    assert_eq!(
+        validate_path_for_deletion(Path::new(""), &ctx()),
+        Err(PathRejection::Empty),
+        "the empty path must be rejected"
+    );
+
+    // 6. Ancestor symlinks. A symlink cannot be represented as a static string either;
+    // the category is covered by a unit test, and this assertion fails if that test is
+    // renamed or deleted.
+    assert!(
+        PATH_SOURCE.contains(&format!("fn {ANCESTOR_SYMLINK_TEST}")),
+        "the ancestor-symlink category is covered by the unit test `{ANCESTOR_SYMLINK_TEST}` \
+         in src/path.rs; renaming or deleting it must be reflected here"
     );
 }
 
@@ -139,7 +185,7 @@ fn random_candidate(rng: &mut XorShift) -> PathBuf {
 
 #[test]
 fn accepted_paths_always_satisfy_the_invariant() {
-    let ctx = DeletionContext::new();
+    let ctx = ctx();
     let mut rng = XorShift::new(0x1234_5678_9abc_def0);
     let mut accepted = 0usize;
 
@@ -195,7 +241,7 @@ fn accepted_paths_always_satisfy_the_invariant() {
 
 #[test]
 fn generated_paths_never_accept_control_characters() {
-    let ctx = DeletionContext::new();
+    let ctx = ctx();
     let mut rng = XorShift::new(0xdead_beef_0bad_f00d);
     for _ in 0..5_000 {
         let candidate = random_candidate(&mut rng);
