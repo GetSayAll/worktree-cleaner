@@ -61,7 +61,8 @@ export interface WorktreeRecord {
   stash_count: number;
   last_updated_at: string | null;
   agent: string | null;
-  size_bytes: number;
+  /** `null` = unmeasurable (no permission / timeout); must stay distinguishable from 0. */
+  size_bytes: number | null;
   safety: SafetyAssessment;
 }
 
@@ -91,7 +92,7 @@ export interface ProjectSnapshot {
   warnings: string[];
 }
 
-export const SNAPSHOT_SCHEMA_VERSION = 1;
+export const SNAPSHOT_SCHEMA_VERSION = 2;
 
 export interface WorktreeRemovalItem {
   kind: "worktree";
@@ -100,7 +101,8 @@ export interface WorktreeRemovalItem {
   command: string;
   force: boolean;
   untracked_files: string[];
-  size_bytes: number;
+  /** `null` = unmeasurable, so the plan does not claim a size it cannot know. */
+  size_bytes: number | null;
 }
 
 export interface TrashMoveItem {

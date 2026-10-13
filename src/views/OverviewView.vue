@@ -9,7 +9,7 @@ import { messages } from "../i18n";
 const root = computed(() => snapshot.value?.root ?? "");
 
 const topWorktrees = computed(() =>
-  [...worktrees.value].sort((a, b) => b.size_bytes - a.size_bytes).slice(0, 5)
+  [...worktrees.value].sort((a, b) => (b.size_bytes ?? 0) - (a.size_bytes ?? 0)).slice(0, 5)
 );
 
 const topArtifacts = computed(() =>
@@ -17,7 +17,7 @@ const topArtifacts = computed(() =>
 );
 
 const safeBytes = computed(() =>
-  worktrees.value.filter((w) => w.safety.status === "Safe").reduce((sum, w) => sum + w.size_bytes, 0) +
+  worktrees.value.filter((w) => w.safety.status === "Safe").reduce((sum, w) => sum + (w.size_bytes ?? 0), 0) +
   artifacts.value.filter((a) => a.safety.status === "Safe").reduce((sum, a) => sum + (a.size_bytes ?? 0), 0)
 );
 

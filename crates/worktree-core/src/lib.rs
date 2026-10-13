@@ -5,22 +5,37 @@
 //! **This crate is read-only**: it never performs any deletion. Deletion lives in a
 //! separate place and can only be driven by a plan object (development contract §2).
 
+pub mod git;
 pub mod path;
 pub mod reason;
+pub mod timefmt;
+pub mod worktree;
 
+pub use git::{GitError, GitOutput, GitRunner, ProcessGitRunner, DEFAULT_GIT_TIMEOUT};
 pub use path::{validate_path_for_deletion, DeletionContext, PathRejection, ValidatedPath};
 pub use reason::{Reason, ReasonCode, SafetyAssessment, SafetyStatus};
+pub use worktree::{
+    check_worktree, detect_default_branch, infer_agent, parse_status, parse_worktree_list,
+    WorktreeCheckOptions, WorktreeEntry,
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Contract version of `snapshot.json`. Must be bumped whenever fields are added,
 /// removed, or change meaning (development contract D20).
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+///
+/// Version 2 widened `WorktreeRecord.size_bytes` from `u64` to `Option<u64>`: an
+/// unmeasurable size must stay distinguishable from `0`, and a version 1 consumer
+/// would render `null` as `0 B`.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum ScanError {
-    #[error("scanner is not implemented in the initial project skeleton")]
+    /// The orchestrator (default-branch detection, artifact walk, snapshot assembly)
+    /// lands with the CLI stage. The worktree checks it will call already exist in
+    /// [`crate::worktree`].
+    #[error("the scan orchestrator is not implemented yet; the worktree checks live in worktree::check_worktree")]
     NotImplemented,
 }
 
@@ -54,7 +69,10 @@ pub struct WorktreeRecord {
     /// Agent inferred from path characteristics; `None` when it cannot be identified —
     /// never guess.
     pub agent: Option<String>,
-    pub size_bytes: u64,
+    /// Directory size measured by the caller. `None` = unmeasurable (no permission /
+    /// timeout), which must stay distinguishable from `0` (development contract
+    /// section 3); the UI shows `unknown` rather than `0 B`.
+    pub size_bytes: Option<u64>,
     pub safety: SafetyAssessment,
 }
 
@@ -107,7 +125,7 @@ mod tests {
         // The contract version must be readable by both the CLI and the web UI, and
         // match the constant in src/types.ts.
         let version = SNAPSHOT_SCHEMA_VERSION;
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 
     #[test]
@@ -167,7 +185,9 @@ mod tests {
             stash_count: 0,
             last_updated_at: Some("2026-01-01T00:00:00Z".to_string()),
             agent: Some("codex".to_string()),
-            size_bytes: 1234,
+            // `None` = unmeasurable, which must survive the round trip as `null` and
+            // not collapse to `0`.
+            size_bytes: Some(1234),
             safety: sample_assessment(),
         }
     }
@@ -204,6 +224,19 @@ mod tests {
     }
 
     #[test]
+    fn worktree_size_none_survives_as_null() {
+        // "Cannot be measured" must be distinguishable from "0" on the wire as well
+        // (development contract section 3): a `u64` field would force a lie.
+        let mut record = sample_worktree();
+        record.size_bytes = None;
+        let json = serde_json::to_string(&record).expect("serialize worktree record");
+        assert!(json.contains("\"size_bytes\":null"));
+        let back: WorktreeRecord =
+            serde_json::from_str(&json).expect("deserialize worktree record");
+        assert_eq!(record, back);
+    }
+
+    #[test]
     fn artifact_record_round_trips_through_json() {
         let record = sample_artifact();
         let json = serde_json::to_string(&record).expect("serialize artifact record");
@@ -226,7 +259,7 @@ mod tests {
             warnings: vec!["size measurement timed out for .nuxt".to_string()],
         };
         let json = serde_json::to_string(&snapshot).expect("serialize snapshot");
-        assert!(json.contains("\"schema_version\":1"));
+        assert!(json.contains("\"schema_version\":2"));
         let back: ProjectSnapshot = serde_json::from_str(&json).expect("deserialize snapshot");
         assert_eq!(snapshot, back);
     }

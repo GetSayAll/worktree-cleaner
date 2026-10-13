@@ -186,18 +186,8 @@ pub fn validate_path_for_deletion(
     // Compare a candidate against **both** its literal and its resolved form, and
     // resolve each rule itself first. Otherwise a symlink that satisfies the whitelist
     // only after resolution would slip through (D10: verification may only tighten).
-    for rule in &ctx.whitelist {
-        let rule_literal = lexical_normalize(rule);
-        let rule_resolved = resolve_for_inspection(rule)
-            .map(|resolution| resolution.resolved)
-            .unwrap_or_else(|_| rule_literal.clone());
-        for rule_form in [&rule_literal, &rule_resolved] {
-            for candidate_form in [&normalized, &resolved] {
-                if candidate_form == rule_form || candidate_form.starts_with(rule_form) {
-                    return Err(PathRejection::Whitelisted(display(rule)));
-                }
-            }
-        }
+    if let Some(rule) = whitelist_hit(candidate, &ctx.whitelist) {
+        return Err(PathRejection::Whitelisted(display(&rule)));
     }
 
     Ok(ValidatedPath {
@@ -205,6 +195,37 @@ pub fn validate_path_for_deletion(
         resolved,
         is_symlink: resolution.is_leaf_symlink,
     })
+}
+
+/// Whether `candidate` matches one of the whitelist `rules`, returning the matched
+/// rule.
+///
+/// Both the literal and the symlink-resolved form of the candidate are compared
+/// against both forms of each rule, so a rule can only ever be *more* likely to hit
+/// after resolution (D10: verification may only tighten). Shared with the worktree
+/// checks (`wt.whitelisted`) so whitelist semantics live in exactly one place.
+pub fn whitelist_hit(candidate: &Path, rules: &[PathBuf]) -> Option<PathBuf> {
+    if rules.is_empty() {
+        return None;
+    }
+    let normalized = lexical_normalize(candidate);
+    let resolved = resolve_for_inspection(candidate)
+        .map(|resolution| resolution.resolved)
+        .unwrap_or_else(|_| normalized.clone());
+    for rule in rules {
+        let rule_literal = lexical_normalize(rule);
+        let rule_resolved = resolve_for_inspection(rule)
+            .map(|resolution| resolution.resolved)
+            .unwrap_or_else(|_| rule_literal.clone());
+        for rule_form in [&rule_literal, &rule_resolved] {
+            for candidate_form in [&normalized, &resolved] {
+                if candidate_form == rule_form || candidate_form.starts_with(rule_form) {
+                    return Some(rule.clone());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Top-level root + system location checks.

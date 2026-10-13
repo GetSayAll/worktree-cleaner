@@ -269,7 +269,7 @@ export const selectedSummary = computed(() => {
   if (!snap) return { worktrees: 0, artifacts: 0, bytes: 0 };
   const wtBytes = snap.worktrees
     .filter((w) => selectedWorktrees.value.includes(w.path))
-    .reduce((sum, w) => sum + w.size_bytes, 0);
+    .reduce((sum, w) => sum + (w.size_bytes ?? 0), 0);
   // Artifacts removed together with a selected worktree are not counted again:
   // their bytes are already inside the worktree's size.
   const independentArtifacts = snap.artifacts.filter(
@@ -348,7 +348,7 @@ function buildPlan(): CleanupPlan {
   // separate deletion.
   const independentMoves = trash_moves.filter((t) => t.bundled_with_worktree === null);
   const total_bytes =
-    worktree_removals.reduce((sum, w) => sum + w.size_bytes, 0) +
+    worktree_removals.reduce((sum, w) => sum + (w.size_bytes ?? 0), 0) +
     independentMoves.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0);
 
   const ack_reasons: string[] = [];
@@ -380,9 +380,9 @@ export function executeCleanup() {
       target: item.path,
       result: "ok",
       detail: item.command,
-      size_bytes: item.size_bytes
+      size_bytes: item.size_bytes ?? 0
     });
-    freed += item.size_bytes;
+    freed += item.size_bytes ?? 0;
     removed += 1;
   }
 

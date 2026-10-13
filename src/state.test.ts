@@ -75,7 +75,7 @@ describe("default selection and bundled artifacts", () => {
 
     const expectedWorktrees = mockSnapshot.worktrees
       .filter((w) => w.safety.status === "Safe")
-      .reduce((sum, w) => sum + w.size_bytes, 0);
+      .reduce((sum, w) => sum + (w.size_bytes ?? 0), 0);
     const expectedArtifacts = safeArtifacts
       .filter((a) => !owned(a.worktree_path))
       .reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
