@@ -46,7 +46,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
 </script>
 
 <template>
-  <div class="stack page--reading">
+  <div class="stack page--wide">
     <div class="spread">
       <div>
         <h1>{{ messages.overview.title }}</h1>
@@ -107,7 +107,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         <table class="table">
           <tbody>
             <tr v-for="item in topWorktrees" :key="item.path">
-              <td>
+              <td class="cell-path">
                 <div class="mono">{{ displayPath(item.path, root) }}</div>
                 <div class="tiny faint">
                   {{ item.branch || messages.common.detached }}{{ item.is_main ? messages.overview.mainWorktreeSuffix : "" }}
@@ -118,17 +118,15 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
                   >{{ messages.worktrees.outsideRoot }}</span>
                 </div>
               </td>
-              <td class="nowrap">
+              <td class="cell-agent">
                 <span class="chip">{{ item.agent || messages.common.unknownAgent }}</span>
               </td>
-              <td class="cell-size">
+              <td class="cell-size cell-bytes">
                 <div class="numeric">{{ formatBytes(item.size_bytes) }}</div>
                 <div class="tiny faint">{{ formatRelTime(item.last_updated_at) }}</div>
               </td>
-              <td class="nowrap"><SafetyBadge :status="item.safety.status" /></td>
-              <td class="cell-size tiny faint" style="max-width: 200px">
-                {{ primaryReason(item.safety.reasons)?.text }}
-              </td>
+              <td class="cell-verdict"><SafetyBadge :status="item.safety.status" /></td>
+              <td class="cell-hint tiny faint">{{ primaryReason(item.safety.reasons)?.text }}</td>
             </tr>
           </tbody>
         </table>
@@ -144,19 +142,19 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         <table class="table">
           <tbody>
             <tr v-for="item in topArtifacts" :key="item.path">
-              <td>
+              <td class="cell-path">
                 <div class="row-wrap">
                   <span class="chip">{{ item.kind }}</span>
                   <span class="mono">{{ displayPath(item.path, root) }}</span>
                 </div>
                 <div class="tiny faint">{{ messages.overview.artifactMeta(item.ecosystem, formatCount(item.file_count)) }}</div>
               </td>
-              <td class="cell-size">
+              <td class="cell-size cell-bytes">
                 <div class="numeric">{{ formatBytes(item.size_bytes) }}</div>
                 <div class="tiny faint">{{ formatRelTime(item.last_updated_at) }}</div>
               </td>
-              <td class="nowrap"><SafetyBadge :status="item.safety.status" /></td>
-              <td class="cell-size tiny faint" style="max-width: 200px">{{ primaryReason(item.safety.reasons)?.text }}</td>
+              <td class="cell-verdict"><SafetyBadge :status="item.safety.status" /></td>
+              <td class="cell-hint tiny faint">{{ primaryReason(item.safety.reasons)?.text }}</td>
             </tr>
           </tbody>
         </table>

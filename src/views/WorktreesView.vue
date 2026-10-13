@@ -134,13 +134,13 @@ function stateText(item: WorktreeRecord): string {
               <th class="cell-check">
                 <input v-model="allSelected" class="check" type="checkbox" :disabled="selectable.length === 0" />
               </th>
-              <th class="cell-path">{{ messages.worktrees.columns.branch }}</th>
-              <th>{{ messages.worktrees.columns.status }}</th>
-              <th>{{ messages.worktrees.columns.agent }}</th>
-              <th>{{ messages.worktrees.columns.lastActivity }}</th>
-              <th class="cell-size">{{ messages.worktrees.columns.size }}</th>
-              <th>{{ messages.worktrees.columns.safety }}</th>
-              <th style="width: 76px"></th>
+              <th class="cell-branch">{{ messages.worktrees.columns.branch }}</th>
+              <th class="cell-status">{{ messages.worktrees.columns.status }}</th>
+              <th class="cell-agent">{{ messages.worktrees.columns.agent }}</th>
+              <th class="cell-time">{{ messages.worktrees.columns.lastActivity }}</th>
+              <th class="cell-size cell-bytes">{{ messages.worktrees.columns.size }}</th>
+              <th class="cell-verdict">{{ messages.worktrees.columns.safety }}</th>
+              <th class="cell-actions"></th>
             </tr>
           </thead>
           <tbody>
@@ -156,7 +156,7 @@ function stateText(item: WorktreeRecord): string {
                     @change="toggleWorktree(item.path)"
                   />
                 </td>
-                <td class="cell-path">
+                <td class="cell-branch">
                   <div>{{ item.branch || messages.common.detachedHead }}</div>
                   <div class="mono tiny faint">
                     {{ displayPath(item.path, root) }}
@@ -167,12 +167,15 @@ function stateText(item: WorktreeRecord): string {
                     >{{ messages.worktrees.outsideRoot }}</span>
                   </div>
                 </td>
-                <td class="nowrap tiny">{{ stateText(item) }}</td>
-                <td class="nowrap"><span class="chip">{{ item.agent || messages.common.emDash }}</span></td>
-                <td class="nowrap tiny">{{ formatRelTime(item.last_updated_at) }}</td>
-                <td class="cell-size numeric">{{ formatBytes(item.size_bytes) }}</td>
-                <td class="nowrap"><SafetyBadge :status="item.safety.status" /></td>
-                <td class="nowrap">
+                <!-- No `nowrap`: the state list joins up to three facts with a
+                     separator, which is wider than any column this table can spare.
+                     It wraps instead, and the row was already this tall. -->
+                <td class="tiny cell-status">{{ stateText(item) }}</td>
+                <td class="cell-agent"><span class="chip">{{ item.agent || messages.common.emDash }}</span></td>
+                <td class="nowrap tiny cell-time">{{ formatRelTime(item.last_updated_at) }}</td>
+                <td class="cell-size cell-bytes numeric">{{ formatBytes(item.size_bytes) }}</td>
+                <td class="nowrap cell-verdict"><SafetyBadge :status="item.safety.status" /></td>
+                <td class="nowrap cell-actions">
                   <button class="btn btn--ghost" @click="toggleExpanded(item.path)">
                     {{ isExpanded(item.path) ? messages.worktrees.collapse : messages.worktrees.details }}
                   </button>

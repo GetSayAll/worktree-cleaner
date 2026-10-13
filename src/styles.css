@@ -232,16 +232,12 @@ a { color: var(--accent); }
    its content, which is what turns the flex child above into the scroll container. */
 .content { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--sp-6); }
 /* ---------- page columns ----------
-   One width per kind of page, so the text does not move when the user changes
-   view. A page reads its width from the class its own view declares, rather than
-   each view hard-coding a `max-width` of its own — that is how the settings page
-   and the welcome screen ended up at 968px and 860px respectively, two layouts
-   for the same job. */
-.page--reading {
-  max-width: 860px;
-  margin-inline: auto;
-  width: 100%;
-}
+   One width for every page: the full content pane, so the text starts and ends
+   at the same place whichever page the user is on. The content pane's padding is
+   the margin, and it is the same margin the worktree page has always had.
+   Reading pages used to be capped at 860px and centred, which put their left and
+   right edges 56px in from the pane instead of 24px — the settings page and the
+   welcome screen jumped sideways every time the user changed view. */
 .page--wide { width: 100%; }
 .stack { display: flex; flex-direction: column; gap: var(--sp-4); }
 .stack--tight { gap: var(--sp-3); }
@@ -487,23 +483,60 @@ a { color: var(--accent); }
   background: var(--surface-2);
   white-space: nowrap;
 }
-.table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); vertical-align: middle; }
+.table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover { background: var(--surface-2); }
 .table tr.is-bundled { opacity: 0.62; }
-.table .cell-check { width: 44px; }
 .table .cell-size, .table .cell-outcome { text-align: right; white-space: nowrap; }
+/* A cell clips what does not fit in it, and a one-line cell says so with an
+   ellipsis. Under `table-layout: fixed` a column given no width takes whatever is
+   left over, and its content then paints over the cell next door — which is how
+   "Safe to delete" ended up sliced in half by the reason box beside it. Clipped is
+   a shorter word; painted over is a wrong one, and this is the guard that makes the
+   second one impossible at any window width. */
+.table td.nowrap { text-overflow: ellipsis; }
+/* Every other column is given a share of the table rather than a pixel width: a
+   cell that cannot wrap has to be wide enough for its longest value in either
+   language (the Chinese labels are about a third narrower than the English ones),
+   and shares keep every column in a table growing together with the window. A
+   pixel column would be exactly right and never grow, and where a share and a
+   pixel share a row the browser hands the leftover to the pixels, which starves the
+   prose column beside them on a narrower window. The shares are set so each column
+   holds its longest value at the app's default window (1180px). */
+.table .cell-check { width: 44px; }
+.table .cell-git { width: 9.5%; }
+.table .cell-time { width: 12.3%; }
+.table .cell-bytes { width: 10.4%; }
+.table .cell-verdict { width: 18%; }
+.table .cell-agent { width: 10%; }
+.table .cell-status { width: 14%; }
+.table .cell-actions { width: 10.5%; }
+.table .cell-hint { width: 24%; min-width: 0; }
+/* The plan and result tables carry four and five columns, so the column holding a
+   path takes a far larger share than the same column in a seven-column list — the
+   shares are per table, not per column name. */
+.table .cell-directory { width: 46%; min-width: 0; }
+.table .cell-recoverable { width: 25%; min-width: 0; }
+.table .cell-action { width: 16%; min-width: 0; }
+.table .cell-target { width: 28%; min-width: 0; }
+.table .cell-detail { width: 25%; min-width: 0; }
+.table .cell-outcome-cell { width: 14%; min-width: 0; }
+.table .cell-path { width: 16%; min-width: 0; }
+.table .cell-branch { width: 18%; min-width: 0; }
 /* The reason column is the one that used to stretch a row: it carries the evidence
-   text, which is prose. It is given the largest share and capped, so a row's height
-   is decided by the number of items rather than by the longest unbroken string in
+   text, which is prose. It is given a share and capped, so a row's height is
+   decided by the number of items rather than by the longest unbroken string in
    the table. The width lives on the `th`, because under `table-layout: fixed` only
    the first row sizes a column. */
 .table .cell-reason {
-  width: 32%;
+  width: 29%;
   min-width: 0;
   overflow: hidden;
 }
-.table .cell-path { width: 30%; min-width: 0; }
+/* A path or a branch name is one unbreakable run of characters, so it needs
+   somewhere to break when the column is narrow. Without this it is clipped at the
+   cell edge instead of wrapping. */
+.table .cell-path > div, .table .cell-branch > div, .table .cell-directory > div, .table .cell-target { overflow-wrap: anywhere; }
 
 .group-head {
   display: flex;
@@ -587,11 +620,10 @@ a { color: var(--accent); }
 .divider { height: 1px; background: var(--border); border: 0; margin: 0; }
 
 /* ---------- welcome ---------- */
-/* The same column and the same page padding as `content--narrow`, and the
-   same stack rhythm as every other page. It used to be its own layout — 760px
-   wide, 56px of top padding — which is why the welcome screen and the page
-   after it looked like two different applications. */
-.welcome { max-width: 860px; margin-inline: auto; width: 100%; padding: var(--sp-6) 0; display: flex; flex-direction: column; gap: var(--sp-5); }
+/* The full content pane like every other page, and the same stack rhythm. It used
+   to be its own layout — 860px wide and centred — which is why the welcome screen
+   and the page after it had two different left and right margins. */
+.welcome { width: 100%; padding: var(--sp-6) 0; display: flex; flex-direction: column; gap: var(--sp-5); }
 .welcome__hero { display: flex; flex-direction: column; gap: var(--sp-3); }
 .welcome__title { font-size: 32px; letter-spacing: -0.03em; }
 .welcome__lede { color: var(--text-2); max-width: 60ch; }
@@ -633,8 +665,8 @@ a { color: var(--accent); }
 .recent__path { font-family: var(--mono); font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- scanning ---------- */
-/* Same column family as the other single-purpose pages, same page padding. */
-.scan { max-width: 860px; margin-inline: auto; width: 100%; padding: var(--sp-6) 0; display: flex; flex-direction: column; gap: var(--sp-5); }
+/* The full content pane like every other page. */
+.scan { width: 100%; padding: var(--sp-6) 0; display: flex; flex-direction: column; gap: var(--sp-5); }
 .stage-list { display: flex; flex-direction: column; gap: var(--sp-1); }
 .stage { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); }
 .stage.is-active { background: var(--accent-weak); }

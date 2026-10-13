@@ -116,7 +116,7 @@ async function copyPlan() {
 </script>
 
 <template>
-  <div class="stack page--reading">
+  <div class="stack page--wide">
     <div class="spread">
       <div>
         <h1>{{ messages.plan.title }}</h1>
@@ -217,23 +217,23 @@ async function copyPlan() {
         <table class="table">
           <thead>
             <tr>
-              <th>{{ messages.plan.columns.directory }}</th>
-              <th class="cell-size">{{ messages.plan.columns.files }}</th>
-              <th class="cell-size">{{ messages.plan.columns.size }}</th>
-              <th>{{ messages.plan.columns.recoverability }}</th>
+              <th class="cell-directory">{{ messages.plan.columns.directory }}</th>
+              <th class="cell-size cell-bytes">{{ messages.plan.columns.files }}</th>
+              <th class="cell-size cell-bytes">{{ messages.plan.columns.size }}</th>
+              <th class="cell-recoverable">{{ messages.plan.columns.recoverability }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="item in plan.trash_moves" :key="item.path" :class="{ 'is-bundled': item.bundled_with_worktree !== null }">
-              <td>
+              <td class="cell-directory">
                 <div class="row-wrap">
                   <span class="chip">{{ item.artifact_kind }}</span>
                   <span class="mono">{{ displayPath(item.path, root) }}</span>
                 </div>
               </td>
-              <td class="cell-size numeric">{{ item.file_count > 0 ? formatCount(item.file_count) : messages.common.unknown }}</td>
-              <td class="cell-size numeric">{{ formatBytes(item.size_bytes) }}</td>
-              <td class="tiny">
+              <td class="cell-size cell-bytes numeric">{{ item.file_count > 0 ? formatCount(item.file_count) : messages.common.unknown }}</td>
+              <td class="cell-size cell-bytes numeric">{{ formatBytes(item.size_bytes) }}</td>
+              <td class="tiny cell-recoverable">
                 <span v-if="item.bundled_with_worktree" class="faint">{{ messages.plan.removedWithWorktree }}</span>
                 <span v-else class="muted">{{ messages.plan.recoverable }}</span>
               </td>

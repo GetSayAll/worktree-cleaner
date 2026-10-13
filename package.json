@@ -10,6 +10,7 @@
     "build:preview": "vite build --base ./ && node scripts/build-preview.mjs",
     "test": "vitest run",
     "test:theme": "pnpm run build:preview && node scripts/verify-theme.mjs",
+    "test:layout": "pnpm run build:preview && node scripts/verify-layout.mjs",
     "lint:rust": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

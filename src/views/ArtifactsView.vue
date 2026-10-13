@@ -162,10 +162,10 @@ function sizeText(item: ArtifactRecord): string {
             <tr>
               <th class="cell-check"></th>
               <th class="cell-path">{{ messages.artifacts.columns.path }}</th>
-              <th>{{ messages.artifacts.columns.git }}</th>
-              <th>{{ messages.artifacts.columns.lastActivity }}</th>
-              <th class="cell-size">{{ messages.artifacts.columns.size }}</th>
-              <th>{{ messages.artifacts.columns.safety }}</th>
+              <th class="cell-git">{{ messages.artifacts.columns.git }}</th>
+              <th class="cell-time">{{ messages.artifacts.columns.lastActivity }}</th>
+              <th class="cell-size cell-bytes">{{ messages.artifacts.columns.size }}</th>
+              <th class="cell-verdict">{{ messages.artifacts.columns.safety }}</th>
               <th class="cell-reason">{{ messages.artifacts.columns.reason }}</th>
             </tr>
           </thead>
@@ -199,10 +199,10 @@ function sizeText(item: ArtifactRecord): string {
                     <span v-if="item.is_symlink">{{ messages.artifacts.symlink(item.symlink_target ?? "") }}</span>
                   </div>
                 </td>
-                <td class="nowrap tiny">{{ gitState(item) }}</td>
-                <td class="nowrap tiny">{{ formatRelTime(item.last_updated_at) }}</td>
-                <td class="cell-size numeric">{{ sizeText(item) }}</td>
-                <td class="nowrap"><SafetyBadge :status="item.safety.status" /></td>
+                <td class="nowrap tiny cell-git">{{ gitState(item) }}</td>
+                <td class="nowrap tiny cell-time">{{ formatRelTime(item.last_updated_at) }}</td>
+                <td class="cell-size cell-bytes numeric">{{ sizeText(item) }}</td>
+                <td class="nowrap cell-verdict"><SafetyBadge :status="item.safety.status" /></td>
                 <!-- The reason is a title, not the whole story: the evidence under it
                      can be a full sentence, and a list is for choosing items at a
                      glance. The full reason is on the item's own page, and the row

@@ -47,7 +47,7 @@ async function copyAll() {
 </script>
 
 <template>
-  <div class="stack page--reading">
+  <div class="stack page--wide">
     <div class="spread">
       <div>
         <h1>{{ messages.history.title }}</h1>

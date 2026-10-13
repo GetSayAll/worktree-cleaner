@@ -104,7 +104,7 @@ async function onClearLog() {
 </script>
 
 <template>
-  <div class="stack page--reading">
+  <div class="stack page--wide">
     <div class="spread">
       <div>
         <h1>{{ messages.settings.title }}</h1>

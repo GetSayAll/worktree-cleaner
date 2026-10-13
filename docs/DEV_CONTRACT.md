@@ -196,6 +196,13 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   decides what the user is told.
 - Front end: any UI change must leave `vue-tsc --noEmit` at zero errors and the
   build passing.
+- Front end layout is checked in a **real browser**, not in a unit test, because a
+  table's columns are a layout result: `pnpm test:theme` drives the appearance
+  modes and `pnpm test:layout` drives the page grid — every page's margins against
+  the worktree page's, and no cell's `scrollWidth` exceeding its `clientWidth`, in
+  both locales, at the app's default window size. A stylesheet assertion cannot
+  know how wide "Must not delete" is in the machine's font, and happy-dom does not
+  lay out a table at all.
 - Rust: `pnpm lint:rust` must pass. It runs `cargo fmt --all -- --check` and
   `cargo clippy --workspace --all-targets`, and what that fails on is declared in
   `[workspace.lints]` in the root `Cargo.toml`: `clippy::all`, `clippy::pedantic`,
@@ -345,7 +352,7 @@ and the optional Tauri desktop shell (Form C).
 
 ### Current coverage status
 
-Last updated 2026-10-12. "Met" means a passing automated check exists and would
+Last updated 2026-10-13. "Met" means a passing automated check exists and would
 fail if the behaviour regressed. "Blocked" means the criterion belongs to a
 deliverable that does not exist yet. Three rows are marked **renegotiated**: the
 criterion as written cannot hold in the design that shipped, and the replacement
@@ -380,7 +387,7 @@ guarantee is named next to it.
 | P4 | 7 · the log has time / action / target / reason / result / size, with no network call (D15) | Met |
 | P4 | 8 · Windows: the Recycle Bin path verified separately (D16) | Blocked — no Windows machine has run it; open item 1 |
 | P5 | daemon and browser-UI criteria | Blocked — P5 not started |
-| P6 | wrap-up criteria | Partly met — settings persist on the device, the history page reads the real log, the language picker ships, and the prototype wording is gone. Plan export copies JSON to the clipboard rather than writing a file |
+| P6 | wrap-up criteria | Partly met — settings persist on the device, the history page reads the real log, the language picker ships, and the prototype wording is gone. Plan export copies JSON to the clipboard rather than writing a file. Appearance has `pnpm test:theme` and the page grid `pnpm test:layout`, both in a real browser (decision 5) |
 
 The rule for every row: a criterion counts as met only when a test in the
 repository fails if the behaviour regresses.
@@ -497,6 +504,21 @@ message):
    version note's prototype suffix are removed, and the buttons that used to only
    surface a notice (choose folder, open Trash, open log directory) now perform the
    real action through the Tauri dialog and opener plugins.
+5. **One page width, and no cell paints over its neighbour.** Both were reported
+   from a screenshot of the build-artifacts page. The width is the content pane's
+   own padding (24px) on every page: the welcome, overview, plan, history and
+   settings pages were capped at 860px and centred, so their left and right edges
+   sat 56px in and moved sideways whenever the user changed view. Table columns
+   take a share of the table instead of an ad-hoc width, because under
+   `table-layout: fixed` a column given no width takes what is left over and its
+   content then paints over the cell next door — the verdict badge was sliced in
+   half by the reason box beside it, and in English three more columns bled the
+   same way. Every cell now clips its own content (`overflow: hidden`, with an
+   ellipsis where the text is one line), so a narrower window degrades to a
+   truncated label rather than an overlap, at any width and in either language.
+   `pnpm test:layout` walks every page in a real browser, in both locales, at the
+   app's default window size: it compares each page's margins with the worktree
+   page's and asserts that no cell's `scrollWidth` exceeds its `clientWidth`.
 
 **Decided (2026-10-12, while building the above)**
 

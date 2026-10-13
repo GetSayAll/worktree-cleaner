@@ -112,22 +112,22 @@ const logFailure = computed(() => {
         <table class="table">
           <thead>
             <tr>
-              <th>{{ messages.result.columns.action }}</th>
-              <th>{{ messages.result.columns.target }}</th>
-              <th>{{ messages.result.columns.detail }}</th>
-              <th class="cell-outcome">{{ messages.result.columns.result }}</th>
-              <th class="cell-size">{{ messages.result.columns.size }}</th>
+              <th class="cell-action">{{ messages.result.columns.action }}</th>
+              <th class="cell-target">{{ messages.result.columns.target }}</th>
+              <th class="cell-detail">{{ messages.result.columns.detail }}</th>
+              <th class="cell-outcome cell-outcome-cell">{{ messages.result.columns.result }}</th>
+              <th class="cell-size cell-bytes">{{ messages.result.columns.size }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(item, index) in lastResult" :key="`${item.target}-${index}`">
-              <td class="nowrap tiny">{{ actionLabel(item.action) }}</td>
-              <td class="mono">{{ displayPath(item.target, root) }}</td>
-              <td class="tiny faint">{{ item.detail }}</td>
-              <td class="cell-outcome">
+              <td class="nowrap tiny cell-action">{{ actionLabel(item.action) }}</td>
+              <td class="mono cell-target">{{ displayPath(item.target, root) }}</td>
+              <td class="tiny faint cell-detail">{{ item.detail }}</td>
+              <td class="cell-outcome cell-outcome-cell">
                 <span class="outcome" :class="`outcome--${item.result}`">{{ outcomeLabel(item.result) }}</span>
               </td>
-              <td class="cell-size numeric">{{ formatBytes(item.size_bytes) }}</td>
+              <td class="cell-size cell-bytes numeric">{{ formatBytes(item.size_bytes) }}</td>
             </tr>
             <tr v-if="lastResult.length === 0">
               <td colspan="5"><div class="empty">{{ messages.result.empty }}</div></td>
