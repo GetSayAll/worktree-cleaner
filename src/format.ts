@@ -1,4 +1,5 @@
 import { messages } from "./i18n";
+import type { Reason } from "./types";
 
 const KB = 1024;
 
@@ -76,6 +77,22 @@ export function formatBytes(bytes: number | null, opts: { approximate?: boolean 
 
 export function formatCount(n: number): string {
   return n.toLocaleString("en-US");
+}
+
+/**
+ * The reader-facing wording of one safety reason.
+ *
+ * The core sends a stable code and an English sentence; the code decides what the
+ * reader sees. The sentence is only the fallback for a code this build does not
+ * know, so a newer core against an older UI says something true instead of
+ * nothing. `evidence` is not passed through here: it is a command, a count or a
+ * path, and it stays exactly as the core reported it.
+ */
+export function reasonText(reason: Reason): string {
+  const dot = reason.code.indexOf(".");
+  const family = reason.code.slice(0, dot) as "wt" | "af";
+  const table: Record<string, string> | undefined = messages.reasons[family];
+  return table?.[reason.code.slice(dot + 1)] ?? reason.text;
 }
 
 /**

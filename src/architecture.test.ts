@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SNAPSHOT_SCHEMA_VERSION } from "./types";
+import { en } from "./i18n/en";
+import { zhCN } from "./i18n/zh-CN";
 
 // Rules that are about the shape of the source tree rather than the behaviour of
 // one function. Both exist because a plausible future edit would break them
@@ -132,5 +134,21 @@ describe("the Rust-to-TypeScript field contract", () => {
 
     expect(rustCodes.length).toBeGreaterThan(20);
     expect([...tsCodes].sort()).toEqual([...rustCodes].sort());
+  });
+
+  it("gives every reason code a message in every locale", () => {
+    // A code with no entry falls back to the core's English sentence, and the
+    // fallback is silent — nothing fails, the reader just gets English on a
+    // Chinese screen. So the check is on the table's keys, in both locales.
+    const rustCodes = [...core["reason.rs"].matchAll(/=> "((?:wt|af)\.[a-z_]+)"/g)].map(
+      (match) => match[1]
+    );
+    const tableCodes = (table: typeof en): string[] =>
+      Object.entries(table.reasons).flatMap(([family, entries]) =>
+        Object.keys(entries).map((name) => `${family}.${name}`)
+      );
+
+    expect(tableCodes(en).sort()).toEqual([...rustCodes].sort());
+    expect(tableCodes(zhCN).sort()).toEqual([...rustCodes].sort());
   });
 });

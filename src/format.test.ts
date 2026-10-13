@@ -4,9 +4,13 @@ import {
   compareSizeNullsFirst,
   formatBytes,
   formatCount,
-  isUnder
+  isUnder,
+  reasonText
 } from "./format";
-import { messages } from "./i18n";
+import { applyLocale, messages, SOURCE_LOCALE } from "./i18n";
+import { en } from "./i18n/en";
+import { zhCN } from "./i18n/zh-CN";
+import type { Reason, ReasonCode } from "./types";
 
 // `size_bytes` is `number | null` since schema version 2: an item whose size
 // could not be measured must never be rendered as `0 B`, and a total that omits
@@ -127,5 +131,64 @@ describe("compareByActionability", () => {
     // Zero, deliberately: the volume ordering is a second pass, composed by the
     // caller. A non-zero here would fight it.
     expect(compareByActionability(rec("Safe"), rec("Safe"))).toBe(0);
+  });
+});
+
+describe("reasonText", () => {
+  // Shaped like a real reason: an English sentence from the core plus the code
+  // that says what the sentence means.
+  const dirty: Reason = {
+    code: "wt.dirty",
+    severity: "Unsafe",
+    text: "has uncommitted changes",
+    evidence: "3 files have uncommitted changes"
+  };
+
+  function inLocale(locale: "en" | "zh-CN", run: () => void): void {
+    applyLocale(locale);
+    try {
+      run();
+    } finally {
+      applyLocale(SOURCE_LOCALE);
+    }
+  }
+
+  it("follows the active language rather than the core's sentence", () => {
+    inLocale("en", () => {
+      expect(reasonText(dirty)).toBe(en.reasons.wt.dirty);
+    });
+    inLocale("zh-CN", () => {
+      // The point of the table: this is the sentence the reader gets, not the
+      // English one that arrived with the record.
+      expect(reasonText(dirty)).toBe(zhCN.reasons.wt.dirty);
+      expect(reasonText(dirty)).not.toBe(dirty.text);
+    });
+  });
+
+  it("keeps the core's sentence for a code this build does not know", () => {
+    // A newer core against an older UI must still say something true rather than
+    // an empty cell, so the fallback is the sentence and not a placeholder.
+    const future: Reason = {
+      ...dirty,
+      code: "wt.brand_new_check" as ReasonCode,
+      text: "a check this build has never heard of"
+    };
+    inLocale("zh-CN", () => {
+      expect(reasonText(future)).toBe(future.text);
+    });
+  });
+
+  it("covers the artifact family as well as the worktree one", () => {
+    // Both families travel in the same `reasons` table; a lookup that only worked
+    // for `wt.*` would fall back to English for every artifact row.
+    inLocale("zh-CN", () => {
+      const artifact: Reason = {
+        code: "af.git_tracked",
+        severity: "Unsafe",
+        text: "the directory contains files committed to the repository",
+        evidence: "git ls-files matches 2 files"
+      };
+      expect(reasonText(artifact)).toBe(zhCN.reasons.af.git_tracked);
+    });
   });
 });

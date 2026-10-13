@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { Reason, SafetyStatus } from "../types";
 import { sortReasons } from "../state";
+import { reasonText } from "../format";
 
 const props = defineProps<{ reasons: Reason[] }>();
 
@@ -18,7 +19,7 @@ const shown = computed(() => sortReasons(props.reasons));
   <div class="reasons">
     <div v-for="reason in shown" :key="reason.code + reason.text" class="reason" :class="`reason--${reason.severity.toLowerCase()}`">
       <span class="reason__mark">{{ MARK[reason.severity] }}</span>
-      <span class="reason__text">{{ reason.text }}</span>
+      <span class="reason__text">{{ reasonText(reason) }}</span>
       <span v-if="reason.evidence" class="reason__evidence">{{ reason.evidence }}</span>
     </div>
   </div>
