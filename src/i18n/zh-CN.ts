@@ -59,6 +59,46 @@ export const zhCN = {
       Unsafe: "禁止"
     }
   },
+  // 每个 ReasonCode 一条，顺序与 `src/types.ts` 一致。核心送来的判定理由因此
+  // 用读者自己的语言显示，而不是送出它那个进程的语言。`evidence` 不在这里：
+  // 那是命令、计数或路径，保持原样。
+  //
+  // `wt.cannot_verify` 在核心里有四种说法（「cannot read the worktree status」、
+  // 「cannot read the HEAD commit time」、「cannot read the merge status」、
+  // 「cannot read {label}」），但结论完全一样，所以一条就够，细节留给下面的证据行。
+  reasons: {
+    wt: {
+      main: "这是主工作树",
+      locked: "已被 Git 锁定",
+      dirty: "有未提交的改动",
+      unpushed: "有从未推送过的提交",
+      detached: "HEAD 处于游离状态",
+      no_upstream: "没有上游分支，且尚未合并",
+      unmerged: "未合并进默认分支",
+      untracked: "含有未跟踪文件",
+      stash: "存在 stash 条目",
+      recent_activity: "在活动时间窗口内有过改动",
+      agent_active: "可能有 Git 命令正在运行",
+      cannot_verify: "无法完成检查",
+      whitelisted: "命中白名单规则",
+      prunable: "工作目录已不存在",
+      merged: "已合并进默认分支",
+      clean: "工作区干净"
+    },
+    af: {
+      git_tracked: "该目录含有已提交进仓库的文件",
+      nested_git: "含有嵌套的 Git 仓库",
+      authored_content: "含有手写内容",
+      credentials: "含有疑似凭据文件",
+      symlink_outside: "软链接指向项目之外",
+      whitelisted: "受白名单规则保护",
+      recent_activity: "最近有过改动",
+      cannot_verify: "无法完成检查",
+      empty: "该目录为空",
+      git_ignored: "已被 .gitignore 忽略",
+      rebuildable: "可重新生成的目录"
+    }
+  },
   common: {
     unknown: "未知",
     none: "（无）",

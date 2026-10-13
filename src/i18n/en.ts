@@ -66,6 +66,48 @@ export const en = {
       Unsafe: "Blocked"
     }
   },
+  // One entry per ReasonCode, in the order `src/types.ts` declares them. The core
+  // ships the same codes, so a verdict can be rendered in the reader's language
+  // instead of the language of the process that found it. `evidence` is not here:
+  // it is a command, a count or a path, and it stays verbatim.
+  //
+  // `wt.cannot_verify` has four wordings in the core ("cannot read the worktree
+  // status", "cannot read the HEAD commit time", "cannot read the merge status",
+  // "cannot read {label}"). The conclusion is identical in all four, so one entry
+  // covers them and the evidence line below carries the detail.
+  reasons: {
+    wt: {
+      main: "this is the main worktree",
+      locked: "locked by Git",
+      dirty: "has uncommitted changes",
+      unpushed: "has commits that were never pushed",
+      detached: "HEAD is detached",
+      no_upstream: "has no upstream branch and is not merged",
+      unmerged: "not merged into the default branch",
+      untracked: "has untracked files",
+      stash: "has stash entries",
+      recent_activity: "changed within the activity window",
+      agent_active: "a Git command may be running",
+      cannot_verify: "cannot complete the check",
+      whitelisted: "matches a whitelist rule",
+      prunable: "the working directory no longer exists",
+      merged: "merged into the default branch",
+      clean: "clean working tree"
+    },
+    af: {
+      git_tracked: "the directory contains files committed to the repository",
+      nested_git: "contains a nested Git repository",
+      authored_content: "contains hand-written content",
+      credentials: "contains what looks like a credential file",
+      symlink_outside: "symlink pointing outside the project",
+      whitelisted: "protected by a whitelist rule",
+      recent_activity: "changed recently",
+      cannot_verify: "could not complete the check",
+      empty: "the directory is empty",
+      git_ignored: "ignored by .gitignore",
+      rebuildable: "regenerable directory"
+    }
+  },
   common: {
     unknown: "unknown",
     none: "(none)",
