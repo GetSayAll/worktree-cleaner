@@ -213,6 +213,13 @@ pub fn whitelist_hit(candidate: &Path, rules: &[PathBuf]) -> Option<PathBuf> {
         .map(|resolution| resolution.resolved)
         .unwrap_or_else(|_| normalized.clone());
     for rule in rules {
+        // An empty rule would lexically normalise to the root and therefore match
+        // every absolute path — fail-closed, but a surprising silent "protect
+        // everything" for what is really a malformed rule. Skip it instead; the UI
+        // never emits empty rules, this is a defence in depth for other callers.
+        if rule.as_os_str().is_empty() {
+            continue;
+        }
         let rule_literal = lexical_normalize(rule);
         let rule_resolved = resolve_for_inspection(rule)
             .map(|resolution| resolution.resolved)
@@ -816,6 +823,31 @@ mod tests {
             validate_path_for_deletion(Path::new("/Users/andy/MySrc/keep-me-other"), &context)
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn empty_whitelist_rules_are_skipped_not_matched_everywhere() {
+        // A malformed (empty) rule normalises to the root and would otherwise match
+        // every absolute path — silently protecting everything.
+        let context = DeletionContext::new(UNRELATED_PARENT).with_whitelist(vec![
+            PathBuf::new(),
+            PathBuf::from("/Users/andy/MySrc/keep-me"),
+        ]);
+        // The real rule still works.
+        assert_rejected("/Users/andy/MySrc/keep-me/target", &context);
+        // The empty rule does not turn every other path into a whitelist hit.
+        assert!(
+            validate_path_for_deletion(Path::new("/Users/andy/MySrc/other/target"), &context)
+                .is_ok()
+        );
+        // A whitelist that contains *only* empty rules protects nothing.
+        let only_empty = DeletionContext::new(UNRELATED_PARENT)
+            .with_whitelist(vec![PathBuf::new(), PathBuf::new()]);
+        assert!(validate_path_for_deletion(
+            Path::new("/Users/andy/MySrc/other/target"),
+            &only_empty
+        )
+        .is_ok());
     }
 
     #[test]

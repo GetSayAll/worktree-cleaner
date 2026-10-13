@@ -13,6 +13,10 @@
 //! - `GIT_TERMINAL_PROMPT=0` — a credential prompt would otherwise hang until the
 //!   timeout; git must fail instead of waiting for input.
 //! - stdin is `/dev/null`, so no subcommand can wait on input.
+//! - `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` are removed from the
+//!   environment: if the app is started from inside a Git hook (or any process
+//!   that exported them), an inherited value would silently redirect every
+//!   `git -C <repo>` call to the wrong repository.
 //!
 //! Scanning code must only pass read-only verbs (`status`, `worktree list`,
 //! `merge-base`, `stash list`, `ls-files`, `log`, `rev-parse`, `symbolic-ref`). The
@@ -103,6 +107,9 @@ impl GitRunner for ProcessGitRunner {
             .args(args)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_TERMINAL_PROMPT", "0")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -157,8 +164,16 @@ impl GitRunner for ProcessGitRunner {
             }
         };
 
-        let stdout = stdout_thread.join().unwrap_or_default();
-        let stderr = stderr_thread.join().unwrap_or_default();
+        // A reader-thread panic must not read as "the command printed nothing":
+        // that would turn an internal failure into an empty-but-fine result (D3).
+        let stdout = stdout_thread.join().map_err(|_| GitError::Io {
+            command: command.clone(),
+            source: std::io::Error::other("the stdout reader thread failed"),
+        })?;
+        let stderr = stderr_thread.join().map_err(|_| GitError::Io {
+            command: command.clone(),
+            source: std::io::Error::other("the stderr reader thread failed"),
+        })?;
         Ok(GitOutput {
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
             stderr: String::from_utf8_lossy(&stderr).into_owned(),
@@ -197,8 +212,13 @@ pub(crate) mod testing {
     #[derive(Debug, Clone)]
     pub(crate) enum Canned {
         Out(GitOutput),
-        Failed { code: Option<i32>, stderr: String },
+        Failed {
+            code: Option<i32>,
+            stderr: String,
+        },
         Timeout,
+        /// The process could not be spawned at all (git missing, fork failure).
+        Io,
     }
 
     /// Returns canned output keyed by the argument list.
@@ -229,6 +249,19 @@ pub(crate) mod testing {
             let wanted: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
             self.calls().iter().any(|call| call == &wanted)
         }
+
+        /// Whether a call *starting* with these arguments was made.
+        ///
+        /// Use this when the full argument list is not interesting: an exact-match
+        /// `called(&["merge-base", "--is-ancestor"])` would never fire, because the
+        /// real call carries two more arguments, and a never-firing assertion
+        /// passes vacuously.
+        pub(crate) fn called_prefix(&self, args: &[&str]) -> bool {
+            let wanted: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+            self.calls()
+                .iter()
+                .any(|call| call.len() >= wanted.len() && call.starts_with(&wanted))
+        }
     }
 
     impl GitRunner for FakeGitRunner {
@@ -247,6 +280,10 @@ pub(crate) mod testing {
                         Canned::Timeout => Err(GitError::Timeout {
                             command: key.join(" "),
                             seconds: 10,
+                        }),
+                        Canned::Io => Err(GitError::Io {
+                            command: key.join(" "),
+                            source: std::io::Error::other("canned spawn failure"),
                         }),
                     };
                 }
@@ -325,10 +362,12 @@ mod tests {
 
         let runner = ProcessGitRunner::default();
         let worktrees = runner
-            .run(&dir, &["worktree", "list", "--porcelain"])
+            .run(&dir, &["worktree", "list", "--porcelain", "-z"])
             .expect("worktree list");
         assert!(worktrees.success());
         assert!(worktrees.stdout.contains("worktree "));
+        // `-z` NUL-terminates every attribute; the parser depends on that.
+        assert!(worktrees.stdout.contains('\0'));
 
         let status = runner
             .run(&dir, &["status", "--porcelain=v2", "--branch"])

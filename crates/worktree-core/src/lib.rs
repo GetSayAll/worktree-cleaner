@@ -53,6 +53,12 @@ pub struct WorktreeRecord {
     pub is_detached: bool,
     pub is_locked: bool,
     /// Git metadata is still present, but the working directory is gone.
+    ///
+    /// When this is `true`, the count fields below (`dirty_files`,
+    /// `untracked_files`, `untracked_file_list`, `ahead`, `behind`) are
+    /// **not-checked** values: the working directory is gone, so the checks that
+    /// would produce them never ran. Their zeros must never be read as
+    /// "nothing to report" — the actionable fact is the prune itself.
     pub is_prunable: bool,
     pub dirty_files: u32,
     pub untracked_files: u32,

@@ -11,9 +11,9 @@
 //! parsed (development contract section 2).
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
-use crate::git::{display_command, GitError, GitOutput, GitRunner, DEFAULT_GIT_TIMEOUT};
+use crate::git::{display_command, GitError, GitOutput, GitRunner};
 use crate::path::whitelist_hit;
 use crate::reason::{Reason, ReasonCode, SafetyAssessment, SafetyStatus};
 use crate::timefmt::{elapsed_days, format_rfc3339, from_unix_seconds, humanize_days};
@@ -39,19 +39,25 @@ pub struct WorktreeEntry {
     pub prunable_reason: Option<String>,
 }
 
-/// Parses `git worktree list --porcelain`.
+/// Parses `git worktree list --porcelain -z`.
 ///
-/// Entries are separated by blank lines and each starts with a `worktree <path>`
-/// line; the **first** entry is the main worktree. Unknown attribute lines are
-/// ignored on purpose: porcelain gains fields over time, and an unknown line must
-/// never fail a scan.
-pub fn parse_worktree_list(porcelain: &str) -> Vec<WorktreeEntry> {
+/// `-z` is mandatory, not an optimisation: without it a path that contains a
+/// newline is emitted raw, and a line-based parser silently truncates the path at
+/// the newline — the remainder looks like an unknown attribute. The truncated path
+/// then fails the existence check, and the entry is routed to the prune-only
+/// channel as if its directory were gone (D3: a parsing failure must never read
+/// as a safe fact). With `-z` every attribute is NUL-terminated, so any path
+/// survives intact.
+///
+/// A new `worktree` attribute starts the next entry; the **first** entry is the
+/// main worktree. Unknown attributes are ignored on purpose: porcelain gains
+/// fields over time, and an unknown attribute must never fail a scan.
+pub fn parse_worktree_list(porcelain_z: &str) -> Vec<WorktreeEntry> {
     let mut entries: Vec<WorktreeEntry> = Vec::new();
     let mut current: Option<WorktreeEntry> = None;
 
-    for line in porcelain.lines() {
-        let line = line.trim_end_matches('\r');
-        if let Some(path) = line.strip_prefix("worktree ") {
+    for attribute in porcelain_z.split('\0') {
+        if let Some(path) = attribute.strip_prefix("worktree ") {
             if let Some(entry) = current.take() {
                 entries.push(entry);
             }
@@ -71,22 +77,22 @@ pub fn parse_worktree_list(porcelain: &str) -> Vec<WorktreeEntry> {
         let Some(entry) = current.as_mut() else {
             continue;
         };
-        if let Some(sha) = line.strip_prefix("HEAD ") {
-            entry.head = Some(sha.trim().to_string());
-        } else if let Some(reference) = line.strip_prefix("branch ") {
+        if let Some(sha) = attribute.strip_prefix("HEAD ") {
+            entry.head = non_empty(sha);
+        } else if let Some(reference) = attribute.strip_prefix("branch ") {
             entry.branch = Some(short_branch(reference.trim()));
-        } else if line == "detached" {
+        } else if attribute == "detached" {
             entry.is_detached = true;
-        } else if line == "bare" {
+        } else if attribute == "bare" {
             entry.is_bare = true;
-        } else if line == "locked" {
+        } else if attribute == "locked" {
             entry.is_locked = true;
-        } else if let Some(reason) = line.strip_prefix("locked ") {
+        } else if let Some(reason) = attribute.strip_prefix("locked ") {
             entry.is_locked = true;
             entry.lock_reason = non_empty(reason);
-        } else if line == "prunable" {
+        } else if attribute == "prunable" {
             entry.is_prunable = true;
-        } else if let Some(reason) = line.strip_prefix("prunable ") {
+        } else if let Some(reason) = attribute.strip_prefix("prunable ") {
             entry.is_prunable = true;
             entry.prunable_reason = non_empty(reason);
         }
@@ -110,8 +116,17 @@ pub struct StatusInfo {
     pub behind: u32,
     /// Tracked files with uncommitted changes (ordinary, rename/copy, unmerged).
     pub dirty_files: u32,
-    /// Untracked, non-ignored files.
+    /// Untracked, non-ignored files. An untracked **directory** is folded into
+    /// one entry by git, so this is a lower bound; the exact count comes from
+    /// `ls-files --others` when that call succeeds.
     pub untracked_files: u32,
+    /// Whether any `# branch.*` header line was seen. Without the header the
+    /// counts above are not "zero" — they are unknown (D3).
+    pub header_seen: bool,
+    /// `# branch.upstream` was present but `# branch.ab` was not: git omits the
+    /// ahead/behind line when the upstream ref itself is gone, so the counts are
+    /// unknown rather than zero.
+    pub upstream_without_ab: bool,
 }
 
 /// Parses `git status --porcelain=v2 --branch`.
@@ -121,8 +136,10 @@ pub struct StatusInfo {
 /// at all.
 pub fn parse_status(porcelain_v2: &str) -> StatusInfo {
     let mut info = StatusInfo::default();
+    let mut ab_seen = false;
     for line in porcelain_v2.lines() {
         if let Some(rest) = line.strip_prefix("# branch.oid ") {
+            info.header_seen = true;
             let oid = rest.trim();
             // An unborn branch reports `(initial)`, which is not a SHA.
             info.head = if oid == "(initial)" {
@@ -131,6 +148,7 @@ pub fn parse_status(porcelain_v2: &str) -> StatusInfo {
                 Some(oid.to_string())
             };
         } else if let Some(rest) = line.strip_prefix("# branch.head ") {
+            info.header_seen = true;
             let head = rest.trim();
             info.branch = if head == "(detached)" {
                 None
@@ -138,8 +156,11 @@ pub fn parse_status(porcelain_v2: &str) -> StatusInfo {
                 Some(short_branch(head))
             };
         } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
+            info.header_seen = true;
             info.upstream = Some(short_branch(rest.trim()));
         } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+            info.header_seen = true;
+            ab_seen = true;
             for token in rest.split_whitespace() {
                 if let Some(value) = token.strip_prefix('+') {
                     if let Ok(ahead) = value.parse() {
@@ -157,6 +178,7 @@ pub fn parse_status(porcelain_v2: &str) -> StatusInfo {
             info.untracked_files += 1;
         }
     }
+    info.upstream_without_ab = info.upstream.is_some() && !ab_seen;
     info
 }
 
@@ -183,8 +205,9 @@ pub struct WorktreeCheckOptions {
     /// Worktree directory size measured by the caller; `None` = unmeasurable, which
     /// must stay distinguishable from `0` (development contract section 3).
     pub size_bytes: Option<u64>,
-    /// Per-command timeout for the Git calls.
-    pub timeout: Duration,
+    // There is deliberately no per-command timeout here: the timeout belongs to
+    // the [`crate::git::GitRunner`], which owns the processes. The orchestrator
+    // passes the setting into `ProcessGitRunner::new`, so one knob, one owner.
 }
 
 impl Default for WorktreeCheckOptions {
@@ -196,7 +219,6 @@ impl Default for WorktreeCheckOptions {
             whitelist: Vec::new(),
             now: SystemTime::now(),
             size_bytes: None,
-            timeout: DEFAULT_GIT_TIMEOUT,
         }
     }
 }
@@ -269,6 +291,27 @@ pub fn infer_agent(path: &Path) -> Option<String> {
 /// `untracked_files` comes from `git status` and stays exact.
 const MAX_UNTRACKED_LIST: usize = 200;
 
+/// Filesystem state of a worktree directory.
+///
+/// The distinction matters: `Path::exists()` reports `false` for a permission
+/// error just as it does for a missing path, and treating "cannot stat" as "gone"
+/// would route an unreadable worktree to the prune-only channel with a Safe
+/// verdict (D3). Only [`DirectoryState::Gone`] may skip the per-directory checks.
+enum DirectoryState {
+    Present,
+    Gone,
+    Unreadable(std::io::Error),
+}
+
+fn directory_state(path: &Path) -> DirectoryState {
+    match std::fs::metadata(path) {
+        Ok(_) => DirectoryState::Present,
+        // Only "not found" is evidence of absence; everything else is unknown.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => DirectoryState::Gone,
+        Err(error) => DirectoryState::Unreadable(error),
+    }
+}
+
 /// Runs the worktree checks for one entry and assembles its [`WorktreeRecord`].
 ///
 /// `repo` is any existing directory of the same repository (the main worktree in
@@ -283,8 +326,15 @@ pub fn check_worktree(
 ) -> WorktreeRecord {
     let mut reasons: Vec<Reason> = Vec::new();
     let path_text = entry.path.display().to_string();
-    let directory_present = entry.path.exists();
-    let directory_gone = entry.is_prunable || !directory_present;
+    let directory = directory_state(&entry.path);
+    // The directory must be verifiably gone before the entry may take the
+    // prune-only channel; a porcelain `prunable` flag alone is not enough (the
+    // directory may have come back), and a stat error is never enough.
+    let directory_gone = matches!(directory, DirectoryState::Gone);
+    let is_prunable = entry.is_prunable && directory_gone;
+    if let DirectoryState::Unreadable(error) = &directory {
+        reasons.push(cannot_verify_io("the worktree directory", error));
+    }
 
     // ---- porcelain-only reasons: no command can change these ----
     if is_main {
@@ -317,6 +367,9 @@ pub fn check_worktree(
     let mut status: Option<StatusInfo> = None;
     let mut stash_count: u32 = 0;
     let mut untracked_file_list: Vec<String> = Vec::new();
+    // Exact untracked file count from `ls-files --others`, when that call
+    // succeeded. `None` = not measured; the folded status count is then used.
+    let mut untracked_listed: Option<u32> = None;
     let mut activity: Option<SystemTime> = None;
 
     if directory_gone {
@@ -334,41 +387,46 @@ pub fn check_worktree(
             &mut reasons,
         ) {
             let info = parse_status(&output.stdout);
-            if info.dirty_files > 0 {
-                reasons.push(Reason::blocking(
-                    ReasonCode::WtDirty,
-                    "has uncommitted changes",
-                    format!("{} files have uncommitted changes", info.dirty_files),
+            if !info.header_seen {
+                // A status without the `# branch.*` header cannot be read as
+                // "zero changes": the counts would be a guess (D3).
+                reasons.push(Reason::review(
+                    ReasonCode::WtCannotVerify,
+                    "cannot read the worktree status",
+                    "the status header (# branch.oid / # branch.head) was missing, so the file counts are unknown",
                 ));
-            }
-            if info.untracked_files > 0 {
-                let severity = if opts.untracked_as_unsafe {
-                    SafetyStatus::Unsafe
-                } else {
-                    SafetyStatus::Review
-                };
-                reasons.push(Reason::new(
-                    ReasonCode::WtUntracked,
-                    severity,
-                    "has untracked files",
-                    format!("{} untracked files", info.untracked_files),
+            } else if info.upstream_without_ab {
+                // Git omits `# branch.ab` when the upstream ref itself is gone;
+                // ahead/behind are then unknown, not zero.
+                reasons.push(Reason::review(
+                    ReasonCode::WtCannotVerify,
+                    "cannot read the worktree status",
+                    "the upstream branch no longer exists, so the ahead/behind counts are unknown",
                 ));
+            } else {
+                if info.dirty_files > 0 {
+                    reasons.push(Reason::blocking(
+                        ReasonCode::WtDirty,
+                        "has uncommitted changes",
+                        format!("{} files have uncommitted changes", info.dirty_files),
+                    ));
+                }
+                if info.ahead > 0 {
+                    reasons.push(Reason::blocking(
+                        ReasonCode::WtUnpushed,
+                        "has commits that were never pushed",
+                        format!("{} commits not pushed", info.ahead),
+                    ));
+                }
+                if info.dirty_files == 0 && info.untracked_files == 0 {
+                    reasons.push(Reason::safe(
+                        ReasonCode::WtClean,
+                        "the working tree is clean",
+                        "no uncommitted changes, no untracked files",
+                    ));
+                }
+                status = Some(info);
             }
-            if info.ahead > 0 {
-                reasons.push(Reason::blocking(
-                    ReasonCode::WtUnpushed,
-                    "has commits that were never pushed",
-                    format!("{} commits not pushed", info.ahead),
-                ));
-            }
-            if info.dirty_files == 0 && info.untracked_files == 0 {
-                reasons.push(Reason::safe(
-                    ReasonCode::WtClean,
-                    "the working tree is clean",
-                    "no uncommitted changes, no untracked files",
-                ));
-            }
-            status = Some(info);
         }
 
         if let Some(output) = run_checked(
@@ -400,13 +458,43 @@ pub fn check_worktree(
                 &["ls-files", "--others", "--exclude-standard"],
                 &mut reasons,
             ) {
-                untracked_file_list = output
+                // `ls-files --others` lists individual files, so this is the exact
+                // count where `git status` folds a whole directory into one entry.
+                let listed: Vec<&str> = output
                     .stdout
                     .lines()
                     .filter(|line| !line.is_empty())
+                    .collect();
+                untracked_listed = Some(listed.len() as u32);
+                untracked_file_list = listed
+                    .into_iter()
                     .take(MAX_UNTRACKED_LIST)
                     .map(str::to_string)
                     .collect();
+            }
+        }
+
+        // The untracked reason is emitted here, after the exact count is known.
+        if let Some(info) = &status {
+            if info.untracked_files > 0 {
+                let severity = if opts.untracked_as_unsafe {
+                    SafetyStatus::Unsafe
+                } else {
+                    SafetyStatus::Review
+                };
+                let count = untracked_listed.unwrap_or(info.untracked_files);
+                let mut evidence = format!("{count} untracked files");
+                if untracked_listed.is_some_and(|listed| listed > MAX_UNTRACKED_LIST as u32) {
+                    evidence.push_str(&format!(
+                        " (the list below shows the first {MAX_UNTRACKED_LIST})"
+                    ));
+                }
+                reasons.push(Reason::new(
+                    ReasonCode::WtUntracked,
+                    severity,
+                    "has untracked files",
+                    evidence,
+                ));
             }
         }
 
@@ -418,11 +506,31 @@ pub fn check_worktree(
             &["log", "-1", "--format=%ct"],
             &mut reasons,
         )
-        .and_then(|output| output.stdout.trim().parse::<i128>().ok())
-        .map(from_unix_seconds);
-        let directory_mtime = std::fs::metadata(&entry.path)
-            .and_then(|meta| meta.modified())
-            .ok();
+        .and_then(|output| match output.stdout.trim().parse::<i128>() {
+            Ok(seconds) => Some(from_unix_seconds(seconds)),
+            Err(_) => {
+                reasons.push(Reason::review(
+                    ReasonCode::WtCannotVerify,
+                    "cannot read the HEAD commit time",
+                    format!(
+                        "git reported a non-numeric commit time: {:?}",
+                        output.stdout.trim()
+                    ),
+                ));
+                None
+            }
+        });
+        let directory_mtime = match std::fs::metadata(&entry.path).and_then(|meta| meta.modified())
+        {
+            Ok(time) => Some(time),
+            // Gone cannot happen here (the branch above caught it); any other
+            // error leaves the activity unknown rather than silently absent.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                reasons.push(cannot_verify_io("the directory modification time", &error));
+                None
+            }
+        };
         activity = later_of(commit_time, directory_mtime);
 
         // A Git command holding `index.lock` may be running right now.
@@ -463,37 +571,25 @@ pub fn check_worktree(
     // ---- merge status: runs in `repo`, so it survives a missing directory ----
     let merged = match (opts.default_branch.as_deref(), entry.head.as_deref()) {
         (Some(default_branch), Some(head)) => {
-            match runner.run(repo, &["merge-base", "--is-ancestor", head, default_branch]) {
-                // The exit code is the answer: 0 = ancestor (merged), 1 = not an
-                // ancestor, anything else = cannot determine.
-                Ok(output) if output.code == Some(0) => {
+            match merge_base_is_ancestor(runner, repo, head, default_branch) {
+                Ok((true, evidence)) => {
                     reasons.push(Reason::safe(
                         ReasonCode::WtMerged,
                         "merged into the default branch",
-                        format!("merge-base reports {head} is an ancestor of {default_branch}"),
+                        evidence,
                     ));
                     Some(true)
                 }
-                Ok(output) if output.code == Some(1) => {
+                Ok((false, evidence)) => {
                     reasons.push(Reason::review(
                         ReasonCode::WtUnmerged,
                         "not merged into the default branch",
-                        format!("merge-base reports {head} is not an ancestor of {default_branch}"),
+                        evidence,
                     ));
                     Some(false)
                 }
-                Ok(output) => {
-                    let error = GitError::Failed {
-                        command: display_command(
-                            repo,
-                            &["merge-base", "--is-ancestor", head, default_branch],
-                        ),
-                        code: output.code,
-                        stderr: output.stderr.clone(),
-                    };
-                    reasons.push(cannot_verify("the merge status", &error));
-                    None
-                }
+                // Anything that is neither exit 0 nor exit 1 answers nothing and
+                // must never be read as "merged" (D3).
                 Err(error) => {
                     reasons.push(cannot_verify("the merge status", &error));
                     None
@@ -558,9 +654,11 @@ pub fn check_worktree(
                 .as_ref()
                 .is_some_and(|info| info.branch.is_none() && !entry.is_bare),
         is_locked: entry.is_locked,
-        is_prunable: directory_gone,
+        is_prunable,
         dirty_files: status.as_ref().map_or(0, |info| info.dirty_files),
-        untracked_files: status.as_ref().map_or(0, |info| info.untracked_files),
+        untracked_files: untracked_listed
+            .or_else(|| status.as_ref().map(|info| info.untracked_files))
+            .unwrap_or(0),
         untracked_file_list,
         ahead: status.as_ref().map_or(0, |info| info.ahead),
         behind: status.as_ref().map_or(0, |info| info.behind),
@@ -572,6 +670,67 @@ pub fn check_worktree(
         size_bytes: opts.size_bytes,
         safety,
     }
+}
+
+/// Asks `git merge-base --is-ancestor` whether `head` is an ancestor of
+/// `default_branch`.
+///
+/// Two candidate names are tried, in order: the branch as detected, then
+/// `origin/<name>`. The fallback exists because `origin/HEAD` names a branch that
+/// often exists only as a remote-tracking ref — `git merge-base` does not resolve
+/// the bare name to it (verified against git 2.54), which would degrade every
+/// healthy worktree to `cannot_verify`. `--` keeps a branch name that starts with
+/// `-` from being parsed as an option. The exit code is the answer: 0 = ancestor,
+/// 1 = not an ancestor; every other outcome is an error the caller must treat as
+/// unknown (D3). A transport error (timeout, spawn failure) is returned as-is:
+/// retrying another name cannot fix it.
+fn merge_base_is_ancestor(
+    runner: &dyn GitRunner,
+    repo: &Path,
+    head: &str,
+    default_branch: &str,
+) -> Result<(bool, String), GitError> {
+    let mut candidates = vec![default_branch.to_string()];
+    if !default_branch.contains('/') {
+        candidates.push(format!("origin/{default_branch}"));
+    }
+    let mut last_error: Option<GitError> = None;
+    for candidate in &candidates {
+        let args = [
+            "merge-base",
+            "--is-ancestor",
+            "--",
+            head,
+            candidate.as_str(),
+        ];
+        match runner.run(repo, &args) {
+            Ok(output) if output.code == Some(0) => {
+                return Ok((
+                    true,
+                    format!("merge-base reports {head} is an ancestor of {candidate}"),
+                ));
+            }
+            Ok(output) if output.code == Some(1) => {
+                return Ok((
+                    false,
+                    format!("merge-base reports {head} is not an ancestor of {candidate}"),
+                ));
+            }
+            Ok(output) => {
+                last_error = Some(GitError::Failed {
+                    command: display_command(repo, &args),
+                    code: output.code,
+                    stderr: output.stderr.clone(),
+                });
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| GitError::Failed {
+        command: display_command(repo, &["merge-base", "--is-ancestor", "--", head]),
+        code: None,
+        stderr: "no merge-base candidate resolved".to_string(),
+    }))
 }
 
 /// Runs one Git call and maps **every** failure onto a `wt.cannot_verify` reason
@@ -611,10 +770,23 @@ fn cannot_verify(label: &str, error: &GitError) -> Reason {
     )
 }
 
+/// The same shape for a filesystem failure (a stat or mtime read), which is not a
+/// Git error but must fail closed just the same (D3).
+fn cannot_verify_io(label: &str, error: &std::io::Error) -> Reason {
+    Reason::review(
+        ReasonCode::WtCannotVerify,
+        format!("cannot read {label}"),
+        error.to_string(),
+    )
+}
+
 fn prunable_evidence(entry: &WorktreeEntry) -> String {
     match entry.prunable_reason.as_deref() {
         Some(reason) => format!("only cleans .git/worktrees metadata ({reason})"),
-        None => "only cleans .git/worktrees metadata".to_string(),
+        None if entry.is_prunable => "only cleans .git/worktrees metadata".to_string(),
+        // The directory is gone but porcelain has not marked the entry yet.
+        None => "the directory does not exist, so git worktree prune will clean the metadata"
+            .to_string(),
     }
 }
 
@@ -664,7 +836,7 @@ fn non_empty(text: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::git::testing::{Canned, FakeGitRunner};
-    use std::time::UNIX_EPOCH;
+    use std::time::{Duration, UNIX_EPOCH};
 
     fn canned(args: &[&str], stdout: &str) -> (Vec<String>, Canned) {
         (
@@ -687,27 +859,20 @@ mod tests {
         )
     }
 
-    /// Porcelain output captured from a real repository (git 2.54): a main worktree,
-    /// a locked linked worktree, a detached one, and a prunable one.
+    /// Porcelain output captured from a real repository (git 2.54, `--porcelain -z`):
+    /// a main worktree, a detached one, a locked one, one whose path contains a
+    /// newline, and a prunable one.
+    ///
+    /// Every attribute is NUL-terminated and entries are separated by one extra
+    /// NUL (verified with `od -c` against git 2.54). The newline inside the fourth
+    /// path is emitted raw: a line-based parser would truncate the path there and
+    /// misread the entry as gone, which is exactly why `-z` is mandatory.
     const PORCELAIN: &str = "\
-worktree /private/tmp/wt-fixture
-HEAD 19402c62a2bdb19e2271df95ecfc1a272aad4bf6
-branch refs/heads/main
-
-worktree /private/tmp/wt-fixture-detached
-HEAD 19402c62a2bdb19e2271df95ecfc1a272aad4bf6
-detached
-
-worktree /private/tmp/wt-fixture-feature
-HEAD 19402c62a2bdb19e2271df95ecfc1a272aad4bf6
-branch refs/heads/feature/x
-locked holding for review
-
-worktree /private/tmp/wt-fixture-gone
-HEAD 19402c62a2bdb19e2271df95ecfc1a272aad4bf6
-branch refs/heads/gone-branch
-prunable gitdir file points to non-existent location
-";
+worktree /private/tmp/wt-fixture\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad4bf6\0branch refs/heads/main\0\0\
+worktree /private/tmp/wt-fixture-detached\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad4bf6\0detached\0\0\
+worktree /private/tmp/wt-fixture-feature\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad4bf6\0branch refs/heads/feature/x\0locked holding for review\0\0\
+worktree /private/tmp/wt-fixture/new\nline\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad4bf6\0branch refs/heads/newline-branch\0\0\
+worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad4bf6\0branch refs/heads/gone-branch\0prunable gitdir file points to non-existent location\0";
 
     const CLEAN_STATUS: &str = "\
 # branch.oid 3704a98b0e299445f52e13555002a5ffe7d13814
@@ -726,6 +891,26 @@ prunable gitdir file points to non-existent location
 # branch.head feature/x
 # branch.upstream origin/feature/x
 # branch.ab +2 -1
+";
+
+    /// Dirty, untracked and unpushed at once, with an upstream: the shape that
+    /// produces the most reasons from the status check alone.
+    const MESSY_STATUS: &str = "\
+# branch.oid 3704a98b0e299445f52e13555002a5ffe7d13814
+# branch.head feature/x
+# branch.upstream origin/feature/x
+# branch.ab +2 -1
+1 .M N... 100644 100644 100644 814f4a422927b82f5f8a43f8fab6d3839e3983f2 814f4a422927b82f5f8a43f8fab6d3839e3983f2 a.txt
+? notes.md
+";
+
+    /// An upstream that no longer exists: git prints `# branch.upstream` but omits
+    /// `# branch.ab` entirely (verified against git 2.54), so ahead/behind are
+    /// unknown rather than zero.
+    const UPSTREAM_WITHOUT_AB: &str = "\
+# branch.oid 3704a98b0e299445f52e13555002a5ffe7d13814
+# branch.head feature/x
+# branch.upstream origin/feature/x
 ";
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -789,6 +974,7 @@ prunable gitdir file points to non-existent location
                 vec![
                     "merge-base".to_string(),
                     "--is-ancestor".to_string(),
+                    "--".to_string(),
                     "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
                     "main".to_string(),
                 ],
@@ -823,7 +1009,7 @@ prunable gitdir file points to non-existent location
     #[test]
     fn parses_real_porcelain_output() {
         let entries = parse_worktree_list(PORCELAIN);
-        assert_eq!(entries.len(), 4);
+        assert_eq!(entries.len(), 5);
         assert_eq!(entries[0].path, Path::new("/private/tmp/wt-fixture"));
         assert_eq!(entries[0].branch.as_deref(), Some("main"));
         assert_eq!(
@@ -843,20 +1029,44 @@ prunable gitdir file points to non-existent location
         );
         assert_eq!(entries[2].branch.as_deref(), Some("feature/x"));
 
-        assert!(entries[3].is_prunable);
+        // A path containing a newline survives intact under `-z`; a line-based
+        // parser would truncate it to "/private/tmp/wt-fixture/new" and treat the
+        // rest as garbage.
         assert_eq!(
-            entries[3].prunable_reason.as_deref(),
+            entries[3].path,
+            Path::new("/private/tmp/wt-fixture/new\nline")
+        );
+        assert_eq!(entries[3].branch.as_deref(), Some("newline-branch"));
+
+        assert!(entries[4].is_prunable);
+        assert_eq!(
+            entries[4].prunable_reason.as_deref(),
             Some("gitdir file points to non-existent location")
         );
     }
 
     #[test]
-    fn porcelain_parsing_tolerates_unknown_lines_and_crlf() {
-        let text =
-            "worktree /repo\r\nHEAD abc\r\nbranch refs/heads/main\r\nbrand-new-field whatever\r\n";
+    fn porcelain_parsing_tolerates_unknown_attributes() {
+        // Porcelain gains fields over time; an unknown attribute must never fail a
+        // scan. The entry separator (an empty attribute) is ignored as well, and so
+        // is any attribute printed before the first `worktree` line.
+        let text = "brand-new-field whatever\0worktree /repo\0HEAD abc\0branch refs/heads/main\0brand-new-field whatever\0\0worktree /other\0HEAD def\0detached\0";
+        let entries = parse_worktree_list(text);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].branch.as_deref(), Some("main"));
+        assert!(entries[1].is_detached);
+        assert_eq!(entries[1].path, Path::new("/other"));
+    }
+
+    #[test]
+    fn a_newline_in_a_path_never_truncates_it() {
+        // The regression this `-z` contract exists for: the line-based parser saw
+        // "/repo/new" and reported the entry as a directory that no longer exists.
+        let text = "worktree /repo/new\nline\0HEAD abc\0branch refs/heads/x\0";
         let entries = parse_worktree_list(text);
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].branch.as_deref(), Some("main"));
+        assert_eq!(entries[0].path, Path::new("/repo/new\nline"));
+        assert_eq!(entries[0].branch.as_deref(), Some("x"));
     }
 
     #[test]
@@ -1128,6 +1338,7 @@ prunable gitdir file points to non-existent location
                 vec![
                     "merge-base".to_string(),
                     "--is-ancestor".to_string(),
+                    "--".to_string(),
                     "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
                     "main".to_string(),
                 ],
@@ -1162,6 +1373,7 @@ prunable gitdir file points to non-existent location
             vec![
                 "merge-base".to_string(),
                 "--is-ancestor".to_string(),
+                "--".to_string(),
                 "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
                 "main".to_string(),
             ],
@@ -1421,10 +1633,13 @@ prunable gitdir file points to non-existent location
         // No per-worktree command runs against a directory that is not there.
         assert!(!runner.called(&["status", "--porcelain=v2", "--branch"]));
         assert!(!runner.called(&["stash", "list", "--format=%gd"]));
-        // The merge check still runs, in the repository rather than the worktree.
+        // The merge check still runs, in the repository rather than the worktree,
+        // and carries the `--` separator that keeps a ref name from being parsed
+        // as an option.
         assert!(runner.called(&[
             "merge-base",
             "--is-ancestor",
+            "--",
             "19402c62a2bdb19e2271df95ecfc1a272aad4bf6",
             "main"
         ]));
@@ -1435,6 +1650,7 @@ prunable gitdir file points to non-existent location
             vec![
                 "merge-base".to_string(),
                 "--is-ancestor".to_string(),
+                "--".to_string(),
                 "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
                 "main".to_string(),
             ],
@@ -1551,7 +1767,9 @@ prunable gitdir file points to non-existent location
         assert!(has(&record, ReasonCode::WtCannotVerify));
         assert_eq!(record.safety.status, SafetyStatus::Review);
         // The merge check is never even attempted without a default branch.
-        assert!(!runner.called(&["merge-base", "--is-ancestor"]));
+        // (`called_prefix`: the real call carries two more arguments, so an exact
+        // match here would pass vacuously even if the check did run.)
+        assert!(!runner.called_prefix(&["merge-base", "--is-ancestor"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1559,17 +1777,38 @@ prunable gitdir file points to non-existent location
     fn an_unknown_merge_status_is_never_reported_as_merged() {
         let dir = temp_dir("merge-unknown");
         backdate(&dir, 30 * 86_400);
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        // Both candidate names are tried and both exit 128: the verdict must stay
+        // unknown rather than collapse to either answer (D3).
         let mut rules = calm_rules(CLEAN_STATUS);
         rules.pop();
-        rules.push(failing(
-            &[
-                "merge-base",
-                "--is-ancestor",
-                "19402c62a2bdb19e2271df95ecfc1a272aad4bf6",
-                "main",
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                head.to_string(),
+                "main".to_string(),
             ],
-            Some(128),
-            "fatal: Not a valid object name deadbeef",
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: "fatal: Not a valid object name deadbeef\n".to_string(),
+                code: Some(128),
+            }),
+        ));
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                head.to_string(),
+                "origin/main".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: "fatal: Not a valid object name deadbeef\n".to_string(),
+                code: Some(128),
+            }),
         ));
         let runner = FakeGitRunner::new(rules);
         let record = check_worktree(
@@ -1581,8 +1820,11 @@ prunable gitdir file points to non-existent location
         );
         assert_eq!(record.merged_into_default, None);
         assert!(!has(&record, ReasonCode::WtMerged));
+        assert!(!has(&record, ReasonCode::WtUnmerged));
         assert!(has(&record, ReasonCode::WtCannotVerify));
         assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert!(runner.called(&["merge-base", "--is-ancestor", "--", head, "main"]));
+        assert!(runner.called(&["merge-base", "--is-ancestor", "--", head, "origin/main"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1727,6 +1969,575 @@ prunable gitdir file points to non-existent location
             Some("2023-11-14T22:13:20Z")
         );
         assert_eq!(record.size_bytes, Some(1_234));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- review findings, each pinned by its own regression test -------------
+
+    #[test]
+    fn a_spawn_error_on_status_yields_review_with_cannot_verify() {
+        // GAP-1: a git that cannot be spawned at all is a transport failure, not an
+        // empty-but-fine result (D3).
+        let dir = temp_dir("spawn-status");
+        backdate(&dir, 30 * 86_400);
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules[0] = (
+            vec![
+                "status".to_string(),
+                "--porcelain=v2".to_string(),
+                "--branch".to_string(),
+            ],
+            Canned::Io,
+        );
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        assert!(!has(&record, ReasonCode::WtClean));
+        assert!(!has(&record, ReasonCode::WtDirty));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtCannotVerify)
+            .expect("cannot verify reason");
+        assert!(reason.evidence.contains("could not run"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_spawn_error_on_the_merge_check_yields_review_with_cannot_verify() {
+        // GAP-1, merge branch: the verdict must stay unknown, and a transport
+        // error must not trigger the second name candidate (retrying cannot fix
+        // a process that would not start).
+        let dir = temp_dir("spawn-merge");
+        backdate(&dir, 30 * 86_400);
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.pop();
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                head.to_string(),
+                "main".to_string(),
+            ],
+            Canned::Io,
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert_eq!(record.merged_into_default, None);
+        assert!(!has(&record, ReasonCode::WtMerged));
+        assert!(!has(&record, ReasonCode::WtUnmerged));
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert!(!runner.called(&["merge-base", "--is-ancestor", "--", head, "origin/main"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn merge_check_falls_back_to_the_remote_tracking_name() {
+        // Finding 5: `origin/HEAD` often names a branch that exists only as
+        // `refs/remotes/origin/<name>`, and `git merge-base` does not resolve the
+        // bare name to it (exit 128, no DWIM). Without the fallback every healthy
+        // worktree would degrade to cannot_verify.
+        let dir = temp_dir("merge-fallback");
+        backdate(&dir, 30 * 86_400);
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        let mut opts = default_options();
+        opts.default_branch = Some("develop".to_string());
+        let runner = FakeGitRunner::new(vec![
+            canned(&["status", "--porcelain=v2", "--branch"], CLEAN_STATUS),
+            canned(&["stash", "list", "--format=%gd"], ""),
+            canned(&["log", "-1", "--format=%ct"], "1700000000\n"),
+            canned(
+                &["rev-parse", "--git-path", "index.lock"],
+                "/nonexistent/.git/index.lock\n",
+            ),
+            // The bare name exits 128: git *ran* and answered "no such ref" (an
+            // `Ok` with a non-zero code, which is what `ProcessGitRunner` returns
+            // for a command that failed — a transport-level `Err` would instead
+            // short-circuit the candidate loop).
+            (
+                vec![
+                    "merge-base".to_string(),
+                    "--is-ancestor".to_string(),
+                    "--".to_string(),
+                    head.to_string(),
+                    "develop".to_string(),
+                ],
+                Canned::Out(GitOutput {
+                    stdout: String::new(),
+                    stderr: "fatal: not a valid ref: develop\n".to_string(),
+                    code: Some(128),
+                }),
+            ),
+            (
+                vec![
+                    "merge-base".to_string(),
+                    "--is-ancestor".to_string(),
+                    "--".to_string(),
+                    head.to_string(),
+                    "origin/develop".to_string(),
+                ],
+                Canned::Out(GitOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    code: Some(0),
+                }),
+            ),
+        ]);
+        let record = check_worktree(&runner, &dir, &feature_entry(&dir), false, &opts);
+        assert_eq!(record.merged_into_default, Some(true));
+        assert!(has(&record, ReasonCode::WtMerged));
+        assert!(!has(&record, ReasonCode::WtCannotVerify));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtMerged)
+            .expect("merged reason");
+        assert!(
+            reason.evidence.contains("origin/develop"),
+            "the evidence must name the candidate that answered: {}",
+            reason.evidence
+        );
+        // Both candidates were tried, the bare name first.
+        assert!(runner.called(&["merge-base", "--is-ancestor", "--", head, "develop"]));
+        assert!(runner.called(&["merge-base", "--is-ancestor", "--", head, "origin/develop"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_status_without_the_header_is_never_read_as_clean() {
+        // Without the `# branch.*` header the counts are not "zero", they are
+        // unknown (D3): a positive reason must not be minted from them.
+        let dir = temp_dir("no-header");
+        backdate(&dir, 30 * 86_400);
+        let runner = FakeGitRunner::new(calm_rules(
+            "1 .M N... 100644 100644 100644 814f4a422927b82f5f8a43f8fab6d3839e3983f2 814f4a422927b82f5f8a43f8fab6d3839e3983f2 a.txt\n",
+        ));
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtCannotVerify)
+            .expect("cannot verify reason");
+        assert!(reason.evidence.contains("status header"));
+        assert!(!has(&record, ReasonCode::WtClean));
+        assert!(!has(&record, ReasonCode::WtDirty));
+        assert!(!has(&record, ReasonCode::WtUntracked));
+        assert_eq!(record.dirty_files, 0);
+        assert_eq!(record.untracked_files, 0);
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_upstream_without_ahead_behind_is_unknown_not_zero() {
+        // Finding 3b: git omits `# branch.ab` when the upstream ref itself is
+        // gone, so "0 commits not pushed" would be a lie.
+        let dir = temp_dir("upstream-without-ab");
+        backdate(&dir, 30 * 86_400);
+        let runner = FakeGitRunner::new(calm_rules(UPSTREAM_WITHOUT_AB));
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtCannotVerify)
+            .expect("cannot verify reason");
+        assert!(reason.evidence.contains("upstream branch no longer exists"));
+        assert!(!has(&record, ReasonCode::WtUnpushed));
+        assert!(!has(&record, ReasonCode::WtClean));
+        assert_eq!(record.ahead, 0);
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_unreadable_directory_is_never_reported_as_gone() {
+        // Finding 2: `Path::exists()` conflates EACCES with NotFound, which routed
+        // an unreadable worktree to the prune-only channel with a Safe verdict.
+        use std::os::unix::fs::PermissionsExt;
+
+        let parent = temp_dir("unreadable");
+        let dir = parent.join("wt");
+        std::fs::create_dir_all(&dir).expect("create worktree dir");
+        backdate(&dir, 30 * 86_400);
+        // Search permission on the *parent* is what a stat of the child needs;
+        // the leaf's own mode is irrelevant to stat(2).
+        let sealed = std::fs::Permissions::from_mode(0o000);
+        std::fs::set_permissions(&parent, sealed).expect("seal parent");
+        let stat_fails = std::fs::metadata(&dir).is_err();
+        if !stat_fails {
+            // Running as root defeats the permission model; nothing to assert.
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755))
+                .expect("restore parent mode");
+            let _ = std::fs::remove_dir_all(&parent);
+            return;
+        }
+
+        let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
+        let record = check_worktree(
+            &runner,
+            &parent.join("wt"),
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755))
+            .expect("restore parent mode");
+
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        assert!(
+            record
+                .safety
+                .reasons
+                .iter()
+                .any(|reason| reason.text == "cannot read the worktree directory"),
+            "the failure must name the directory stat: {:?}",
+            codes(&record)
+        );
+        assert!(!record.is_prunable, "unreadable is not gone");
+        assert!(!has(&record, ReasonCode::WtPrunable));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn the_untracked_count_is_exact_and_truncation_is_disclosed() {
+        // Finding 10: `git status` folds a whole untracked directory into one
+        // entry; `ls-files --others` lists every file, so the record must carry
+        // the exact count — and must say so when the displayed list is capped.
+        let dir = temp_dir("untracked-exact");
+        backdate(&dir, 30 * 86_400);
+
+        let mut rules = calm_rules(DIRTY_STATUS);
+        rules.push(canned(
+            &["ls-files", "--others", "--exclude-standard"],
+            "notes.md\nscratch/a\nscratch/b\n",
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert_eq!(record.untracked_files, 3, "exact count from ls-files");
+        assert_eq!(
+            record.untracked_file_list,
+            vec![
+                "notes.md".to_string(),
+                "scratch/a".to_string(),
+                "scratch/b".to_string()
+            ]
+        );
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtUntracked)
+            .expect("untracked reason");
+        assert_eq!(reason.evidence, "3 untracked files");
+        assert!(!reason.evidence.contains("the list below"));
+
+        // More files than the display cap: the count stays exact, the list is
+        // capped, and the evidence discloses the cap.
+        let many: String = (0..201)
+            .map(|index| format!("f{index:03}.txt\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        let mut rules = calm_rules(DIRTY_STATUS);
+        rules.push(canned(
+            &["ls-files", "--others", "--exclude-standard"],
+            &many,
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert_eq!(record.untracked_files, 201);
+        assert_eq!(record.untracked_file_list.len(), 200);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtUntracked)
+            .expect("untracked reason");
+        assert_eq!(
+            reason.evidence,
+            "201 untracked files (the list below shows the first 200)"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_non_numeric_commit_time_fails_closed() {
+        // A `%ct` that does not parse must not silently drop the activity signal:
+        // the directory mtime still answers, and the failure is visible.
+        let dir = temp_dir("bad-commit-time");
+        backdate(&dir, 30 * 86_400);
+        let mut rules = calm_rules(CLEAN_STATUS);
+        for rule in &mut rules {
+            if rule.0
+                == vec![
+                    "log".to_string(),
+                    "-1".to_string(),
+                    "--format=%ct".to_string(),
+                ]
+            {
+                if let Canned::Out(output) = &mut rule.1 {
+                    output.stdout = "not-a-time\n".to_string();
+                }
+            }
+        }
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtCannotVerify)
+            .expect("cannot verify reason");
+        assert!(reason.evidence.contains("non-numeric"));
+        assert!(
+            record.last_updated_at.is_some(),
+            "the directory mtime still answers"
+        );
+        assert!(!has(&record, ReasonCode::WtRecentActivity));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_log_ls_files_or_rev_parse_each_fails_closed() {
+        // GAP-8: every secondary call has its own fail-closed path.
+        let dir = temp_dir("secondary-failures");
+        backdate(&dir, 30 * 86_400);
+
+        // -- log fails: activity falls back to the directory mtime
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules[2] = failing(
+            &["log", "-1", "--format=%ct"],
+            Some(128),
+            "fatal: bad default revision",
+        );
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        assert!(record.last_updated_at.is_some());
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+
+        // -- ls-files fails: the folded status count is used, the list stays
+        //    empty, and no truncation note is invented
+        let mut rules = calm_rules(DIRTY_STATUS);
+        rules.push(failing(
+            &["ls-files", "--others", "--exclude-standard"],
+            Some(128),
+            "fatal: not a git repository",
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtUntracked));
+        assert_eq!(record.untracked_files, 1, "falls back to the status count");
+        assert!(record.untracked_file_list.is_empty());
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtUntracked)
+            .expect("untracked reason");
+        assert_eq!(reason.evidence, "1 untracked files");
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+
+        // -- rev-parse --git-path fails: no lock verdict may be produced
+        let mut rules = calm_rules(CLEAN_STATUS);
+        for rule in &mut rules {
+            if rule.0
+                == vec![
+                    "rev-parse".to_string(),
+                    "--git-path".to_string(),
+                    "index.lock".to_string(),
+                ]
+            {
+                *rule = failing(
+                    &["rev-parse", "--git-path", "index.lock"],
+                    Some(128),
+                    "fatal: not a git repository",
+                );
+            }
+        }
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        assert!(!has(&record, ReasonCode::WtAgentActive));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_worktree_reason_code_reports_non_empty_text_and_evidence() {
+        // GAP-5: one record that carries as many wt.* codes as the decision table
+        // can produce at once, so every one of them is proven to render text and
+        // evidence (D9). The remaining codes have dedicated tests above.
+        let dir = temp_dir("all-codes");
+        let lock = dir.join("index.lock");
+        std::fs::write(&lock, "").expect("create lock file");
+        let mut opts = default_options();
+        opts.now = SystemTime::now();
+        opts.whitelist = vec![dir.clone()];
+        let mut entry = feature_entry(&dir);
+        entry.is_locked = true;
+        entry.lock_reason = Some("holding for review".to_string());
+
+        let mut rules = calm_rules(MESSY_STATUS);
+        // Swap the merge-base rule for "not an ancestor" *before* appending the
+        // ls-files rule: `pop()` removes the last element, and appending first
+        // would silently drop the ls-files rule instead.
+        rules.pop();
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
+                "main".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
+        ));
+        // The log call fails, which is what puts wt.cannot_verify into the set.
+        rules[2] = failing(
+            &["log", "-1", "--format=%ct"],
+            Some(128),
+            "fatal: bad default revision",
+        );
+        rules.push(canned(
+            &["ls-files", "--others", "--exclude-standard"],
+            "notes.md\n",
+        ));
+        // Two stash entries, and the lock file the rev-parse call must report.
+        for rule in &mut rules {
+            if rule.0
+                == vec![
+                    "stash".to_string(),
+                    "list".to_string(),
+                    "--format=%gd".to_string(),
+                ]
+            {
+                if let Canned::Out(output) = &mut rule.1 {
+                    output.stdout = "stash@{0}\nstash@{1}\n".to_string();
+                }
+            }
+            if rule.0
+                == vec![
+                    "rev-parse".to_string(),
+                    "--git-path".to_string(),
+                    "index.lock".to_string(),
+                ]
+            {
+                if let Canned::Out(output) = &mut rule.1 {
+                    output.stdout = format!("{}\n", lock.display());
+                }
+            }
+        }
+
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(&runner, &dir, &entry, true, &opts);
+        assert_eq!(
+            codes(&record),
+            vec![
+                "wt.main",
+                "wt.locked",
+                "wt.whitelisted",
+                "wt.dirty",
+                "wt.unpushed",
+                "wt.stash",
+                "wt.untracked",
+                "wt.cannot_verify",
+                "wt.agent_active",
+                "wt.recent_activity",
+                "wt.unmerged",
+            ]
+        );
+        for reason in &record.safety.reasons {
+            assert!(
+                !reason.text.trim().is_empty(),
+                "empty text for {}",
+                reason.code.as_str()
+            );
+            assert!(
+                !reason.evidence.trim().is_empty(),
+                "empty evidence for {}",
+                reason.code.as_str()
+            );
+        }
+        assert_eq!(record.safety.status, SafetyStatus::Unsafe);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
