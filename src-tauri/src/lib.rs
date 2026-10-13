@@ -14,6 +14,7 @@
 //! nature (it starts processes and walks the filesystem), so it belongs on the
 //! blocking pool rather than on an async worker.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -21,7 +22,8 @@ use serde::Deserialize;
 use worktree_core::cleanup::{execute_plan as core_execute, ExecuteOptions, ExecutionOutcome};
 use worktree_core::log;
 use worktree_core::{
-    scan_project as core_scan, CleanupPlan, HistoryEntry, ProjectSnapshot, ScanOptions,
+    scan_project as core_scan, ActivityAction, ActivityEvent, CleanupPlan, DetailArg, HistoryEntry,
+    ProjectSnapshot, ScanOptions,
 };
 
 /// Runs one scan.
@@ -123,6 +125,47 @@ async fn clear_log() -> Result<(), String> {
     .map_err(|error| format!("the log clear did not finish: {error}"))?
 }
 
+/// Appends one user action to the activity log.
+///
+/// The front end never writes a file itself: the path lives in the core and the
+/// "stays on this machine" guarantee is enforced there. A failure is reported but
+/// never blocks — an activity log records what happened afterwards and decides
+/// nothing, so it must not be able to fail a scan or a deletion.
+#[tauri::command]
+async fn log_activity(
+    action: ActivityAction,
+    target: String,
+    args: BTreeMap<String, DetailArg>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = log::default_activity_log_path() else {
+            return Ok(());
+        };
+        let event = ActivityEvent {
+            at: worktree_core::timefmt::format_rfc3339(std::time::SystemTime::now()),
+            action,
+            target,
+            args,
+        };
+        log::append_activity(&path, &[event]).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("the activity write did not finish: {error}"))?
+}
+
+/// Reads the activity log back, oldest first.
+#[tauri::command]
+async fn read_activity() -> Result<Vec<ActivityEvent>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let Some(path) = log::default_activity_log_path() else {
+            return Vec::new();
+        };
+        log::read_activity(&path)
+    })
+    .await
+    .map_err(|error| format!("the activity read did not finish: {error}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -133,7 +176,9 @@ pub fn run() {
             execute_plan,
             log_path,
             read_history,
-            clear_log
+            clear_log,
+            log_activity,
+            read_activity
         ])
         .run(tauri::generate_context!())
         .expect("error while running Worktree Cleaner");

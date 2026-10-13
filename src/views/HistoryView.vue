@@ -1,11 +1,23 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { history, historyError } from "../state";
-import { detailText, formatBytes, formatTimestamp, homePath, reasonCopy } from "../format";
-import type { HistoryEntry } from "../types";
+import { activity, history, historyError } from "../state";
+import { activityText, detailText, formatBytes, formatTimestamp, homePath, reasonCopy } from "../format";
+import type { ActivityEvent, HistoryEntry } from "../types";
 import { messages } from "../i18n";
 
-type FilterKey = "all" | "worktree-remove" | "trash-move";
+type FilterKey = "all" | "worktree-remove" | "trash-move" | "activity";
+
+/**
+ * One line of the history, whichever log it came from.
+ *
+ * The two records stay in their own files and keep their own shapes; the page
+ * puts them on one timeline because that is the question being asked — "what
+ * happened on this machine" — and a reader should not have to know that the
+ * answers live in two places.
+ */
+type TimelineRow =
+  | { kind: "deletion"; at: string; entry: HistoryEntry }
+  | { kind: "action"; at: string; event: ActivityEvent };
 
 const filter = ref<FilterKey>("all");
 const copied = ref(false);
@@ -42,9 +54,20 @@ function reasonOf(row: HistoryEntry): string {
   return copy ?? row.reason ?? messages.detail.legacy;
 }
 
-const filtered = computed(() => {
-  const rows = filter.value === "all" ? history.value : history.value.filter((row) => row.action === filter.value);
-  return [...rows].sort((a, b) => b.at.localeCompare(a.at));
+const filtered = computed<TimelineRow[]>(() => {
+  const deletions: TimelineRow[] = history.value
+    .filter((row) => {
+      if (filter.value === "all") return true;
+      // "Your actions" is the other log entirely, not a slice of this one.
+      if (filter.value === "activity") return false;
+      return row.action === filter.value;
+    })
+    .map((entry) => ({ kind: "deletion", at: entry.at, entry }));
+  const actions: TimelineRow[] =
+    filter.value === "all" || filter.value === "activity"
+      ? activity.value.map((event) => ({ kind: "action", at: event.at, event }) as TimelineRow)
+      : [];
+  return [...deletions, ...actions].sort((a, b) => b.at.localeCompare(a.at));
 });
 
 async function copyAll() {
@@ -77,6 +100,7 @@ async function copyAll() {
           {{ " " + messages.history.filterWorktreeRemove + " " }}
         </button>
         <button :class="filter === 'trash-move' ? 'is-active' : ''" @click="filter = 'trash-move'">{{ messages.history.filterTrashMove }}</button>
+        <button :class="filter === 'activity' ? 'is-active' : ''" @click="filter = 'activity'">{{ messages.activity.filterAction }}</button>
       </div>
     </div>
 
@@ -85,15 +109,23 @@ async function copyAll() {
         <div class="timeline">
           <div v-for="(row, index) in filtered" :key="`${row.at}-${index}`" class="timeline__row">
             <div class="timeline__time">{{ formatTimestamp(row.at) }}</div>
-            <div class="timeline__body">
+            <div v-if="row.kind === 'action'" class="timeline__body">
               <div class="row-wrap">
-                <span class="chip">{{ actionLabel(row.action) }}</span>
-                <span class="mono">{{ homePath(row.target) }}</span>
-                <span class="outcome" :class="`outcome--${row.result}`">{{ outcomeLabel(row.result) }}</span>
-                <span class="faint tiny numeric">{{ formatBytes(row.size_bytes) }}</span>
+                <span class="chip">{{ messages.activity.kinds.action }}</span>
+                <span class="tiny">{{ activityText(row.event.action, row.event.args) }}</span>
+                <span v-if="row.event.target" class="mono faint tiny">{{ homePath(row.event.target) }}</span>
               </div>
-              <div class="tiny faint">{{ reasonOf(row) }}</div>
-              <div class="tiny muted">{{ detailText(row.detail_code, row.detail_args, row.detail) }}</div>
+            </div>
+            <div v-else class="timeline__body">
+              <div class="row-wrap">
+                <span class="chip">{{ messages.activity.kinds.deletion }}</span>
+                <span class="chip">{{ actionLabel(row.entry.action) }}</span>
+                <span class="mono">{{ homePath(row.entry.target) }}</span>
+                <span class="outcome" :class="`outcome--${row.entry.result}`">{{ outcomeLabel(row.entry.result) }}</span>
+                <span class="faint tiny numeric">{{ formatBytes(row.entry.size_bytes) }}</span>
+              </div>
+              <div class="tiny faint">{{ reasonOf(row.entry) }}</div>
+              <div class="tiny muted">{{ detailText(row.entry.detail_code, row.entry.detail_args, row.entry.detail) }}</div>
             </div>
           </div>
           <div v-if="filtered.length === 0" class="empty">{{ messages.history.empty }}</div>

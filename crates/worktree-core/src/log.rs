@@ -1,16 +1,22 @@
 //! The local operation log (D15).
 //!
-//! Every executed action is appended here as one JSON object per line: time,
-//! action, target, reason, result, and size. The log is written to this machine
-//! only — there is no network call anywhere in this crate, and none may be
-//! added. A corrupt line is skipped on read rather than failing the whole
-//! history: losing one record must not blind the user to the others.
+//! Two files, both on this machine only — there is no network call anywhere in
+//! this crate, and none may be added.
+//!
+//! * `operations.log` is the audit trail: one JSON object per line for every
+//!   executed action, with time, action, target, reason, result and size.
+//! * `activity.log` is what the *user* did: scans, project switches, generated
+//!   plans, changed settings. It is a different record with a different reader,
+//!   and mixing the two would make both worse.
+//!
+//! A corrupt line is skipped on read rather than failing the whole history:
+//! losing one record must not blind the user to the others.
 
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::HistoryEntry;
+use crate::{ActivityEvent, HistoryEntry};
 
 /// Directory the log lives in, without the file name.
 pub fn log_directory() -> Option<PathBuf> {
@@ -38,6 +44,12 @@ pub fn log_directory() -> Option<PathBuf> {
 /// The default log file path, or `None` when no home directory can be determined.
 pub fn default_log_path() -> Option<PathBuf> {
     log_directory().map(|directory| directory.join("operations.log"))
+}
+
+/// The activity log that goes beside it: what the user did, as opposed to what
+/// was deleted.
+pub fn default_activity_log_path() -> Option<PathBuf> {
+    log_directory().map(|directory| directory.join("activity.log"))
 }
 
 fn home() -> PathBuf {
@@ -84,6 +96,41 @@ pub fn read(path: &Path) -> Vec<HistoryEntry> {
         .collect()
 }
 
+/// Appends user actions, one JSON object per line.
+///
+/// Best effort at the call site: an unwritable activity log must not stop a scan
+/// or a deletion, because it records what happened afterwards rather than
+/// deciding what happens now. The result page reports a failed operation log; it
+/// does not report a failed activity log, which costs nothing.
+pub fn append_activity(path: &Path, events: &[ActivityEvent]) -> std::io::Result<()> {
+    if events.is_empty() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    for event in events {
+        let line = serde_json::to_string(event)
+            .map_err(|error| std::io::Error::other(format!("serialise activity: {error}")))?;
+        file.write_all(line.as_bytes())?;
+        file.write_all(b"\n")?;
+    }
+    file.flush()
+}
+
+/// Reads the activity log back, oldest first, skipping a damaged line.
+pub fn read_activity(path: &Path) -> Vec<ActivityEvent> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<ActivityEvent>(line).ok())
+        .collect()
+}
+
 /// Empties the log without deleting the file.
 pub fn clear(path: &Path) -> std::io::Result<()> {
     if !path.exists() {
@@ -96,7 +143,7 @@ pub fn clear(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DetailCode, ExecutionResult, HistoryAction, ReasonCode};
+    use crate::{ActivityAction, DetailCode, ExecutionResult, HistoryAction, ReasonCode};
     use std::collections::BTreeMap;
 
     fn entry(target: &str, size: Option<u64>) -> HistoryEntry {
@@ -187,5 +234,74 @@ mod tests {
             path.file_name().and_then(|name| name.to_str()),
             Some("operations.log")
         );
+    }
+
+    #[test]
+    fn the_activity_log_lives_beside_the_operation_log() {
+        let (Some(operations), Some(activity)) = (default_log_path(), default_activity_log_path())
+        else {
+            return;
+        };
+        assert_eq!(
+            operations.parent(),
+            activity.parent(),
+            "one directory, two files"
+        );
+        assert_ne!(
+            operations.file_name(),
+            activity.file_name(),
+            "the deletion trail and the activity trail are different files"
+        );
+    }
+
+    #[test]
+    fn activity_round_trips_and_skips_a_damaged_line() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("activity.log");
+        let event = |action: ActivityAction| ActivityEvent {
+            at: "2026-01-01T00:00:00Z".to_string(),
+            action,
+            target: "/repo".to_string(),
+            args: std::collections::BTreeMap::new(),
+        };
+
+        append_activity(&path, &[event(ActivityAction::ScanStarted)]).expect("first");
+        append_activity(&path, &[event(ActivityAction::PlanGenerated)]).expect("second");
+        let read_back = read_activity(&path);
+        assert_eq!(read_back.len(), 2);
+        assert_eq!(read_back[0].action, ActivityAction::ScanStarted);
+
+        let mut file = OpenOptions::new().append(true).open(&path).expect("open");
+        file.write_all(b"this is not json\n").expect("write");
+        let after = read_activity(&path);
+        assert_eq!(
+            after.len(),
+            2,
+            "a damaged line is skipped, and the records around it survive"
+        );
+    }
+
+    #[test]
+    fn every_activity_action_has_a_stable_name() {
+        // The front end keys its copy by these strings, so they are part of the
+        // contract rather than a display detail.
+        let all = [
+            ActivityAction::ScanStarted,
+            ActivityAction::ScanFinished,
+            ActivityAction::ScanFailed,
+            ActivityAction::ScanCancelled,
+            ActivityAction::ProjectSwitched,
+            ActivityAction::PlanGenerated,
+            ActivityAction::PlanExported,
+            ActivityAction::SettingsChanged,
+            ActivityAction::CleanupConfirmed,
+            ActivityAction::TrashOpened,
+        ];
+        let names: Vec<&str> = all.iter().map(|action| action.as_str()).collect();
+        let unique: std::collections::BTreeSet<&str> = names.iter().copied().collect();
+        assert_eq!(unique.len(), names.len(), "{names:?}");
+        for name in names {
+            assert!(name.contains('.'), "{name} should read family.action");
+        }
     }
 }

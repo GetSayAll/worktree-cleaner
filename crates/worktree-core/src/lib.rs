@@ -259,6 +259,73 @@ pub enum DetailCode {
     BundledWithWorktree,
 }
 
+/// What the user did, as distinct from what was deleted.
+///
+/// `operations.log` is an audit trail and keeps its shape: one row per deletion,
+/// with the reason and the result. This is the other half — scanning, switching
+/// project, generating a plan, changing a setting, confirming a run. They live in
+/// their own file on purpose: mixing "the user clicked a button" into a record of
+/// "this tool deleted something" would make both harder to read, and the deletion
+/// rows are the ones that may matter later.
+///
+/// Mirrors `ActivityEvent` in `src/types.ts` field for field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityEvent {
+    pub at: String,
+    pub action: ActivityAction,
+    /// What it happened to: a project path, a setting name, or empty.
+    pub target: String,
+    #[serde(default)]
+    pub args: BTreeMap<String, DetailArg>,
+}
+
+/// The user actions worth being able to look up afterwards.
+///
+/// Hovering and focusing are not here: they are not things a reader would come
+/// back for. Nor is every checkbox — a log of every toggle answers nothing, and
+/// the selection as it stood when the plan was made is already in `plan.generated`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActivityAction {
+    #[serde(rename = "scan.started")]
+    ScanStarted,
+    #[serde(rename = "scan.finished")]
+    ScanFinished,
+    #[serde(rename = "scan.failed")]
+    ScanFailed,
+    #[serde(rename = "scan.cancelled")]
+    ScanCancelled,
+    #[serde(rename = "project.switched")]
+    ProjectSwitched,
+    #[serde(rename = "plan.generated")]
+    PlanGenerated,
+    #[serde(rename = "plan.exported")]
+    PlanExported,
+    #[serde(rename = "settings.changed")]
+    SettingsChanged,
+    #[serde(rename = "cleanup.confirmed")]
+    CleanupConfirmed,
+    #[serde(rename = "trash.opened")]
+    TrashOpened,
+}
+
+impl ActivityAction {
+    /// The string form the front end keys its copy by.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ScanStarted => "scan.started",
+            Self::ScanFinished => "scan.finished",
+            Self::ScanFailed => "scan.failed",
+            Self::ScanCancelled => "scan.cancelled",
+            Self::ProjectSwitched => "project.switched",
+            Self::PlanGenerated => "plan.generated",
+            Self::PlanExported => "plan.exported",
+            Self::SettingsChanged => "settings.changed",
+            Self::CleanupConfirmed => "cleanup.confirmed",
+            Self::TrashOpened => "trash.opened",
+        }
+    }
+}
+
 /// One line of the per-item result table.
 ///
 /// Mirrors `ResultEntry` in `src/types.ts` field for field.

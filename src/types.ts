@@ -169,6 +169,40 @@ export type DetailCode =
  */
 export type DetailArg = string | number | boolean | null;
 
+/**
+ * What the user did, as distinct from what was deleted.
+ *
+ * Mirrors `ActivityEvent` in `crates/worktree-core/src/lib.rs`. It is a separate
+ * record with a separate reader — the deletion trail in `operations.log` answers
+ * "what did this tool remove", this one answers "what did I do".
+ */
+export interface ActivityEvent {
+  at: string;
+  action: ActivityAction;
+  /** What it happened to: a project path, a setting name, or empty. */
+  target: string;
+  args: Record<string, DetailArg>;
+}
+
+/**
+ * The user actions worth being able to look up afterwards.
+ *
+ * Hovering and focusing are not here, and neither is every checkbox: a log of
+ * every toggle answers nothing, and the selection as it stood when the plan was
+ * made is already in `plan.generated`.
+ */
+export type ActivityAction =
+  | "scan.started"
+  | "scan.finished"
+  | "scan.failed"
+  | "scan.cancelled"
+  | "project.switched"
+  | "plan.generated"
+  | "plan.exported"
+  | "settings.changed"
+  | "cleanup.confirmed"
+  | "trash.opened";
+
 export interface HistoryEntry {
   at: string;
   action: "worktree-remove" | "trash-move" | "prune";

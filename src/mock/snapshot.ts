@@ -1,4 +1,5 @@
 import type {
+  ActivityEvent,
   ArtifactRecord,
   HistoryEntry,
   ProjectSnapshot,
@@ -507,6 +508,40 @@ export const mockSnapshot: ProjectSnapshot = {
     }
   ] as ArtifactRecord[]
 };
+
+/** Sample user actions for the browser preview, newest last like the real log. */
+export const mockActivity: ActivityEvent[] = [
+  {
+    at: "2026-10-12T09:04:11.000Z",
+    action: "scan.started",
+    target: mockRoot,
+    args: {}
+  },
+  {
+    at: "2026-10-12T09:04:13.000Z",
+    action: "scan.finished",
+    target: mockRoot,
+    args: { worktrees: 5, artifacts: 14, sample: true }
+  },
+  {
+    at: "2026-10-12T09:05:02.000Z",
+    action: "settings.changed",
+    target: "whitelist_paths",
+    args: { before: "", after: "~/Archive" }
+  },
+  {
+    at: "2026-10-12T09:05:40.000Z",
+    action: "plan.generated",
+    target: mockRoot,
+    args: { worktrees: 2, artifacts: 12 }
+  },
+  {
+    at: "2026-10-12T09:06:01.000Z",
+    action: "cleanup.confirmed",
+    target: mockRoot,
+    args: { worktrees: 2, artifacts: 12, forced: 1, typed_name: true }
+  }
+];
 
 export const mockHistory: HistoryEntry[] = [
   {

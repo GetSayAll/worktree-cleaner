@@ -170,6 +170,41 @@ export const en = {
     },
     legacy: "recorded before this build kept reason codes"
   },
+  // What the user did, keyed by ActivityAction. The deletions live in their own
+  // section above; these are the other half of "what happened on this machine",
+  // and they are the half a reader has no other way to reconstruct.
+  activity: {
+    codes: {
+      scan: {
+        started: "Started a scan",
+        finished: "Scan finished: {worktrees} worktrees, {artifacts} artifact directories",
+        failed: "The scan did not finish: {error}",
+        cancelled: "Cancelled the scan after {elapsed}"
+      },
+      project: {
+        switched: "Switched to this project from {from}"
+      },
+      plan: {
+        generated: "Generated a plan: {worktrees} worktrees, {artifacts} artifact directories",
+        exported: "Exported the plan"
+      },
+      settings: {
+        changed: "Changed a setting"
+      },
+      cleanup: {
+        confirmed:
+          "Confirmed the cleanup: {worktrees} worktrees, {artifacts} artifact directories, {forced} needing --force"
+      },
+      trash: {
+        opened: "Opened the system {{trash}}"
+      }
+    },
+    kinds: {
+      deletion: "Deleted",
+      action: "You did"
+    },
+    filterAction: "Your actions"
+  },
   common: {
     unknown: "unknown",
     none: "(none)",

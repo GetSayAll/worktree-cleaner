@@ -16,8 +16,17 @@ import type {
 import { SEVERITY_RANK } from "./types";
 import { applyLocale, messages, watchSystemLocale } from "./i18n";
 import { formatBytes, pathMatchesRule } from "./format";
-import { executePlan, isDesktop, logPath, readHistory, scanProject } from "./platform";
-import { mockHistory, mockSnapshot, scanTrace } from "./mock/snapshot";
+import {
+  executePlan,
+  isDesktop,
+  logActivity,
+  logPath,
+  readActivity,
+  readHistory,
+  scanProject
+} from "./platform";
+import { mockActivity, mockHistory, mockSnapshot, scanTrace } from "./mock/snapshot";
+import type { ActivityAction, ActivityEvent, DetailArg } from "./types";
 
 export type ViewKey =
   | "welcome"
@@ -74,6 +83,14 @@ export const settings = reactive<Settings>({ ...defaultSettings });
 export const selectedWorktrees = ref<string[]>([]);
 export const selectedArtifacts = ref<string[]>([]);
 export const history = ref<HistoryEntry[]>([]);
+/**
+ * What the user did, newest first.
+ *
+ * Kept beside `history` rather than folded into it: the two records answer
+ * different questions, and the history page shows them as one timeline with the
+ * kind marked, rather than pretending a setting change is a deletion.
+ */
+export const activity = ref<ActivityEvent[]>([]);
 export const historyError = ref<string | null>(null);
 export const lastResult = ref<ResultEntry[]>([]);
 export const resultSummary = ref({ freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 0 });
@@ -160,6 +177,10 @@ function loadRecents() {
 
 /** Records that `path` was scanned just now, and keeps the list short. */
 function rememberProject(path: string) {
+  const previous = projectPath.value;
+  if (previous && previous !== path) {
+    record("project.switched", path, { from: previous });
+  }
   const entry: RecentProject = { path, scanned_at: new Date().toISOString() };
   recentProjects.value = [entry, ...recentProjects.value.filter((item) => item.path !== path)].slice(
     0,
@@ -268,10 +289,28 @@ function scanKnobs(): ScanOptions {
  * has no repository to read, so it walks the sample snapshot instead and every
  * page says the data is a sample.
  */
+/**
+ * Writes one line to the activity log.
+ *
+ * Fire and forget. The record describes what happened, and the only person who
+ * needs it is one looking back at it later, so a failed write must not interrupt
+ * a scan or a deletion — nothing here is awaited and nothing here throws.
+ */
+function record(action: ActivityAction, target = "", args: Record<string, DetailArg> = {}): void {
+  void logActivity(action, target, args).catch(() => undefined);
+}
+
+/** Records a setting change with what it was, so a later reading can compare. */
+export function recordSettingChange(key: string, before: string, after: string): void {
+  if (before === after) return;
+  record("settings.changed", key, { before, after });
+}
+
 export async function startScan(path: string) {
   const target = path.trim();
   if (!target) return;
 
+  record("scan.started", target);
   projectPath.value = target;
   selectedWorktrees.value = [];
   selectedArtifacts.value = [];
@@ -306,6 +345,7 @@ export async function startScan(path: string) {
     scanState.running = false;
     clearTimers();
     scanError.value = error instanceof Error ? error.message : String(error);
+    record("scan.failed", target, { error: scanError.value });
     view.value = "welcome";
   }
 }
@@ -332,6 +372,11 @@ function finishScan(result: ProjectSnapshot, sample = false) {
   snapshot.value = result;
   isDemoData.value = sample;
   rememberProject(projectPath.value);
+  record("scan.finished", projectPath.value, {
+    worktrees: result.worktrees.length,
+    artifacts: result.artifacts.length,
+    sample
+  });
   applyDefaultSelection();
   view.value = "overview";
 }
@@ -340,6 +385,7 @@ export function cancelScan() {
   clearTimers();
   scanState.running = false;
   scanState.cancelled = true;
+  record("scan.cancelled", projectPath.value, { elapsed: scanState.elapsed });
   view.value = "welcome";
 }
 
@@ -677,6 +723,14 @@ export async function executeCleanup() {
   executing.value = true;
   executeError.value = null;
   logError.value = null;
+  // What the reader confirmed, not what happened afterwards: the deletions are
+  // already in the operation log, and this line is what they agreed to.
+  record("cleanup.confirmed", current.root, {
+    worktrees: plan.worktree_removals.length,
+    artifacts: plan.trash_moves.filter((item) => item.bundled_with_worktree === null).length,
+    forced: plan.worktree_removals.filter((item) => item.force).length,
+    typed_name: confirmText.value.trim() !== ""
+  });
   try {
     const outcome = await executePlan(plan, current, {
       recent_activity_days: settings.active_days,
@@ -779,12 +833,15 @@ function summarise(entries: ResultEntry[], plan: CleanupPlan) {
 export async function refreshHistory() {
   if (!isDesktop()) {
     history.value = [...mockHistory].reverse();
+    activity.value = [...mockActivity].reverse();
     historyError.value = null;
     return;
   }
   try {
     // The log is appended oldest first; every page shows the newest on top.
-    history.value = (await readHistory()).reverse();
+    const [deletions, actions] = await Promise.all([readHistory(), readActivity()]);
+    history.value = deletions.reverse();
+    activity.value = actions.reverse();
     historyError.value = null;
   } catch (error) {
     historyError.value = error instanceof Error ? error.message : String(error);

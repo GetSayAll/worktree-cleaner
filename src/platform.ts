@@ -21,7 +21,10 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath as openWithSystem, revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import type {
+  ActivityAction,
+  ActivityEvent,
   CleanupPlan,
+  DetailArg,
   ExecutionOutcome,
   HistoryEntry,
   ProjectSnapshot,
@@ -132,6 +135,29 @@ export async function readHistory(): Promise<HistoryEntry[]> {
 /** Empties the log, keeping the file itself. */
 export async function clearLog(): Promise<void> {
   await invoke<void>("clear_log", {});
+}
+
+/**
+ * Records one user action.
+ *
+ * Deliberately fire-and-forget: an activity log records what happened
+ * afterwards and decides nothing, so a failure here must not surface as an error
+ * on a page the reader was in the middle of. The file and its location are the
+ * core's business, which is why this goes over IPC rather than to a file.
+ */
+export async function logActivity(
+  action: ActivityAction,
+  target: string,
+  args: Record<string, DetailArg> = {}
+): Promise<void> {
+  if (!isDesktop()) return;
+  await invoke<void>("log_activity", { action, target, args });
+}
+
+/** Reads the user-action log back, oldest first. */
+export async function readActivity(): Promise<ActivityEvent[]> {
+  if (!isDesktop()) return [];
+  return invoke<ActivityEvent[]>("read_activity", {});
 }
 
 // ---- the operating system ---------------------------------------------------

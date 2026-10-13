@@ -105,7 +105,8 @@ describe("the Rust-to-TypeScript field contract", () => {
     ["ScanOptions", "lib.rs"],
     ["ExecutionOutcome", "cleanup.rs"],
     ["Reason", "reason.rs"],
-    ["SafetyAssessment", "reason.rs"]
+    ["SafetyAssessment", "reason.rs"],
+    ["ActivityEvent", "lib.rs"]
   ];
 
   for (const [name, file] of structs) {
@@ -180,5 +181,28 @@ describe("the Rust-to-TypeScript field contract", () => {
     const fields = ["level", "prunable", "dirty", "untracked", "merged", "size", "files", "tracked", "ignored", "symlink"];
     expect(Object.keys(en.detail.fields).sort()).toEqual([...fields].sort());
     expect(Object.keys(zhCN.detail.fields).sort()).toEqual([...fields].sort());
+  });
+
+  it("keeps the activity-action list, its type and its copy in step", () => {
+    // The same three places as the detail codes: what the core sends, what the
+    // front end types it as, and what the copy table is read by.
+    const lib = readFileSync(join(coreDir, "lib.rs"), "utf8");
+    const rustActions = [
+      ...lib.matchAll(/#\[serde\(rename = "((?:scan|project|plan|settings|cleanup|trash)\.[a-z]+)"\)\]/g)
+    ].map((match) => match[1]);
+
+    const block = types.match(/export type ActivityAction =([\s\S]*?);/);
+    expect(block, "ActivityAction not found in src/types.ts").not.toBeNull();
+    const tsActions = [...block![1].matchAll(/"([a-z]+\.[a-z]+)"/g)].map((match) => match[1]);
+
+    const tableCodes = (table: typeof en): string[] =>
+      Object.entries(table.activity.codes).flatMap(([family, entries]) =>
+        Object.keys(entries).map((name) => `${family}.${name}`)
+      );
+
+    expect(rustActions.length).toBeGreaterThan(5);
+    expect([...tsActions].sort()).toEqual([...rustActions].sort());
+    expect(tableCodes(en).sort()).toEqual([...rustActions].sort());
+    expect(tableCodes(zhCN).sort()).toEqual([...rustActions].sort());
   });
 });

@@ -155,6 +155,39 @@ export const zhCN = {
     },
     legacy: "这条记录写于本工具开始保留原因码之前"
   },
+  // 用户做过什么，按 ActivityAction 索引。删除记录在上面自己的段里；这里是
+  // 「这台机器上发生过什么」的另一半，也是读者没有别的办法重建的那一半。
+  activity: {
+    codes: {
+      scan: {
+        started: "开始扫描",
+        finished: "扫描完成：{worktrees} 个工作树、{artifacts} 个产物目录",
+        failed: "扫描没有完成：{error}",
+        cancelled: "扫描在 {elapsed} 后被取消"
+      },
+      project: {
+        switched: "从 {from} 切换到这个项目"
+      },
+      plan: {
+        generated: "生成了清理计划：{worktrees} 个工作树、{artifacts} 个产物目录",
+        exported: "导出了计划"
+      },
+      settings: {
+        changed: "修改了一项设置"
+      },
+      cleanup: {
+        confirmed: "确认执行清理：{worktrees} 个工作树、{artifacts} 个产物目录，其中 {forced} 个需要 --force"
+      },
+      trash: {
+        opened: "打开了系统{{trash}}"
+      }
+    },
+    kinds: {
+      deletion: "删除了",
+      action: "你的操作"
+    },
+    filterAction: "你的操作"
+  },
   common: {
     unknown: "未知",
     none: "（无）",

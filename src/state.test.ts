@@ -24,9 +24,14 @@ async function freshState(): Promise<typeof import("./state")> {
  */
 async function freshStateWithExecutor(
   outcome: ExecutionOutcome
-): Promise<{ state: typeof import("./state"); plans: unknown[] }> {
+): Promise<{
+  state: typeof import("./state");
+  plans: unknown[];
+  logActivity: ReturnType<typeof vi.fn>;
+}> {
   vi.resetModules();
   const plans: unknown[] = [];
+  const logActivity = vi.fn(async () => undefined);
   vi.doMock("./platform", () => ({
     isDesktop: () => true,
     // The message tables resolve their platform wording through this, so a mock
@@ -38,10 +43,14 @@ async function freshStateWithExecutor(
       return outcome;
     },
     logPath: async () => null,
-    readHistory: async () => outcome.history
+    readHistory: async () => outcome.history,
+    // The activity log is written fire-and-forget, so a mock that collects it is
+    // enough to prove the calls happen without turning every test into a file.
+    logActivity,
+    readActivity: async () => []
   }));
   const state = await import("./state");
-  return { state, plans };
+  return { state, plans, logActivity };
 }
 
 /** Undoes `freshStateWithExecutor` so the next test sees the real boundary. */
@@ -368,6 +377,36 @@ describe("an unmeasurable size travels as unknown", () => {
     // The history entry keeps the same value.
     expect(state.history.value[0]?.size_bytes).toBeNull();
   });
+});
+
+describe("the activity log", () => {
+  it("records what the reader confirmed, not what happened afterwards", async () => {
+    // The deletions are already in the operation log. This line is the other
+    // half — the agreement, with what it covered — and it is the part nothing
+    // else records: after the run, "what did I just agree to delete" is only
+    // answerable if it was written down before the run.
+    const { state, logActivity } = await freshStateWithExecutor({
+      entries: [],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.settings.whitelist_paths = [];
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [venv, dist];
+    await state.executeCleanup();
+    unmockPlatform();
+
+    const confirmed = logActivity.mock.calls.filter(
+      (call: unknown[]) => call[0] === "cleanup.confirmed"
+    );
+    expect(confirmed).toHaveLength(1);
+    const [, target, args] = confirmed[0] as [string, string, Record<string, unknown>];
+    expect(target).toBe(mockRoot);
+    expect(args.artifacts).toBe(2);
+    expect(args.typed_name).toBe(false);
+  });
+
 });
 
 describe("group selection and blocked execution", () => {

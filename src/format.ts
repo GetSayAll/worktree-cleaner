@@ -149,6 +149,25 @@ export function detailText(code: DetailCode | null, args: Record<string, DetailA
 }
 
 /**
+ * The wording of one user action, from its code and arguments.
+ *
+ * The same shape as `detailText`: the core sends family.action and the raw
+ * values, and the sentence belongs here. A code with no entry returns the code
+ * itself rather than nothing — an id is ugly, but it is at least traceable, and
+ * a blank row would look like data loss.
+ */
+export function activityText(action: string, args: Record<string, DetailArg> = {}): string {
+  const dot = action.indexOf(".");
+  if (dot < 0) return action;
+  const families: Record<string, Record<string, string> | undefined> = messages.activity.codes;
+  const copy = families[action.slice(0, dot)]?.[action.slice(dot + 1)];
+  if (typeof copy !== "string") return action;
+  const text = (value: DetailArg | undefined): string =>
+    value === undefined ? "" : detailArg(value);
+  return copy.replace(/\{(\w+)\}/g, (_, name: string) => text(args[name]));
+}
+
+/**
  * Sort comparator for "largest first" lists that keeps an unmeasurable item at
  * the top instead of burying it at the bottom.
  *
