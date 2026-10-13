@@ -11,13 +11,19 @@
 const blockerPrefix = "被白名单保护规则拦截：";
 
 export const zhCN = {
+  // 随运行机器变化的词。字符串里写 `{{trash}}`，由 `applyLocale` 填入本机该用的
+  // 那个词（见 `./index.ts`），所以界面上只出现读者所在的那一个系统，不并列两个。
+  // `other` 是第三方系统上的浏览器预览：用通用说法，不猜。
+  platform: {
+    trash: { macos: "废纸篓", windows: "回收站", other: "系统回收站" }
+  },
   app: {
     name: "Worktree Cleaner",
     // 暂时留空，等口号定下来。键先留着：文案落地时只需改这一处，别的地方
     // （侧栏布局、两表一致性测试）都不用动。
     tagline: "",
     readOnlyNote:
-      "扫描阶段只运行只读 Git 命令；删除一律进系统回收站，不会永久删除。",
+      "扫描阶段只运行只读 Git 命令；删除一律进系统{{trash}}，不会永久删除。",
     versionNote: "v0.1.0",
     sampleData: "示例数据",
     previewNote: "浏览器预览",
@@ -67,7 +73,7 @@ export const zhCN = {
     copied: "已复制",
     action: {
       worktreeRemove: "移除工作树",
-      trashMove: "移入回收站",
+      trashMove: "移入{{trash}}",
       prune: "清理元数据"
     },
     outcome: {
@@ -126,7 +132,7 @@ export const zhCN = {
   welcome: {
     eyebrow: "Worktree Cleaner",
     title: "项目清理审计",
-    lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删。扫描默认只读；删除一律进系统回收站。",
+    lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删。扫描默认只读；删除一律进系统{{trash}}。",
     pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
@@ -142,9 +148,9 @@ export const zhCN = {
       evidenceTitle: "可核验的理由",
       evidenceBody:
         "每条判断都带证据：具体命令、文件数量或路径。「看着像垃圾」不算理由。",
-      trashTitle: "回收站删除",
+      trashTitle: "删除走{{trash}}",
       trashBody:
-        "目录删除一律进系统回收站；工作树走 git worktree remove。没有任何永久删除路径。"
+        "目录删除一律进系统{{trash}}；工作树走 git worktree remove。没有任何永久删除路径。"
     },
     recentTitle: "最近的项目",
     recentHint: "点击即可扫描",
@@ -271,7 +277,7 @@ export const zhCN = {
     stats: {
       removeWorktree: "移除工作树",
       removeWorktreeSub: "git worktree remove",
-      moveToTrash: "移入回收站",
+      moveToTrash: "移入{{trash}}",
       moveToTrashSub: (bundled: number) => `另有 ${bundled} 项随所属工作树一并移除`,
       reclaimable: "预计可回收",
       reclaimableSub: "依据扫描时测得的体积",
@@ -324,7 +330,7 @@ export const zhCN = {
       `--force 会连同下列未跟踪文件一起删除（共 ${n} 个）：它们没有被 Git 跟踪，删除后无法从仓库里恢复：`,
     prunableNote: "工作目录已经不在了。只清理 Git 元数据，不触碰任何文件。",
     cleanNote: "工作区是干净的，不会丢失任何未保存内容。",
-    channelB: "通道 B · 移入系统回收站",
+    channelB: "通道 B · 移入系统{{trash}}",
     trashHeader: (n: number, bytes: string) => `${n} 项 · ${bytes}`,
     columns: {
       directory: "目录",
@@ -333,7 +339,7 @@ export const zhCN = {
       recoverability: "可恢复性"
     },
     removedWithWorktree: "随工作树移除",
-    recoverable: "可从回收站恢复",
+    recoverable: "可从{{trash}}恢复",
     noArtifacts: "没有选中产物目录",
     confirmationTitle: "执行前确认",
     confirmationIntro: "本次操作命中以下高风险条件，需要人工确认：",
@@ -354,16 +360,16 @@ export const zhCN = {
   },
   result: {
     title: "执行结果",
-    openTrash: "打开回收站",
+    openTrash: "打开{{trash}}",
     trashNotice:
-      "目录已移入系统回收站，可以从回收站恢复；工作树是通过 git 移除的。",
+      "目录已移入系统{{trash}}，可以从{{trash}}恢复；工作树是通过 git 移除的。",
     openLog: "打开日志",
     logFailedTitle: "操作日志没能写入",
     logFailedBody: (path: string, error: string) =>
       `上面的条目仍然处理了，但 ${path} 写入失败（${error}），审计记录在这里断了一环。`,
     stats: {
       spaceFreed: "已释放空间",
-      spaceFreedSub: "包含回收站移动与工作树移除",
+      spaceFreedSub: "包含{{trash}}移动与工作树移除",
       // 从头就测不出体积的条目对 `freed` 没有贡献；用「至少」表述，比报一个
       // 假合计诚实。
       spaceFreedSubUnknown: (n: number) =>
@@ -373,9 +379,9 @@ export const zhCN = {
       // 现在说清成功数里有什么、什么才会进回收站。
       succeeded: "已处理",
       succeededSub: (trashed: number) =>
-        `其中 ${trashed} 个目录进了回收站；工作树由 git 移除，不进回收站`,
-      movedToTrash: "进了回收站",
-      movedToTrashSub: "可从回收站恢复",
+        `其中 ${trashed} 个目录进了{{trash}}；工作树由 git 移除，不进{{trash}}`,
+      movedToTrash: "进了{{trash}}",
+      movedToTrashSub: "可从{{trash}}恢复",
       skippedFailed: "未删除",
       skippedFailedSub: "都没删，原因见下表"
     },
@@ -389,13 +395,13 @@ export const zhCN = {
     },
     empty: "没有执行记录",
     footer:
-      "失败的条目不影响其他条目；每个动作都会写入本机操作日志。删除不是永久的，目录类目标可以从回收站恢复。",
+      "失败的条目不影响其他条目；每个动作都会写入本机操作日志。删除不是永久的，目录类目标可以从{{trash}}恢复。",
     complete: "清理完成；重新扫描即可确认结果",
     viewHistory: "查看历史记录",
     backToOverview: "返回总览",
     detail: {
       bundled: "随所属工作树一起移除，不再单独操作",
-      trashed: "已移入系统回收站，可从回收站恢复",
+      trashed: "已移入系统{{trash}}，可从{{trash}}恢复",
       pruneFinalize: "git worktree prune 收尾清理残留元数据",
       preconditionFailed: "前置条件检查未通过，未执行"
     }
@@ -406,7 +412,7 @@ export const zhCN = {
     copyLog: "复制日志",
     filterAll: (n: number) => `全部 ${n}`,
     filterWorktreeRemove: "移除工作树",
-    filterTrashMove: "移入回收站",
+    filterTrashMove: "移入{{trash}}",
     empty: "没有记录",
     readFailed: (message: string) => `日志读取失败：${message}`,
     reason: {
@@ -442,8 +448,8 @@ export const zhCN = {
     protectedBranchesHint: "逗号分隔，支持通配符；默认分支会被自动识别并加入",
     deletionTitle: "删除方式",
     directoryDeletion: "目录删除",
-    directoryDeletionHint: "固定为系统回收站；本工具不提供永久删除，也没有绕过开关",
-    directoryDeletionOption: "系统回收站（macOS 废纸篓 / Windows 回收站）",
+    directoryDeletionHint: "固定为系统{{trash}}；本工具不提供永久删除，也没有绕过开关",
+    directoryDeletionOption: "系统{{trash}}",
     worktreeDeletion: "工作树删除",
     worktreeDeletionHint:
       "一律走 git worktree remove；目录已消失时使用 git worktree prune",
@@ -465,7 +471,7 @@ export const zhCN = {
       zhCN: "简体中文"
     },
     appearance: "外观",
-    appearanceHint: "「跟随系统」会自动跟随 macOS / Windows 的浅色与深色模式",
+    appearanceHint: "「跟随系统」会自动跟随操作系统的浅色与深色模式",
     system: "跟随系统",
     light: "浅色",
     dark: "深色",

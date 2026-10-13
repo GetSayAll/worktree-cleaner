@@ -33,6 +33,37 @@ export function isDesktop(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+/**
+ * The operating system the app is running on.
+ *
+ * The words for it are not the same on either one: the place a deleted directory
+ * goes is the Trash on macOS and the Recycle Bin on Windows, and in Chinese 废纸篓
+ * against 回收站. Saying both at once — "System Trash (macOS Trash / Windows Recycle
+ * Bin)" — describes a feature rather than telling the reader where their own
+ * directories go, so the interface says one thing, the right one.
+ *
+ * `other` covers a browser preview on a third system, and reads as the generic
+ * noun rather than guessing.
+ */
+export type HostOs = "macos" | "windows" | "other";
+
+/**
+ * Read from the user agent rather than asked of the host.
+ *
+ * `navigator.userAgent` is deprecated in browsers, and `userAgentData` is not in
+ * every engine a Tauri webview runs on, but the user agent is present in all of
+ * them and this is a two-way choice, not a version. Reading it costs nothing and
+ * fails to a safe answer: an unrecognised agent is `other`, which shows the
+ * generic wording.
+ */
+export function hostOs(): HostOs {
+  if (typeof navigator === "undefined") return "other";
+  const agent = `${navigator.userAgent ?? ""} ${(navigator as { platform?: string }).platform ?? ""}`;
+  if (/mac|iphone|ipad|darwin/i.test(agent)) return "macos";
+  if (/win/i.test(agent)) return "windows";
+  return "other";
+}
+
 /** Raised when a desktop-only action is attempted in a browser preview. */
 export class DesktopOnlyError extends Error {
   constructor() {

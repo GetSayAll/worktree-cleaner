@@ -29,6 +29,9 @@ async function freshStateWithExecutor(
   const plans: unknown[] = [];
   vi.doMock("./platform", () => ({
     isDesktop: () => true,
+    // The message tables resolve their platform wording through this, so a mock
+    // that leaves it out fails at import rather than quietly falling back.
+    hostOs: () => "macos" as const,
     scanProject: vi.fn(),
     executePlan: async (plan: unknown) => {
       plans.push(plan);

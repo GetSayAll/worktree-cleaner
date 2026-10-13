@@ -14,13 +14,20 @@
 const blockerPrefix = "Blocked by whitelist protection: ";
 
 export const en = {
+  // The words that differ by the machine the app runs on. A string writes
+  // `{{trash}}` and `applyLocale` fills it in (see `./index.ts`), so the interface
+  // names the one system the reader is on. `other` is a browser preview on a third
+  // system: the generic noun rather than a guess.
+  platform: {
+    trash: { macos: "Trash", windows: "Recycle Bin", other: "system trash" }
+  },
   app: {
     name: "Worktree Cleaner",
     // Intentionally blank until the tagline is decided. The key stays so that
     // landing the copy later is a one-line edit and nothing else has to move.
     tagline: "",
     readOnlyNote:
-      "The scan phase runs only read-only Git commands; deletions always go to the system Trash and are never permanent.",
+      "The scan phase runs only read-only Git commands; deletions always go to the system {{trash}} and are never permanent.",
     versionNote: "v0.1.0",
     sampleData: "Sample data",
     previewNote: "Browser preview",
@@ -73,7 +80,7 @@ export const en = {
     copied: "Copied",
     action: {
       worktreeRemove: "Remove Worktree",
-      trashMove: "Move to Trash",
+      trashMove: "Move to {{trash}}",
       prune: "Clean up metadata"
     },
     outcome: {
@@ -131,7 +138,7 @@ export const en = {
   welcome: {
     eyebrow: "Worktree Cleaner",
     title: "Project cleanup audit",
-    lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted. Scanning is read-only by default; deletions always go to the system Trash.",
+    lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted. Scanning is read-only by default; deletions always go to the system {{trash}}.",
     pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "Choose folder",
     chooseFolderTitle: "Open the system folder picker",
@@ -148,9 +155,9 @@ export const en = {
       evidenceTitle: "Verifiable reasons",
       evidenceBody:
         'Every judgment comes with evidence: a concrete command, file count, or path. "Looks like junk" is not accepted.',
-      trashTitle: "Trash-based deletion",
+      trashTitle: "Deletion through the {{trash}}",
       trashBody:
-        "Directory deletions always go to the system Trash; worktrees go through git worktree remove. Nothing is permanently deleted."
+        "Directory deletions always go to the system {{trash}}; worktrees go through git worktree remove. Nothing is permanently deleted."
     },
     recentTitle: "Recent projects",
     recentHint: "Click to scan",
@@ -282,7 +289,7 @@ export const en = {
     stats: {
       removeWorktree: "Remove Worktree",
       removeWorktreeSub: "git worktree remove",
-      moveToTrash: "Move to Trash",
+      moveToTrash: "Move to {{trash}}",
       moveToTrashSub: (bundled: number) => `plus ${bundled} items removed with their worktree`,
       reclaimable: "Estimated reclaimable",
       reclaimableSub: "based on sizes measured at scan time",
@@ -339,7 +346,7 @@ export const en = {
     prunableNote:
       "The working directory is already gone. Only the Git metadata is pruned; no files are touched.",
     cleanNote: "The working tree is clean; no unsaved content will be lost.",
-    channelB: "Channel B · Move to system Trash",
+    channelB: "Channel B · Move to system {{trash}}",
     trashHeader: (n: number, bytes: string) => `${n} items · ${bytes}`,
     columns: {
       directory: "Directory",
@@ -348,7 +355,7 @@ export const en = {
       recoverability: "Recoverability"
     },
     removedWithWorktree: "Removed with worktree",
-    recoverable: "Recoverable from Trash",
+    recoverable: "Recoverable from {{trash}}",
     noArtifacts: "No artifact directories selected",
     confirmationTitle: "Confirmation before execution",
     confirmationIntro:
@@ -371,16 +378,16 @@ export const en = {
   },
   result: {
     title: "Result",
-    openTrash: "Open Trash",
+    openTrash: "Open {{trash}}",
     trashNotice:
-      "Directories were moved to the system Trash and are recoverable from there; worktrees were removed with git.",
+      "Directories were moved to the system {{trash}} and are recoverable from there; worktrees were removed with git.",
     openLog: "Open log",
     logFailedTitle: "The operation log could not be written",
     logFailedBody: (path: string, error: string) =>
       `The items above were processed anyway, but ${path} could not be written (${error}), so the audit trail has a hole in it.`,
     stats: {
       spaceFreed: "Space freed",
-      spaceFreedSub: "includes Trash moves and worktrees",
+      spaceFreedSub: "includes {{trash}} moves and worktrees",
       // Items that could never be measured contribute nothing to `freed`; saying
       // "at least" keeps the number honest instead of reporting a false total.
       spaceFreedSubUnknown: (n: number) =>
@@ -390,9 +397,9 @@ export const en = {
       // Saying so here is what stops "4 succeeded, 1 in the Trash" looking wrong.
       succeeded: "Handled",
       succeededSub: (trashed: number) =>
-        `${trashed} went to the Trash; worktrees are removed by git and do not go there`,
-      movedToTrash: "Went to Trash",
-      movedToTrashSub: "recoverable from Trash",
+        `${trashed} went to the {{trash}}; worktrees are removed by git and do not go there`,
+      movedToTrash: "Went to {{trash}}",
+      movedToTrashSub: "recoverable from {{trash}}",
       skippedFailed: "Not deleted",
       skippedFailedSub: "nothing was removed; the table below says why"
     },
@@ -406,13 +413,13 @@ export const en = {
     },
     empty: "No execution records",
     footer:
-      "Failed items do not affect the others; every action is written to the local operation log. Deletions are not permanent, and directory targets can be recovered from Trash.",
+      "Failed items do not affect the others; every action is written to the local operation log. Deletions are not permanent, and directory targets can be recovered from {{trash}}.",
     complete: "Cleanup complete; rescan to confirm the result",
     viewHistory: "View history",
     backToOverview: "Back to overview",
     detail: {
       bundled: "Removed together with its owning worktree; no separate operation",
-      trashed: "Moved to the system Trash; recoverable from Trash",
+      trashed: "Moved to the system {{trash}}; recoverable from {{trash}}",
       pruneFinalize: "git worktree prune finalizes cleanup of leftover metadata",
       preconditionFailed: "Precondition check failed; not executed"
     }
@@ -423,7 +430,7 @@ export const en = {
     copyLog: "Copy log",
     filterAll: (n: number) => `All ${n}`,
     filterWorktreeRemove: "Remove Worktree",
-    filterTrashMove: "Move to Trash",
+    filterTrashMove: "Move to {{trash}}",
     empty: "No records",
     readFailed: (message: string) => `The log could not be read: ${message}`,
     reason: {
@@ -464,8 +471,8 @@ export const en = {
     deletionTitle: "Deletion method",
     directoryDeletion: "Directory deletion",
     directoryDeletionHint:
-      "Fixed to the system Trash; this tool provides no permanent deletion and no bypass",
-    directoryDeletionOption: "System Trash (macOS Trash / Windows Recycle Bin)",
+      "Fixed to the system {{trash}}; this tool provides no permanent deletion and no bypass",
+    directoryDeletionOption: "System {{trash}}",
     worktreeDeletion: "Worktree deletion",
     worktreeDeletionHint:
       "Always via git worktree remove; uses git worktree prune when the directory is gone",
@@ -489,7 +496,7 @@ export const en = {
     },
     appearance: "Appearance",
     appearanceHint:
-      '"Follow system" automatically follows the light and dark modes of macOS / Windows',
+      '"Follow system" follows the light and dark modes of the operating system',
     system: "System",
     light: "Light",
     dark: "Dark",

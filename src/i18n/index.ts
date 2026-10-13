@@ -18,6 +18,7 @@
 import { reactive } from "vue";
 import { en } from "./en";
 import { zhCN } from "./zh-CN";
+import { hostOs, type HostOs } from "../platform";
 
 /** The message table's shape. `en` is the source of truth for it. */
 export type Messages = typeof en;
@@ -36,14 +37,71 @@ export const SOURCE_LOCALE: Locale = "en";
 const TABLES: Record<Locale, Messages> = { en, "zh-CN": zhCN };
 
 /**
+ * The wording this machine needs, filled into the `{{token}}` holes.
+ *
+ * A table writes `{{trash}}` and the resolved table carries the word that is true
+ * here, so no string has to name two systems to be correct and no call site has to
+ * know what it is running on. The tokens are resolved when a locale is applied
+ * rather than where they are read: the host does not change while the app runs, and
+ * `messages` is a plain string table by the time any component sees it.
+ */
+function tokensFor(locale: Locale, os: HostOs): Record<string, string> {
+  return { trash: TABLES[locale].platform.trash[os] };
+}
+
+/** Every `{{token}}` in `value`, replaced. A string with no token is returned as it is. */
+function fill(value: string, tokens: Record<string, string>): string {
+  return value.replace(/\{\{(\w+)\}\}/g, (match, name: string) => tokens[name] ?? match);
+}
+
+/**
+ * The table for one locale on one machine, with its tokens filled in.
+ *
+ * The tables are small and a locale is applied at most a few times per run, so the
+ * simplest thing that cannot alias the source table is the right one: a structural
+ * copy, rebuilt rather than mutated.
+ *
+ * Functions are wrapped rather than copied: most messages are `(n) => ...`, and a
+ * token inside one of those bodies is as real as a token in a plain string — the
+ * one that was `went to the {{trash}}` in a function body is what would have shown
+ * the reader a literal `{{trash}}` if this only walked strings. The wrapper fills
+ * the string the function returns, which is the only place a token can appear.
+ */
+export function resolvedTable(locale: Locale, os: HostOs): Messages {
+  const table = TABLES[locale];
+  const tokens = tokensFor(locale, os);
+  const walk = (node: unknown): unknown => {
+    if (typeof node === "string") return fill(node, tokens);
+    if (typeof node === "function") {
+      const fn = node as (...args: unknown[]) => unknown;
+      return (...args: unknown[]) => {
+        const value = fn(...args);
+        return typeof value === "string" ? fill(value, tokens) : value;
+      };
+    }
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(node)) out[key] = walk(value);
+      return out;
+    }
+    return node;
+  };
+  return walk(table) as Messages;
+}
+
+/**
  * The live message table.
  *
  * Reactive on purpose: components read it in their templates, so replacing a
  * section re-renders them. The tables are two levels deep and all three levels
  * are plain objects, so `Object.assign` replaces whole sections; that is safe
  * only while every table has the same keys, which the locale test asserts.
+ *
+ * Initialised resolved rather than from the raw table, so the first paint has no
+ * `{{trash}}` in it even if nothing has called `applyLocale` yet.
  */
-export const messages = reactive<Messages>({ ...en });
+export const messages = reactive<Messages>(resolvedTable(SOURCE_LOCALE, hostOs()));
 
 let choice: LocaleChoice = "system";
 
@@ -83,12 +141,12 @@ export function resolveLocale(next: LocaleChoice): Locale {
  */
 export function applyLocale(next: LocaleChoice): Locale {
   choice = next;
-  const resolved = resolveLocale(next);
-  Object.assign(messages, TABLES[resolved]);
+  const resolvedLocale = resolveLocale(next);
+  Object.assign(messages, resolvedTable(resolvedLocale, hostOs()));
   if (typeof document !== "undefined") {
-    document.documentElement.lang = resolved;
+    document.documentElement.lang = resolvedLocale;
   }
-  return resolved;
+  return resolvedLocale;
 }
 
 /**
