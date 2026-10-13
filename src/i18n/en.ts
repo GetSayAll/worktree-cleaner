@@ -108,6 +108,68 @@ export const en = {
       rebuildable: "regenerable directory"
     }
   },
+  // What one executed action did, keyed by DetailCode (src/types.ts). The core
+  // decides the code and the raw values; the sentence is written here, which is
+  // why the detail column follows the language instead of staying English.
+  //
+  // `{before}` and `{after}` are the two sides of a field that moved, `{reason}`
+  // is a reason code that the reason table below also knows, and `{error}` is
+  // whatever Git or the system said. `{field}` is looked up in `fields` and
+  // removed before this runs.
+  detail: {
+    yes: "yes",
+    no: "no",
+    // Keyed as family/name, not as the dotted code, for the same reason
+    // `reasons` is: the test helpers walk a table by splitting a path on dots,
+    // so a key that contains one would be read as two segments.
+    codes: {
+      worktree: {
+        not_in_scan: "no longer in the scan result; nothing was executed",
+        changed: "changed since the plan was made: {before} → {after}; not deleted",
+        no_longer_safe: "the re-check no longer reports it as safe to delete: {reason}",
+        removed: "removed with git worktree remove",
+        remove_failed: "git worktree remove failed: {error}",
+        pruned: "git worktree prune cleaned up the leftover metadata",
+        prune_failed: "git worktree prune failed: {error}"
+      },
+      artifact: {
+        not_in_scan: "no longer in the scan result; nothing was executed",
+        not_a_known_kind:
+          "no longer a directory name this tool recognises as an artifact; not deleted",
+        changed: "changed since the plan was made: {before} → {after}; not deleted",
+        no_longer_safe: "the re-check no longer reports it as safe to delete: {reason}",
+        vanished: "this directory is no longer on disk, so there was nothing to delete",
+        unmeasurable: "the re-check could not measure this directory, so it was left alone",
+        trashed: "moved to the {{trash}}",
+        trash_failed: "could not move to the {{trash}}: {error}"
+      },
+      prunable: {
+        metadata_only:
+          "the directory was already gone; only the Git metadata was cleaned up, and no files were touched"
+      },
+      precondition: {
+        failed: "a deletion guard refused this path; not executed"
+      },
+      bundled: {
+        with_worktree: "removed together with its own worktree; no separate operation"
+      }
+    },
+    // The name of the field that moved, for the `changed` codes. Without these
+    // the sentence would read "size changed … " with the field name in English.
+    fields: {
+      level: "the verdict",
+      prunable: "the working directory",
+      dirty: "the uncommitted changes",
+      untracked: "the untracked files",
+      merged: "the merge status",
+      size: "the size",
+      files: "the file count",
+      tracked: "Git tracking",
+      ignored: "the ignore rules",
+      symlink: "the symlink"
+    },
+    legacy: "recorded before this build kept reason codes"
+  },
   common: {
     unknown: "unknown",
     none: "(none)",
@@ -458,13 +520,7 @@ export const en = {
       "Failed items do not affect the others; every action is written to the local operation log. Deletions are not permanent, and directory targets can be recovered from {{trash}}.",
     complete: "Cleanup complete; rescan to confirm the result",
     viewHistory: "View history",
-    backToOverview: "Back to overview",
-    detail: {
-      bundled: "Removed together with its owning worktree; no separate operation",
-      trashed: "Moved to the system {{trash}}; recoverable from {{trash}}",
-      pruneFinalize: "git worktree prune finalizes cleanup of leftover metadata",
-      preconditionFailed: "Precondition check failed; not executed"
-    }
+    backToOverview: "Back to overview"
   },
   history: {
     title: "History",

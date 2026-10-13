@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { executeError, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
-import { formatBytes, displayPath } from "../format";
+import { detailText, formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
 import { openTrash, isDesktop } from "../platform";
 
@@ -123,7 +123,7 @@ const logFailure = computed(() => {
             <tr v-for="(item, index) in lastResult" :key="`${item.target}-${index}`">
               <td class="nowrap tiny cell-action">{{ actionLabel(item.action) }}</td>
               <td class="mono cell-target">{{ displayPath(item.target, root) }}</td>
-              <td class="tiny faint cell-detail">{{ item.detail }}</td>
+              <td class="tiny faint cell-detail">{{ detailText(item.detail_code, item.detail_args, item.detail) }}</td>
               <td class="cell-outcome cell-outcome-cell">
                 <span class="outcome" :class="`outcome--${item.result}`">{{ outcomeLabel(item.result) }}</span>
               </td>

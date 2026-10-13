@@ -708,7 +708,9 @@ async function applyOutcome(outcome: ExecutionOutcome, plan: CleanupPlan) {
     action: "trash-move",
     target: path,
     result: "skipped",
-    detail: messages.result.detail.preconditionFailed,
+    detail_code: "precondition.failed",
+    detail_args: {},
+    detail: null,
     size_bytes: null
   }));
 

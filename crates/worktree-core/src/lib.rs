@@ -22,6 +22,7 @@ pub use worktree::{
     WorktreeCheckOptions, WorktreeEntry,
 };
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -169,6 +170,95 @@ pub enum ExecutionResult {
     Failed,
 }
 
+/// One argument to a [`DetailCode`].
+///
+/// Only raw values cross this boundary. The front end formats them — a byte
+/// count through `formatBytes`, so the unit follows the language the reader is
+/// using — and the wording belongs to the message table. A core that formatted
+/// "1.29 GB" here would freeze an English unit into a Chinese screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DetailArg {
+    Text(String),
+    Bytes(u64),
+    Count(u64),
+    Flag(bool),
+    /// The absence of a value, which is not a zero and not an empty string: an
+    /// unmeasurable size, a Git fact that was never established.
+    Unknown,
+}
+
+/// What one executed action did, as a code rather than a sentence.
+///
+/// A free English sentence used to travel in `detail` and be printed as it
+/// stood, which is why the detail column stayed English after a language switch,
+/// and why a re-check failure once put `size=Some(1320274909) files=80703` on the
+/// screen. Only the code and its raw arguments cross; the front end owns the
+/// sentence. Dotted names, like the reason codes, so both tables read the same
+/// way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DetailCode {
+    /// The worktree is not in the scan result any more; nothing ran.
+    #[serde(rename = "worktree.not_in_scan")]
+    WorktreeNotInScan,
+    /// The re-check found a field different from the one the plan recorded.
+    /// Carries `field`, `before` and `after`.
+    #[serde(rename = "worktree.changed")]
+    WorktreeChanged,
+    /// The re-check no longer reports the worktree as safe. Carries `reason`,
+    /// which is a reason code.
+    #[serde(rename = "worktree.no_longer_safe")]
+    WorktreeNoLongerSafe,
+    /// `git worktree remove` succeeded. Carries `prune_error` when the follow-up
+    /// prune did not.
+    #[serde(rename = "worktree.removed")]
+    WorktreeRemoved,
+    /// Git refused or failed while removing the worktree. Carries `error`.
+    #[serde(rename = "worktree.remove_failed")]
+    WorktreeRemoveFailed,
+    /// `git worktree prune` finalised the metadata cleanup.
+    #[serde(rename = "worktree.pruned")]
+    WorktreePruned,
+    /// `git worktree prune` failed. Carries `error`.
+    #[serde(rename = "worktree.prune_failed")]
+    WorktreePruneFailed,
+    /// The working directory was already gone; only metadata was cleaned up.
+    #[serde(rename = "prunable.metadata_only")]
+    PrunableMetadataOnly,
+    /// The artifact is not in the scan result any more; nothing ran.
+    #[serde(rename = "artifact.not_in_scan")]
+    ArtifactNotInScan,
+    /// The directory is no longer a name this tool recognises as an artifact.
+    #[serde(rename = "artifact.not_a_known_kind")]
+    ArtifactNotAKnownKind,
+    /// The re-check found a field different from the one the plan recorded.
+    /// Carries `field`, `before` and `after`.
+    #[serde(rename = "artifact.changed")]
+    ArtifactChanged,
+    /// The re-check no longer reports the directory as safe to delete. Carries
+    /// `reason`, which is a reason code.
+    #[serde(rename = "artifact.no_longer_safe")]
+    ArtifactNoLongerSafe,
+    /// The directory is not on disk any more.
+    #[serde(rename = "artifact.vanished")]
+    ArtifactVanished,
+    /// The re-check could not measure the directory, so nothing was decided.
+    #[serde(rename = "artifact.unmeasurable")]
+    ArtifactUnmeasurable,
+    /// Moved to the system Trash.
+    #[serde(rename = "artifact.trashed")]
+    ArtifactTrashed,
+    /// The move to the system Trash failed. Carries `error`.
+    #[serde(rename = "artifact.trash_failed")]
+    ArtifactTrashFailed,
+    /// A deletion guard refused the item before execution.
+    #[serde(rename = "precondition.failed")]
+    PreconditionFailed,
+    /// Removed together with its worktree; not a separate operation.
+    #[serde(rename = "bundled.with_worktree")]
+    BundledWithWorktree,
+}
+
 /// One line of the per-item result table.
 ///
 /// Mirrors `ResultEntry` in `src/types.ts` field for field.
@@ -177,7 +267,14 @@ pub struct ResultEntry {
     pub action: HistoryAction,
     pub target: String,
     pub result: ExecutionResult,
-    pub detail: String,
+    /// `None` on a record written before the codes existed; `detail` then holds
+    /// that record's sentence and the front end shows it as it stands.
+    #[serde(default)]
+    pub detail_code: Option<DetailCode>,
+    #[serde(default)]
+    pub detail_args: BTreeMap<String, DetailArg>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     /// `null` = the size was never measurable; must not collapse to 0.
     pub size_bytes: Option<u64>,
 }
@@ -192,10 +289,23 @@ pub struct HistoryEntry {
     pub at: String,
     pub action: HistoryAction,
     pub target: String,
-    pub reason: String,
+    /// The verdict this deletion was based on, as a code the front end has a
+    /// word for. `None` when the record carries no reason.
+    #[serde(default)]
+    pub reason_code: Option<ReasonCode>,
+    /// Superseded by `reason_code`, kept so a log written by an earlier version
+    /// still reads back rather than dropping out of the history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     pub result: ExecutionResult,
     pub size_bytes: Option<u64>,
-    pub detail: String,
+    #[serde(default)]
+    pub detail_code: Option<DetailCode>,
+    #[serde(default)]
+    pub detail_args: BTreeMap<String, DetailArg>,
+    /// Superseded by `detail_code`, kept for the same reason as `reason`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// The check result for a single Git worktree.

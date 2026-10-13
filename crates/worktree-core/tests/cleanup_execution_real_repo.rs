@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 use common::{backdate_tree, purge_marked_from_trash, trash_inspectable, Repo};
 use worktree_core::cleanup::{execute_plan, ExecuteOptions};
 use worktree_core::{
-    log, scan_project, CleanupPlan, ExecutionResult, HistoryAction, PlanItemKind, ProjectSnapshot,
-    SafetyStatus, ScanOptions, TrashMoveItem, WorktreeRecord, WorktreeRemovalItem,
+    log, scan_project, CleanupPlan, DetailArg, DetailCode, ExecutionResult, HistoryAction,
+    PlanItemKind, ProjectSnapshot, SafetyStatus, ScanOptions, TrashMoveItem, WorktreeRecord,
+    WorktreeRemovalItem,
 };
 
 fn scan_options() -> ScanOptions {
@@ -223,7 +224,10 @@ fn a_safe_worktree_is_removed_by_git_and_pruned() {
     assert_eq!(history[0].action, HistoryAction::WorktreeRemove);
     assert_eq!(history[0].result, ExecutionResult::Ok);
     assert_eq!(history[0].target, record.path);
-    assert!(!history[0].reason.is_empty());
+    assert!(
+        history[0].reason_code.is_some(),
+        "every log line carries the verdict it was based on"
+    );
     assert!(!history[0].at.is_empty());
 }
 
@@ -260,7 +264,7 @@ fn a_prunable_worktree_is_cleaned_up_with_prune_only() {
         outcome.entries[0]
     );
     assert!(
-        outcome.entries[0].detail.contains("no files were touched"),
+        outcome.entries[0].detail_code == Some(DetailCode::PrunableMetadataOnly),
         "{:?}",
         outcome.entries[0]
     );
@@ -294,22 +298,79 @@ fn a_plan_is_skipped_when_the_worktree_changed_after_the_scan() {
 
     assert_eq!(outcome.entries.len(), 1, "{:?}", outcome.entries);
     assert_eq!(outcome.entries[0].result, ExecutionResult::Skipped);
-    assert!(
-        outcome.entries[0]
-            .detail
-            .contains("changed since the plan was generated"),
+    assert_eq!(
+        outcome.entries[0].detail_code,
+        Some(DetailCode::WorktreeChanged),
         "{:?}",
         outcome.entries[0]
     );
+    // The reason names the field that moved, rather than printing two records for
+    // the reader to diff: this worktree stopped being safe between the plan and
+    // the run, and that is what the log has to say.
+    let text_arg = |name: &str| {
+        outcome.entries[0]
+            .detail_args
+            .get(name)
+            .and_then(|arg| match arg {
+                DetailArg::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+    };
+    assert_eq!(text_arg("field"), Some("level"));
+    assert_eq!(text_arg("before"), Some("Safe"));
+    assert_eq!(text_arg("after"), Some("Review"));
     assert!(linked.exists(), "nothing was executed");
     assert!(
         linked.join("later.txt").exists(),
         "the new file is untouched"
     );
+}
 
+#[test]
+fn an_artifact_that_vanished_before_the_run_is_reported_as_gone_not_as_changed() {
+    // The regression this pins. A directory that is no longer on disk came back
+    // from the size walk as "0 bytes, 0 files", which is not what the plan
+    // recorded, so every vanished artifact was reported as "changed since the
+    // plan was generated". A run that recorded 80703 files and re-read 0 told
+    // the reader they had changed something they had never touched, and sent
+    // them to look for it.
+    let (repo, _linked, _marker) = repo_with_a_safe_worktree("vanished");
+    let snapshot = scan(&repo);
+    let artifact = ignored_modules(&snapshot);
+    assert_eq!(artifact.safety.status, SafetyStatus::Safe);
+
+    // Gone by the time the plan runs. Nothing is deleted, because there is
+    // nothing left to delete, and nothing is claimed.
+    std::fs::remove_dir_all(&artifact.path).expect("remove artifact");
+
+    let plan = CleanupPlan {
+        trash_moves: vec![TrashMoveItem {
+            kind: PlanItemKind::Artifact,
+            path: artifact.path.clone(),
+            artifact_kind: artifact.kind.clone(),
+            size_bytes: artifact.size_bytes,
+            file_count: artifact.file_count,
+            bundled_with_worktree: None,
+        }],
+        ..CleanupPlan::default()
+    };
+    let log_path = repo.base.join("operations.log");
+    let outcome = execute_plan(&plan, &snapshot, &options_with_log(&log_path));
+
+    assert_eq!(outcome.entries.len(), 1, "{:?}", outcome.entries);
+    assert_eq!(outcome.entries[0].result, ExecutionResult::Skipped);
+    assert_eq!(
+        outcome.entries[0].detail_code,
+        Some(DetailCode::ArtifactVanished),
+        "a directory that is gone did not change; it left: {:?}",
+        outcome.entries[0]
+    );
+
+    // And the log says the same thing, because the log is what a reader checks
+    // afterwards to find out what happened.
     let history = log::read(&log_path);
-    assert_eq!(history.len(), 1);
-    assert_eq!(history[0].result, ExecutionResult::Skipped);
+    assert_eq!(history.len(), 1, "{history:?}");
+    assert_eq!(history[0].detail_code, Some(DetailCode::ArtifactVanished));
 }
 
 #[test]
@@ -327,7 +388,7 @@ fn a_whitelisted_worktree_is_skipped_by_the_path_check() {
     assert_eq!(outcome.entries.len(), 1, "{:?}", outcome.entries);
     assert_eq!(outcome.entries[0].result, ExecutionResult::Skipped);
     assert!(
-        outcome.entries[0].detail.contains("path check failed"),
+        outcome.entries[0].detail_code == Some(DetailCode::PreconditionFailed),
         "{:?}",
         outcome.entries[0]
     );
@@ -381,7 +442,10 @@ fn an_ignored_artifact_is_moved_to_the_system_trash() {
         "the system Trash accepted the move: {:?}",
         outcome.entries[0]
     );
-    assert!(outcome.entries[0].detail.contains("Trash"));
+    assert_eq!(
+        outcome.entries[0].detail_code,
+        Some(DetailCode::ArtifactTrashed)
+    );
     if inspectable {
         assert_eq!(
             recovered.len(),
@@ -448,7 +512,7 @@ fn a_bundled_artifact_is_not_deleted_a_second_time() {
         .expect("the bundled artifact has a row");
     assert_eq!(bundled.result, ExecutionResult::Ok, "{bundled:?}");
     assert!(
-        bundled.detail.contains("no separate operation"),
+        bundled.detail_code == Some(DetailCode::BundledWithWorktree),
         "{bundled:?}"
     );
     assert!(
@@ -494,15 +558,16 @@ fn a_bundled_artifact_is_not_claimed_as_removed_when_its_worktree_stays() {
     // owning worktree" would put a deletion in the audit log that never happened —
     // the worktree is still on disk. The artifact instead goes through the Trash on
     // its own, which is what actually happens to it and what the log must say.
-    assert!(
-        !entry.detail.contains("no separate operation"),
+    assert_ne!(
+        entry.detail_code,
+        Some(DetailCode::BundledWithWorktree),
         "the owning worktree was never removed, so the artifact cannot be reported as swept up with it: {entry:?}"
     );
     assert!(
         linked.exists(),
         "the worktree was never in the plan, so it is still there"
     );
-    if entry.detail.contains("moved to the system Trash") {
+    if entry.detail_code == Some(DetailCode::ArtifactTrashed) {
         assert!(
             !Path::new(&artifact.path).exists(),
             "it really went to the Trash"
@@ -541,7 +606,7 @@ fn a_whitelisted_artifact_is_skipped_by_the_path_check() {
     assert_eq!(outcome.entries.len(), 1, "{:?}", outcome.entries);
     assert_eq!(outcome.entries[0].result, ExecutionResult::Skipped);
     assert!(
-        outcome.entries[0].detail.contains("path check failed"),
+        outcome.entries[0].detail_code == Some(DetailCode::PreconditionFailed),
         "{:?}",
         outcome.entries[0]
     );

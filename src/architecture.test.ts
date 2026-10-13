@@ -151,4 +151,34 @@ describe("the Rust-to-TypeScript field contract", () => {
     expect(tableCodes(en).sort()).toEqual([...rustCodes].sort());
     expect(tableCodes(zhCN).sort()).toEqual([...rustCodes].sort());
   });
+
+  it("keeps the detail-code list, its type and its copy in step", () => {
+    // Three places have to agree, or the result page shows something that means
+    // nothing: the `#[serde(rename)]` the core sends, the union `src/types.ts`
+    // types it as, and the key `detail.codes` looks it up by. A fourth place is
+    // the field names `detail.fields` knows, which the `changed` codes quote.
+    const lib = readFileSync(join(coreDir, "lib.rs"), "utf8");
+    const rustCodes = [
+      ...lib.matchAll(/#\[serde\(rename = "((?:worktree|artifact|prunable|precondition|bundled)[a-z_.]*)"\)\]/g)
+    ].map((match) => match[1]);
+
+    const block = types.match(/export type DetailCode =([\s\S]*?);/);
+    expect(block, "DetailCode not found in src/types.ts").not.toBeNull();
+    const tsCodes = [...block![1].matchAll(/"([a-z_.]+)"/g)].map((match) => match[1]);
+
+    expect(rustCodes.length).toBeGreaterThan(10);
+    const tableCodes = (table: typeof en): string[] =>
+      Object.entries(table.detail.codes).flatMap(([family, entries]) =>
+        Object.keys(entries).map((name) => `${family}.${name}`)
+      );
+
+    expect([...tsCodes].sort()).toEqual([...rustCodes].sort());
+    expect(tableCodes(en).sort()).toEqual([...rustCodes].sort());
+    expect(tableCodes(zhCN).sort()).toEqual([...rustCodes].sort());
+
+    // Every field name the core can send has to be one the sentence can say.
+    const fields = ["level", "prunable", "dirty", "untracked", "merged", "size", "files", "tracked", "ignored", "symlink"];
+    expect(Object.keys(en.detail.fields).sort()).toEqual([...fields].sort());
+    expect(Object.keys(zhCN.detail.fields).sort()).toEqual([...fields].sort());
+  });
 });

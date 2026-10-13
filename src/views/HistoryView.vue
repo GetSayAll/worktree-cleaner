@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { history, historyError } from "../state";
-import { formatBytes, formatTimestamp, homePath } from "../format";
+import { detailText, formatBytes, formatTimestamp, homePath, reasonCopy } from "../format";
+import type { HistoryEntry } from "../types";
 import { messages } from "../i18n";
 
 type FilterKey = "all" | "worktree-remove" | "trash-move";
@@ -28,6 +29,17 @@ function outcomeLabel(result: string): string {
       failed: messages.common.outcome.failed
     }[result] ?? result
   );
+}
+
+/**
+ * The verdict one deletion was based on.
+ *
+ * A code the reason table knows is rendered from it; a record written before the
+ * codes existed keeps its own sentence rather than losing the reason entirely.
+ */
+function reasonOf(row: HistoryEntry): string {
+  const copy = row.reason_code ? reasonCopy(row.reason_code) : undefined;
+  return copy ?? row.reason ?? messages.detail.legacy;
 }
 
 const filtered = computed(() => {
@@ -80,8 +92,8 @@ async function copyAll() {
                 <span class="outcome" :class="`outcome--${row.result}`">{{ outcomeLabel(row.result) }}</span>
                 <span class="faint tiny numeric">{{ formatBytes(row.size_bytes) }}</span>
               </div>
-              <div class="tiny faint">{{ row.reason }}</div>
-              <div class="tiny muted">{{ row.detail }}</div>
+              <div class="tiny faint">{{ reasonOf(row) }}</div>
+              <div class="tiny muted">{{ detailText(row.detail_code, row.detail_args, row.detail) }}</div>
             </div>
           </div>
           <div v-if="filtered.length === 0" class="empty">{{ messages.history.empty }}</div>

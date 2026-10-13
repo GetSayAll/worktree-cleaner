@@ -73,6 +73,12 @@ too_many_lines = "allow"
 # These are settings objects, and a bool is the honest type for each field.
 struct_excessive_bools = "allow"
 
+# `push` writes one audit record, and every argument is a distinct column of that
+# record: action, target, result, the detail code, its arguments, the size and the
+# reason. It is called from eighteen places, and a wrapper struct would repeat all
+# six names at each of them to save the `&mut audit` parameter.
+too_many_arguments = "allow"
+
 # `map_or_else(|| …, |v| …)` in place of a four-line `if let / else` reads worse, not
 # better: the two branches stop being branches and the reader has to hold both in
 # mind at once. The plain form states what happens in the order it happens.

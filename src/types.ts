@@ -132,22 +132,67 @@ export interface CleanupPlan {
   ack_reasons: string[];
 }
 
+/**
+ * What one executed action did, as a stable code rather than a sentence.
+ *
+ * Mirrors `DetailCode` in `crates/worktree-core/src/lib.rs`. A free English
+ * sentence used to travel in the record and be printed as it stood, which is why
+ * the detail column stayed English after a language switch and why a re-check
+ * failure once put `size=Some(1320274909) files=80703` on the screen. Only the
+ * code and raw arguments cross; the wording is in `src/i18n/`.
+ */
+export type DetailCode =
+  | "worktree.not_in_scan"
+  | "worktree.changed"
+  | "worktree.no_longer_safe"
+  | "worktree.removed"
+  | "worktree.remove_failed"
+  | "worktree.pruned"
+  | "worktree.prune_failed"
+  | "prunable.metadata_only"
+  | "artifact.not_in_scan"
+  | "artifact.not_a_known_kind"
+  | "artifact.changed"
+  | "artifact.no_longer_safe"
+  | "artifact.vanished"
+  | "artifact.unmeasurable"
+  | "artifact.trashed"
+  | "artifact.trash_failed"
+  | "precondition.failed"
+  | "bundled.with_worktree";
+
+/** One argument to a `DetailCode`.
+ *
+ * Raw values only: a byte count arrives as a number and is formatted by
+ * `detailArg` in `src/format.ts`, so the unit follows the language the reader is
+ * using. `null` is the absence of a measurement and must never render as zero.
+ */
+export type DetailArg = string | number | boolean | null;
+
 export interface HistoryEntry {
   at: string;
   action: "worktree-remove" | "trash-move" | "prune";
   target: string;
-  reason: string;
+  /** The verdict this deletion was based on; `null` when the record has none. */
+  reason_code: ReasonCode | null;
+  /** A record written before the codes existed; shown as it stands. */
+  reason: string | null;
   result: "ok" | "skipped" | "failed";
   /** `null` = the size was never measurable; must not collapse to 0. */
   size_bytes: number | null;
-  detail: string;
+  detail_code: DetailCode | null;
+  detail_args: Record<string, DetailArg>;
+  /** A record written before the codes existed; shown as it stands. */
+  detail: string | null;
 }
 
 export interface ResultEntry {
   action: "worktree-remove" | "trash-move" | "prune";
   target: string;
   result: "ok" | "skipped" | "failed";
-  detail: string;
+  detail_code: DetailCode | null;
+  detail_args: Record<string, DetailArg>;
+  detail: string | null;
   /** `null` = the size was never measurable; must not collapse to 0. */
   size_bytes: number | null;
 }

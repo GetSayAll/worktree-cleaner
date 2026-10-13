@@ -331,7 +331,9 @@ describe("an unmeasurable size travels as unknown", () => {
           action: "trash-move",
           target: mainCoverage,
           result: "ok",
-          detail: "moved to the system Trash; recoverable from Trash",
+          detail_code: "artifact.trashed",
+          detail_args: {},
+          detail: null,
           size_bytes: null
         }
       ],
@@ -340,10 +342,13 @@ describe("an unmeasurable size travels as unknown", () => {
           at: new Date().toISOString(),
           action: "trash-move",
           target: mainCoverage,
-          reason: "regenerable",
+          reason_code: "af.rebuildable",
+          reason: null,
           result: "ok",
           size_bytes: null,
-          detail: "moved to the system Trash; recoverable from Trash"
+          detail_code: "artifact.trashed",
+          detail_args: {},
+          detail: null
         }
       ],
       log_error: null
@@ -372,16 +377,18 @@ describe("group selection and blocked execution", () => {
     // summed — reporting "0 B freed" for it would be a measurement that never happened.
     const { state } = await freshStateWithExecutor({
       entries: [
-        { action: "trash-move", target: mainCoverage, result: "ok", detail: "moved", size_bytes: 100 },
+        { action: "trash-move", target: mainCoverage, result: "ok", detail_code: "artifact.trashed", detail_args: {}, detail: null, size_bytes: 100 },
         {
           action: "trash-move",
           target: `${mockRoot}/went-stale`,
           result: "skipped",
-          detail: "changed since the plan was generated",
+          detail_code: "artifact.changed",
+          detail_args: { field: "size", before: 200, after: 0 },
+          detail: null,
           size_bytes: 200
         },
-        { action: "trash-move", target: venv, result: "ok", detail: "moved", size_bytes: null },
-        { action: "prune", target: mockRoot, result: "ok", detail: "pruned", size_bytes: null }
+        { action: "trash-move", target: venv, result: "ok", detail_code: "artifact.trashed", detail_args: {}, detail: null, size_bytes: null },
+        { action: "prune", target: mockRoot, result: "ok", detail_code: "worktree.pruned", detail_args: {}, detail: null, size_bytes: null }
       ],
       history: [],
       log_error: null
@@ -505,7 +512,7 @@ describe("canOpen", () => {
     expect(state.canOpen("result")).toBe(false);
 
     state.lastResult.value = [
-      { action: "prune", target: mockRoot, result: "ok", detail: "prune", size_bytes: 0 }
+      { action: "prune", target: mockRoot, result: "ok", detail_code: "worktree.pruned", detail_args: {}, detail: null, size_bytes: 0 }
     ];
     expect(state.canOpen("result")).toBe(true);
   });

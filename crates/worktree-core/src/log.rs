@@ -96,17 +96,21 @@ pub fn clear(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ExecutionResult, HistoryAction};
+    use crate::{DetailCode, ExecutionResult, HistoryAction, ReasonCode};
+    use std::collections::BTreeMap;
 
     fn entry(target: &str, size: Option<u64>) -> HistoryEntry {
         HistoryEntry {
             at: "2026-01-01T00:00:00Z".to_string(),
             action: HistoryAction::TrashMove,
             target: target.to_string(),
-            reason: "matched a rebuildable artifact type".to_string(),
+            reason_code: Some(ReasonCode::AfRebuildable),
+            reason: None,
             result: ExecutionResult::Ok,
             size_bytes: size,
-            detail: "moved to the system Trash".to_string(),
+            detail_code: Some(DetailCode::ArtifactTrashed),
+            detail_args: BTreeMap::new(),
+            detail: None,
         }
     }
 

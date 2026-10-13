@@ -17,6 +17,7 @@
 //! Every action is appended to the local operation log (D15). Nothing here talks
 //! to the network.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -26,11 +27,11 @@ use crate::artifact::{check_artifact, lookup_kind, ArtifactScanOptions};
 use crate::git::{GitError, GitRunner, ProcessGitRunner};
 use crate::log;
 use crate::path::{validate_path_for_deletion, DeletionContext};
-use crate::reason::SafetyStatus;
+use crate::reason::{ReasonCode, SafetyStatus};
 use crate::worktree::{check_worktree, WorktreeCheckOptions};
 use crate::{
-    CleanupPlan, ExecutionResult, HistoryAction, HistoryEntry, ProjectSnapshot, ResultEntry,
-    WorktreeRecord,
+    CleanupPlan, DetailArg, DetailCode, ExecutionResult, HistoryAction, HistoryEntry,
+    ProjectSnapshot, ResultEntry, WorktreeRecord,
 };
 
 /// Injection points for one execution run.
@@ -116,7 +117,8 @@ pub fn execute_plan(
                 HistoryAction::WorktreeRemove,
                 target,
                 ExecutionResult::Skipped,
-                "the worktree is no longer in the scan result; nothing was executed",
+                DetailCode::WorktreeNotInScan,
+                &[],
                 None,
                 None,
             );
@@ -128,15 +130,16 @@ pub fn execute_plan(
             .parent()
             .map_or_else(|| PathBuf::from(&snapshot.root), Path::to_path_buf);
         let context = DeletionContext::new(parent).with_whitelist(whitelist.clone());
-        if let Err(rejection) = validate_path_for_deletion(Path::new(&record.path), &context) {
+        if validate_path_for_deletion(Path::new(&record.path), &context).is_err() {
             push(
                 &mut audit,
                 HistoryAction::WorktreeRemove,
                 target,
                 ExecutionResult::Skipped,
-                &format!("path check failed: {rejection}"),
+                DetailCode::PreconditionFailed,
+                &[],
                 record.size_bytes,
-                Some(primary_reason(record)),
+                primary_reason(record),
             );
             continue;
         }
@@ -156,19 +159,20 @@ pub fn execute_plan(
                 size_bytes: record.size_bytes,
             },
         );
-        if worktree_identity(record) != worktree_identity(&rechecked) {
+        if let Some(change) = worktree_change(record, &rechecked) {
             push(
                 &mut audit,
                 HistoryAction::WorktreeRemove,
                 target,
                 ExecutionResult::Skipped,
-                &format!(
-                    "the worktree changed since the plan was generated (was {}, is now {}); not executed",
-                    worktree_identity(record),
-                    worktree_identity(&rechecked)
-                ),
+                DetailCode::WorktreeChanged,
+                &[
+                    ("field", DetailArg::Text(change.field.to_string())),
+                    ("before", change.before),
+                    ("after", change.after),
+                ],
                 record.size_bytes,
-                Some(primary_reason(record)),
+                primary_reason(record),
             );
             continue;
         }
@@ -181,12 +185,15 @@ pub fn execute_plan(
                 HistoryAction::WorktreeRemove,
                 target,
                 ExecutionResult::Skipped,
-                &format!(
-                    "the re-check no longer reports this worktree as safe to delete: {}",
-                    primary_reason(&rechecked)
-                ),
+                DetailCode::WorktreeNoLongerSafe,
+                &[(
+                    "reason",
+                    primary_reason(&rechecked).map_or(DetailArg::Unknown, |code| {
+                        DetailArg::Text(code.as_str().to_string())
+                    }),
+                )],
                 record.size_bytes,
-                Some(primary_reason(record)),
+                primary_reason(record),
             );
             continue;
         }
@@ -202,9 +209,10 @@ pub fn execute_plan(
                         HistoryAction::Prune,
                         target,
                         ExecutionResult::Ok,
-                        "git worktree prune cleaned up leftover metadata; no files were touched",
+                        DetailCode::PrunableMetadataOnly,
+                        &[],
                         record.size_bytes,
-                        Some(primary_reason(record)),
+                        primary_reason(record),
                     );
                 }
                 Err(error) => push(
@@ -212,9 +220,10 @@ pub fn execute_plan(
                     HistoryAction::Prune,
                     target,
                     ExecutionResult::Failed,
-                    &format!("git worktree prune failed: {error}"),
+                    DetailCode::WorktreePruneFailed,
+                    &[("error", DetailArg::Text(error.to_string()))],
                     record.size_bytes,
-                    Some(primary_reason(record)),
+                    primary_reason(record),
                 ),
             }
             continue;
@@ -238,20 +247,22 @@ pub fn execute_plan(
                 let pruned = run_git(&runner, Path::new(&snapshot.root), &["worktree", "prune"]);
                 any_worktree_removed = true;
                 removed_worktrees.push(record.path.clone());
-                let detail: String = match pruned {
-                    Ok(()) => "git worktree remove succeeded; git worktree prune cleaned up leftover metadata".to_string(),
-                    Err(error) => format!(
-                        "git worktree remove succeeded, but the follow-up prune failed: {error}"
-                    ),
+                // The removal is the outcome; a failed follow-up is carried
+                // alongside it rather than replacing it, because the worktree is
+                // gone either way and the leftover metadata is what remains.
+                let args: Vec<(&str, DetailArg)> = match pruned {
+                    Ok(()) => Vec::new(),
+                    Err(error) => vec![("prune_error", DetailArg::Text(error.to_string()))],
                 };
                 push(
                     &mut audit,
                     HistoryAction::WorktreeRemove,
                     target,
                     ExecutionResult::Ok,
-                    &detail,
+                    DetailCode::WorktreeRemoved,
+                    &args,
                     record.size_bytes,
-                    Some(primary_reason(record)),
+                    primary_reason(record),
                 );
             }
             Err(error) => push(
@@ -259,9 +270,10 @@ pub fn execute_plan(
                 HistoryAction::WorktreeRemove,
                 target,
                 ExecutionResult::Failed,
-                &format!("git worktree remove failed: {error}"),
+                DetailCode::WorktreeRemoveFailed,
+                &[("error", DetailArg::Text(error.to_string()))],
                 record.size_bytes,
-                Some(primary_reason(record)),
+                primary_reason(record),
             ),
         }
     }
@@ -282,9 +294,10 @@ pub fn execute_plan(
                     HistoryAction::TrashMove,
                     target,
                     ExecutionResult::Ok,
-                    "removed together with its owning worktree; no separate operation",
+                    DetailCode::BundledWithWorktree,
+                    &[],
                     Some(0),
-                    Some("removed with its owning worktree".to_string()),
+                    None,
                 );
                 bundled_already_removed = true;
             }
@@ -299,7 +312,8 @@ pub fn execute_plan(
                 HistoryAction::TrashMove,
                 target,
                 ExecutionResult::Skipped,
-                "the artifact is no longer in the scan result; nothing was executed",
+                DetailCode::ArtifactNotInScan,
+                &[],
                 None,
                 None,
             );
@@ -308,15 +322,16 @@ pub fn execute_plan(
 
         let context = DeletionContext::new(PathBuf::from(&record.project_root))
             .with_whitelist(whitelist.clone());
-        if let Err(rejection) = validate_path_for_deletion(Path::new(&record.path), &context) {
+        if validate_path_for_deletion(Path::new(&record.path), &context).is_err() {
             push(
                 &mut audit,
                 HistoryAction::TrashMove,
                 target,
                 ExecutionResult::Skipped,
-                &format!("path check failed: {rejection}"),
+                DetailCode::PreconditionFailed,
+                &[],
                 record.size_bytes,
-                Some(primary_reason_artifact(record)),
+                primary_reason_artifact(record),
             );
             continue;
         }
@@ -333,12 +348,55 @@ pub fn execute_plan(
                 HistoryAction::TrashMove,
                 target,
                 ExecutionResult::Skipped,
-                "the directory is no longer a recognised artifact kind; not executed",
+                DetailCode::ArtifactNotAKnownKind,
+                &[],
                 record.size_bytes,
-                Some(primary_reason_artifact(record)),
+                primary_reason_artifact(record),
             );
             continue;
         };
+        // ---- re-check, and say which of four things happened ----
+        //
+        // "Gone", "cannot be read", "changed" and "no longer safe" all used to
+        // report "changed since the plan was generated". They are one answer for
+        // four situations, and the first two were not even true: a failed
+        // `read_dir` came back from the size walk as zero bytes, the size was part
+        // of the comparison, and a run that recorded 80703 files re-read 0 told
+        // the reader they had changed something they had not touched.
+        //
+        // `symlink_metadata` rather than `exists()`, because `exists()` cannot
+        // tell a missing directory from an unreadable one — the same EACCES /
+        // NotFound conflation that `worktree.rs` already had to fix.
+        match std::fs::symlink_metadata(&record.path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                push(
+                    &mut audit,
+                    HistoryAction::TrashMove,
+                    target,
+                    ExecutionResult::Skipped,
+                    DetailCode::ArtifactVanished,
+                    &[],
+                    record.size_bytes,
+                    primary_reason_artifact(record),
+                );
+                continue;
+            }
+            Err(_) => {
+                push(
+                    &mut audit,
+                    HistoryAction::TrashMove,
+                    target,
+                    ExecutionResult::Skipped,
+                    DetailCode::ArtifactUnmeasurable,
+                    &[],
+                    record.size_bytes,
+                    primary_reason_artifact(record),
+                );
+                continue;
+            }
+            Ok(_) => {}
+        }
+
         let (rechecked, _notes) = check_artifact(
             &runner,
             Path::new(&record.project_root),
@@ -354,19 +412,20 @@ pub fn execute_plan(
                 credential_budget: None,
             },
         );
-        if artifact_identity(record) != artifact_identity(&rechecked) {
+        if let Some(change) = artifact_change(record, &rechecked) {
             push(
                 &mut audit,
                 HistoryAction::TrashMove,
                 target,
                 ExecutionResult::Skipped,
-                &format!(
-                    "the artifact changed since the plan was generated (was {}, is now {}); not executed",
-                    artifact_identity(record),
-                    artifact_identity(&rechecked)
-                ),
+                DetailCode::ArtifactChanged,
+                &[
+                    ("field", DetailArg::Text(change.field.to_string())),
+                    ("before", change.before),
+                    ("after", change.after),
+                ],
                 record.size_bytes,
-                Some(primary_reason_artifact(record)),
+                primary_reason_artifact(record),
             );
             continue;
         }
@@ -376,12 +435,15 @@ pub fn execute_plan(
                 HistoryAction::TrashMove,
                 target,
                 ExecutionResult::Skipped,
-                &format!(
-                    "the re-check no longer reports this artifact as safe to delete: {}",
-                    primary_reason_artifact(&rechecked)
-                ),
+                DetailCode::ArtifactNoLongerSafe,
+                &[(
+                    "reason",
+                    primary_reason_artifact(&rechecked).map_or(DetailArg::Unknown, |code| {
+                        DetailArg::Text(code.as_str().to_string())
+                    }),
+                )],
                 record.size_bytes,
-                Some(primary_reason_artifact(record)),
+                primary_reason_artifact(record),
             );
             continue;
         }
@@ -393,18 +455,20 @@ pub fn execute_plan(
                 HistoryAction::TrashMove,
                 target,
                 ExecutionResult::Ok,
-                "moved to the system Trash; recoverable from Trash",
+                DetailCode::ArtifactTrashed,
+                &[],
                 record.size_bytes,
-                Some(primary_reason_artifact(record)),
+                primary_reason_artifact(record),
             ),
             Err(error) => push(
                 &mut audit,
                 HistoryAction::TrashMove,
                 target,
                 ExecutionResult::Failed,
-                &format!("could not move to the system Trash: {error}"),
+                DetailCode::ArtifactTrashFailed,
+                &[("error", DetailArg::Text(error.to_string()))],
                 record.size_bytes,
-                Some(primary_reason_artifact(record)),
+                primary_reason_artifact(record),
             ),
         }
     }
@@ -419,18 +483,20 @@ pub fn execute_plan(
                 HistoryAction::Prune,
                 &snapshot.root,
                 ExecutionResult::Ok,
-                "git worktree prune finalised the metadata cleanup",
+                DetailCode::WorktreePruned,
+                &[],
                 None,
-                Some("metadata cleanup".to_string()),
+                None,
             ),
             Err(error) => push(
                 &mut audit,
                 HistoryAction::Prune,
                 &snapshot.root,
                 ExecutionResult::Failed,
-                &format!("git worktree prune failed: {error}"),
+                DetailCode::WorktreePruneFailed,
+                &[("error", DetailArg::Text(error.to_string()))],
                 None,
-                Some("metadata cleanup".to_string()),
+                None,
             ),
         }
     }
@@ -494,82 +560,188 @@ fn push(
     action: HistoryAction,
     target: &str,
     result: ExecutionResult,
-    detail: &str,
+    code: DetailCode,
+    args: &[(&str, DetailArg)],
     size_bytes: Option<u64>,
-    reason: Option<String>,
+    reason: Option<ReasonCode>,
 ) {
+    let detail_args: BTreeMap<String, DetailArg> = args
+        .iter()
+        .map(|(name, value)| ((*name).to_string(), value.clone()))
+        .collect();
     audit.entries.push(ResultEntry {
         action,
         target: target.to_string(),
         result,
-        detail: detail.to_string(),
+        detail_code: Some(code),
+        detail_args: detail_args.clone(),
+        detail: None,
         size_bytes,
     });
     audit.history.push(HistoryEntry {
         at: crate::timefmt::format_rfc3339(SystemTime::now()),
         action,
         target: target.to_string(),
-        reason: reason.unwrap_or_else(|| detail.to_string()),
+        reason_code: reason,
+        reason: None,
         result,
         size_bytes,
-        detail: detail.to_string(),
+        detail_code: Some(code),
+        detail_args,
+        detail: None,
     });
 }
 
-/// The decision-relevant facts of a worktree, as one comparable string.
+/// One decision-relevant field that no longer matches the plan.
+struct FieldChange {
+    /// A stable name the front end has a word for: `level`, `size`, `files`,
+    /// `tracked`, `ignored`, `symlink`, `dirty`, `untracked`, `merged`.
+    field: &'static str,
+    before: DetailArg,
+    after: DetailArg,
+}
+
+/// A byte count as an argument. A measurement that never happened is `Unknown`,
+/// not zero: the difference between "this is empty" and "this was not measured"
+/// is the whole point of D3.
+fn bytes_or_unknown(bytes: Option<u64>) -> DetailArg {
+    bytes.map_or(DetailArg::Unknown, DetailArg::Bytes)
+}
+
+fn flag_or_unknown(value: Option<bool>) -> DetailArg {
+    value.map_or(DetailArg::Unknown, DetailArg::Flag)
+}
+
+/// The decision-relevant fields of a worktree, compared one at a time.
 ///
 /// Anything that could change what "remove this" means belongs here: the level,
 /// the channel (prune vs remove), the dirty and untracked counts, the merge
 /// status, and the size. A change in any of them makes the plan stale (D11).
-fn worktree_identity(record: &WorktreeRecord) -> String {
-    format!(
-        "level={:?} prunable={} dirty={} untracked={} merged={:?} size={:?}",
-        record.safety.status,
-        record.is_prunable,
-        record.dirty_files,
-        record.untracked_files,
-        record.merged_into_default,
-        record.size_bytes
-    )
+///
+/// This used to build one formatted string per record and compare the two, which
+/// is why a stale worktree once reported
+/// `level=Safe prunable=false dirty=0 ... size=Some(0)` on the result page and
+/// left the reader to work out which part had moved. Naming the field is the
+/// difference between "this no longer matches the plan" and "the size is now
+/// unknown".
+fn worktree_change(before: &WorktreeRecord, after: &WorktreeRecord) -> Option<FieldChange> {
+    if before.safety.status != after.safety.status {
+        return Some(FieldChange {
+            field: "level",
+            before: DetailArg::Text(format!("{:?}", before.safety.status)),
+            after: DetailArg::Text(format!("{:?}", after.safety.status)),
+        });
+    }
+    if before.is_prunable != after.is_prunable {
+        return Some(FieldChange {
+            field: "prunable",
+            before: DetailArg::Flag(before.is_prunable),
+            after: DetailArg::Flag(after.is_prunable),
+        });
+    }
+    if before.dirty_files != after.dirty_files {
+        return Some(FieldChange {
+            field: "dirty",
+            before: DetailArg::Count(u64::from(before.dirty_files)),
+            after: DetailArg::Count(u64::from(after.dirty_files)),
+        });
+    }
+    if before.untracked_files != after.untracked_files {
+        return Some(FieldChange {
+            field: "untracked",
+            before: DetailArg::Count(u64::from(before.untracked_files)),
+            after: DetailArg::Count(u64::from(after.untracked_files)),
+        });
+    }
+    if before.merged_into_default != after.merged_into_default {
+        return Some(FieldChange {
+            field: "merged",
+            before: flag_or_unknown(before.merged_into_default),
+            after: flag_or_unknown(after.merged_into_default),
+        });
+    }
+    if before.size_bytes != after.size_bytes {
+        return Some(FieldChange {
+            field: "size",
+            before: bytes_or_unknown(before.size_bytes),
+            after: bytes_or_unknown(after.size_bytes),
+        });
+    }
+    None
 }
 
-/// The decision-relevant facts of an artifact, as one comparable string.
-fn artifact_identity(record: &crate::ArtifactRecord) -> String {
-    format!(
-        "level={:?} size={:?} files={} tracked={:?} ignored={:?} symlink={}",
-        record.safety.status,
-        record.size_bytes,
-        record.file_count,
-        record.git_tracked,
-        record.git_ignored,
-        record.is_symlink
-    )
+/// The decision-relevant fields of an artifact, compared one at a time.
+fn artifact_change(
+    before: &crate::ArtifactRecord,
+    after: &crate::ArtifactRecord,
+) -> Option<FieldChange> {
+    if before.safety.status != after.safety.status {
+        return Some(FieldChange {
+            field: "level",
+            before: DetailArg::Text(format!("{:?}", before.safety.status)),
+            after: DetailArg::Text(format!("{:?}", after.safety.status)),
+        });
+    }
+    if before.size_bytes != after.size_bytes {
+        return Some(FieldChange {
+            field: "size",
+            before: bytes_or_unknown(before.size_bytes),
+            after: bytes_or_unknown(after.size_bytes),
+        });
+    }
+    if before.file_count != after.file_count {
+        return Some(FieldChange {
+            field: "files",
+            before: DetailArg::Count(before.file_count),
+            after: DetailArg::Count(after.file_count),
+        });
+    }
+    if before.git_tracked != after.git_tracked {
+        return Some(FieldChange {
+            field: "tracked",
+            before: flag_or_unknown(before.git_tracked),
+            after: flag_or_unknown(after.git_tracked),
+        });
+    }
+    if before.git_ignored != after.git_ignored {
+        return Some(FieldChange {
+            field: "ignored",
+            before: flag_or_unknown(before.git_ignored),
+            after: flag_or_unknown(after.git_ignored),
+        });
+    }
+    if before.is_symlink != after.is_symlink {
+        return Some(FieldChange {
+            field: "symlink",
+            before: DetailArg::Flag(before.is_symlink),
+            after: DetailArg::Flag(after.is_symlink),
+        });
+    }
+    None
 }
 
-/// The most severe reason's text, used as the log's `reason` column.
-fn primary_reason(record: &WorktreeRecord) -> String {
+/// The most severe reason's code, used as the log's `reason` column.
+///
+/// A code rather than `reason.text`, for the same reason the detail column moved:
+/// the text is an English sentence on every machine, and the log is a page the
+/// reader opens after a run. `None` when a record carries no reason at all.
+fn primary_reason(record: &WorktreeRecord) -> Option<ReasonCode> {
     record
         .safety
         .reasons
         .iter()
         .max_by_key(|reason| reason.severity)
-        .map_or_else(
-            || "executed after user confirmation".to_string(),
-            |reason| reason.text.clone(),
-        )
+        .map(|reason| reason.code)
 }
 
-/// The most severe reason's text for an artifact record.
-fn primary_reason_artifact(record: &crate::ArtifactRecord) -> String {
+/// The most severe reason's code for an artifact record.
+fn primary_reason_artifact(record: &crate::ArtifactRecord) -> Option<ReasonCode> {
     record
         .safety
         .reasons
         .iter()
         .max_by_key(|reason| reason.severity)
-        .map_or_else(
-            || "executed after user confirmation".to_string(),
-            |reason| reason.text.clone(),
-        )
+        .map(|reason| reason.code)
 }
 
 /// Rebuilds a [`crate::worktree::WorktreeEntry`] from a scanned record, so the
@@ -747,9 +919,10 @@ mod tests {
         let outcome = execute_plan(&plan, &snapshot, &execute_options());
         assert_eq!(outcome.entries.len(), 1);
         assert_eq!(outcome.entries[0].result, ExecutionResult::Skipped);
-        assert!(outcome.entries[0]
-            .detail
-            .contains("no longer in the scan result"));
+        assert_eq!(
+            outcome.entries[0].detail_code,
+            Some(DetailCode::WorktreeNotInScan)
+        );
     }
 
     #[test]
@@ -759,9 +932,10 @@ mod tests {
         let outcome = execute_plan(&plan, &snapshot, &execute_options());
         assert_eq!(outcome.entries.len(), 1);
         assert_eq!(outcome.entries[0].result, ExecutionResult::Skipped);
-        assert!(outcome.entries[0]
-            .detail
-            .contains("no longer in the scan result"));
+        assert_eq!(
+            outcome.entries[0].detail_code,
+            Some(DetailCode::ArtifactNotInScan)
+        );
     }
 
     #[test]
@@ -785,10 +959,10 @@ mod tests {
             ExecutionResult::Skipped,
             "nothing removed the worktree, so nothing removed the artifact"
         );
-        assert!(
-            !outcome.entries[0].detail.contains("no separate operation"),
-            "{}",
-            outcome.entries[0].detail
+        assert_ne!(
+            outcome.entries[0].detail_code,
+            Some(DetailCode::BundledWithWorktree),
+            "nothing removed the worktree, so nothing removed the artifact"
         );
     }
 
@@ -816,9 +990,10 @@ mod tests {
             HistoryAction::TrashMove,
             "/repo/repo--feature/dist",
             ExecutionResult::Ok,
-            "removed together with its owning worktree; no separate operation",
+            DetailCode::BundledWithWorktree,
+            &[],
             Some(0),
-            Some("removed with its owning worktree".to_string()),
+            None,
         );
         assert_eq!(audit.entries.len(), 1);
         assert_eq!(audit.history.len(), 1);
@@ -844,12 +1019,9 @@ mod tests {
         let outcome = execute_plan(&plan, &snapshot, &execute_options());
         assert_eq!(outcome.entries.len(), 1);
         assert_eq!(outcome.entries[0].result, ExecutionResult::Skipped);
-        assert!(
-            outcome.entries[0]
-                .detail
-                .contains("recognised artifact kind"),
-            "{:?}",
-            outcome.entries[0]
+        assert_eq!(
+            outcome.entries[0].detail_code,
+            Some(DetailCode::ArtifactNotAKnownKind)
         );
         assert!(target.exists(), "nothing was deleted");
     }
@@ -857,55 +1029,77 @@ mod tests {
     // ---- identity ----------------------------------------------------------
 
     #[test]
-    fn worktree_identity_changes_with_the_facts_but_not_with_the_branch() {
+    fn worktree_change_names_the_field_that_moved() {
         let base = worktree("/repo/wt");
 
         let mut dirty = base.clone();
         dirty.dirty_files = 2;
-        assert_ne!(worktree_identity(&base), worktree_identity(&dirty));
+        assert_eq!(
+            worktree_change(&base, &dirty).map(|change| change.field),
+            Some("dirty"),
+            "a dirty count that moved has to name itself, not print two records"
+        );
 
         let mut untracked = base.clone();
         untracked.untracked_files = 1;
-        assert_ne!(worktree_identity(&base), worktree_identity(&untracked));
+        assert_eq!(
+            worktree_change(&base, &untracked).map(|change| change.field),
+            Some("untracked")
+        );
 
         let mut unmeasured = base.clone();
         unmeasured.size_bytes = None;
-        assert_ne!(worktree_identity(&base), worktree_identity(&unmeasured));
+        let size = worktree_change(&base, &unmeasured).expect("a lost size is a change");
+        assert_eq!(size.field, "size");
+        assert_eq!(
+            size.after,
+            DetailArg::Unknown,
+            "a size that was never measured is not a size of zero"
+        );
 
         // The branch is display data: it does not change what removal means.
         let mut same = base.clone();
         same.branch = Some("other".to_string());
-        assert_eq!(worktree_identity(&base), worktree_identity(&same));
+        assert!(worktree_change(&base, &same).is_none());
     }
 
     #[test]
-    fn artifact_identity_tracks_size_tracking_flags_and_the_symlink_state() {
+    fn artifact_change_names_the_field_that_moved() {
         let base = artifact("/repo/dist", "/repo");
 
         let mut bigger = base.clone();
         bigger.size_bytes = Some(4096);
-        assert_ne!(artifact_identity(&base), artifact_identity(&bigger));
+        assert_eq!(
+            artifact_change(&base, &bigger).map(|change| change.field),
+            Some("size")
+        );
 
         let mut tracked = base.clone();
         tracked.git_tracked = Some(true);
-        assert_ne!(artifact_identity(&base), artifact_identity(&tracked));
+        assert_eq!(
+            artifact_change(&base, &tracked).map(|change| change.field),
+            Some("tracked")
+        );
 
         let mut ignored_unknown = base.clone();
         ignored_unknown.git_ignored = None;
-        assert_ne!(
-            artifact_identity(&base),
-            artifact_identity(&ignored_unknown)
+        assert_eq!(
+            artifact_change(&base, &ignored_unknown).map(|change| change.field),
+            Some("ignored")
         );
 
         let mut link = base.clone();
         link.is_symlink = true;
-        assert_ne!(artifact_identity(&base), artifact_identity(&link));
+        assert_eq!(
+            artifact_change(&base, &link).map(|change| change.field),
+            Some("symlink")
+        );
 
         // The human-facing labels are display data and do not take part.
         let mut relabelled = base.clone();
         relabelled.kind = "build output".to_string();
         relabelled.ecosystem = "whatever".to_string();
-        assert_eq!(artifact_identity(&base), artifact_identity(&relabelled));
+        assert!(artifact_change(&base, &relabelled).is_none());
     }
 
     // ---- the log's reason column -------------------------------------------
@@ -932,7 +1126,7 @@ mod tests {
                 "index 0",
             ),
         ]);
-        assert_eq!(primary_reason(&record), "main worktree");
+        assert_eq!(primary_reason(&record), Some(ReasonCode::WtMain));
     }
 
     #[test]
@@ -947,21 +1141,24 @@ mod tests {
                 "written 2026-10-12",
             ),
         ]);
-        assert_eq!(primary_reason_artifact(&record), "recent activity");
+        assert_eq!(
+            primary_reason_artifact(&record),
+            Some(ReasonCode::AfRecentActivity)
+        );
     }
 
     #[test]
-    fn a_record_without_reasons_falls_back_to_the_confirmation_wording() {
+    fn a_record_without_reasons_reports_none_rather_than_inventing_one() {
+        // There is no verdict to show, and the old fallback invented one in
+        // English — "executed after user confirmation" — which the front end had
+        // no way to translate and no reason to display.
         let mut record = worktree("/repo/wt");
         record.safety = SafetyAssessment::from_reasons(Vec::new());
-        assert_eq!(primary_reason(&record), "executed after user confirmation");
+        assert_eq!(primary_reason(&record), None);
 
         let mut link = artifact("/repo/dist", "/repo");
         link.safety = SafetyAssessment::from_reasons(Vec::new());
-        assert_eq!(
-            primary_reason_artifact(&link),
-            "executed after user confirmation"
-        );
+        assert_eq!(primary_reason_artifact(&link), None);
     }
 
     // ---- the result / log pair ---------------------------------------------
@@ -974,9 +1171,10 @@ mod tests {
             HistoryAction::TrashMove,
             "/repo/dist",
             ExecutionResult::Ok,
-            "moved to the system Trash; recoverable from Trash",
+            DetailCode::ArtifactTrashed,
+            &[],
             Some(2048),
-            Some("regenerable directory".to_string()),
+            Some(ReasonCode::AfRebuildable),
         );
 
         let Audit { entries, history } = audit;
@@ -986,8 +1184,14 @@ mod tests {
         assert_eq!(entries[0].target, "/repo/dist");
         assert_eq!(entries[0].result, ExecutionResult::Ok);
         assert_eq!(entries[0].size_bytes, Some(2048));
-        assert_eq!(history[0].reason, "regenerable directory");
-        assert_eq!(history[0].detail, entries[0].detail);
+        // Both carry the code and the arguments, and neither carries a sentence:
+        // the wording is the front end's, and it has to be able to change.
+        assert_eq!(entries[0].detail_code, Some(DetailCode::ArtifactTrashed));
+        assert_eq!(entries[0].detail, None);
+        assert_eq!(history[0].reason_code, Some(ReasonCode::AfRebuildable));
+        assert_eq!(history[0].reason, None);
+        assert_eq!(history[0].detail_code, entries[0].detail_code);
+        assert_eq!(history[0].detail_args, entries[0].detail_args);
         assert!(
             !history[0].at.is_empty(),
             "every log line carries a timestamp"
@@ -995,22 +1199,45 @@ mod tests {
     }
 
     #[test]
-    fn push_falls_back_to_the_detail_when_there_is_no_reason() {
+    fn push_carries_the_arguments_and_leaves_the_reason_empty_without_one() {
         let mut audit = Audit::new();
         push(
             &mut audit,
             HistoryAction::WorktreeRemove,
             "/repo/wt",
             ExecutionResult::Skipped,
-            "the worktree is no longer in the scan result; nothing was executed",
+            DetailCode::WorktreeNotInScan,
+            &[],
             None,
             None,
         );
-        assert_eq!(
-            audit.history[0].reason,
-            "the worktree is no longer in the scan result; nothing was executed"
-        );
+        assert_eq!(audit.history[0].reason_code, None);
         assert_eq!(audit.history[0].size_bytes, None);
+
+        // An argument arrives as a raw value, so the front end formats it in the
+        // reader's language rather than receiving "1.29 GB" from here.
+        let mut measured = Audit::new();
+        push(
+            &mut measured,
+            HistoryAction::TrashMove,
+            "/repo/dist",
+            ExecutionResult::Skipped,
+            DetailCode::ArtifactChanged,
+            &[
+                ("field", DetailArg::Text("size".to_string())),
+                ("before", DetailArg::Bytes(1_320_274_909)),
+                ("after", DetailArg::Unknown),
+            ],
+            None,
+            None,
+        );
+        let args = &measured.entries[0].detail_args;
+        assert_eq!(args.get("before"), Some(&DetailArg::Bytes(1_320_274_909)));
+        assert_eq!(
+            args.get("after"),
+            Some(&DetailArg::Unknown),
+            "a size that stopped being measured is not a size of zero"
+        );
     }
 
     // ---- options -----------------------------------------------------------

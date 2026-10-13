@@ -99,6 +99,62 @@ export const zhCN = {
       rebuildable: "可重新生成的目录"
     }
   },
+  // 一次执行动作的结果，按 DetailCode（`src/types.ts`）索引。核心决定「发生了什么」
+  // 和原始值，句子写在这里 —— 所以这一列跟着界面语言走，而不是永远英文。
+  //
+  // `{before}` 与 `{after}` 是发生变化的字段的两侧，`{reason}` 是原因码（下面
+  // 的 reasons 表认识它），`{error}` 是 Git 或系统给的话。`{field}` 在渲染前
+  // 已从 `fields` 表查好并替换掉。
+  detail: {
+    yes: "是",
+    no: "否",
+    // 按 family/name 两级存，而不是直接用带点的码，理由与 reasons 表相同：测试
+    // 用点号拆路径，键里带点会被读成两段。
+    codes: {
+      worktree: {
+        not_in_scan: "已不在扫描结果中，未执行任何操作",
+        changed: "生成计划后 {field} 变了：{before} → {after}；未删除",
+        no_longer_safe: "重新检查后不再判定为可安全删除：{reason}",
+        removed: "已用 git worktree remove 移除",
+        remove_failed: "git worktree remove 失败：{error}",
+        pruned: "git worktree prune 清理了残留元数据",
+        prune_failed: "git worktree prune 失败：{error}"
+      },
+      artifact: {
+        not_in_scan: "已不在扫描结果中，未执行任何操作",
+        not_a_known_kind: "已不是本工具识别的构建产物目录名，未删除",
+        changed: "生成计划后 {field} 变了：{before} → {after}；未删除",
+        no_longer_safe: "重新检查后不再判定为可安全删除：{reason}",
+        vanished: "该目录已不在磁盘上，无需删除",
+        unmeasurable: "重新检查时无法测量这个目录，因此没有动它",
+        trashed: "已移入{{trash}}",
+        trash_failed: "无法移入{{trash}}：{error}"
+      },
+      prunable: {
+        metadata_only: "该目录早已不存在，只清理了 Git 元数据，未触碰任何文件"
+      },
+      precondition: {
+        failed: "该路径未通过删除前检查，未执行"
+      },
+      bundled: {
+        with_worktree: "随所属工作树一起移除，没有单独操作"
+      }
+    },
+    // 变化字段的名字，供两个 changed 码使用。没有这张表，句子里的字段名会是英文。
+    fields: {
+      level: "判定结果",
+      prunable: "工作目录",
+      dirty: "未提交改动",
+      untracked: "未跟踪文件",
+      merged: "合并状态",
+      size: "体积",
+      files: "文件数",
+      tracked: "Git 跟踪状态",
+      ignored: "忽略规则",
+      symlink: "软链接"
+    },
+    legacy: "这条记录写于本工具开始保留原因码之前"
+  },
   common: {
     unknown: "未知",
     none: "（无）",
@@ -438,13 +494,7 @@ export const zhCN = {
       "失败的条目不影响其他条目；每个动作都会写入本机操作日志。删除不是永久的，目录类目标可以从{{trash}}恢复。",
     complete: "清理完成；重新扫描即可确认结果",
     viewHistory: "查看历史记录",
-    backToOverview: "返回总览",
-    detail: {
-      bundled: "随所属工作树一起移除，不再单独操作",
-      trashed: "已移入系统{{trash}}，可从{{trash}}恢复",
-      pruneFinalize: "git worktree prune 收尾清理残留元数据",
-      preconditionFailed: "前置条件检查未通过，未执行"
-    }
+    backToOverview: "返回总览"
   },
   history: {
     title: "历史记录",

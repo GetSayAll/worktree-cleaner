@@ -1,5 +1,5 @@
 import { messages } from "./i18n";
-import type { Reason } from "./types";
+import type { DetailArg, DetailCode, Reason, ReasonCode } from "./types";
 
 const KB = 1024;
 
@@ -89,10 +89,63 @@ export function formatCount(n: number): string {
  * path, and it stays exactly as the core reported it.
  */
 export function reasonText(reason: Reason): string {
-  const dot = reason.code.indexOf(".");
-  const family = reason.code.slice(0, dot) as "wt" | "af";
+  return reasonCopy(reason.code) ?? reason.text;
+}
+
+/**
+ * The wording for a reason code, or `undefined` for a code this build does not
+ * know. Split out so a `DetailCode` that carries a reason code as an argument
+ * reads the same table rather than building a fake `Reason` to look it up.
+ */
+export function reasonCopy(code: string): string | undefined {
+  const dot = code.indexOf(".");
+  const family = code.slice(0, dot) as "wt" | "af";
   const table: Record<string, string> | undefined = messages.reasons[family];
-  return table?.[reason.code.slice(dot + 1)] ?? reason.text;
+  return table?.[code.slice(dot + 1)];
+}
+
+/**
+ * Renders one argument of a `DetailCode` the way this language writes it.
+ *
+ * A byte count arrives as a raw number and is formatted here rather than in the
+ * core, which is the whole point of sending it raw: `1.29 GB` must not be
+ * spelled once in Rust and then frozen into a Chinese screen. `null` is the
+ * absence of a measurement and says so, because "unknown" and "zero" are the
+ * difference D3 is about.
+ */
+export function detailArg(arg: DetailArg | undefined): string {
+  if (arg === null || arg === undefined) return messages.common.unknown;
+  if (typeof arg === "number") return formatCount(arg);
+  if (typeof arg === "boolean") return arg ? messages.detail.yes : messages.detail.no;
+  return arg;
+}
+
+/**
+ * The wording of one executed action, from its code and arguments.
+ *
+ * The fallback is the record's own sentence: a log written before the codes
+ * existed still reads back, and a core newer than this UI still says something
+ * true rather than nothing.
+ */
+export function detailText(code: DetailCode | null, args: Record<string, DetailArg>, legacy?: string | null): string {
+  if (!code) return legacy ?? messages.detail.legacy;
+  // Two levels, for the same reason `reasonCopy` is: the table is walked by
+  // splitting a path on dots, so a key may not contain one.
+  const dot = code.indexOf(".");
+  const families: Record<string, Record<string, string> | undefined> = messages.detail.codes;
+  const copy = families[code.slice(0, dot)]?.[code.slice(dot + 1)];
+  // A code with no entry in the table would otherwise print the raw id, which is
+  // the one thing worse than English: it means nothing to a reader.
+  if (typeof copy !== "string") return legacy ?? messages.detail.legacy;
+  const fields: Record<string, string> = messages.detail.fields;
+  const reasonCode = typeof args.reason === "string" ? reasonCopy(args.reason) : undefined;
+  return copy
+    .replace("{field}", typeof args.field === "string" ? fields[args.field] ?? "" : "")
+    .replace("{before}", detailArg(args.before))
+    .replace("{after}", detailArg(args.after))
+    .replace("{reason}", reasonCode ?? messages.common.unknown)
+    .replace("{pruneError}", detailArg(args.prune_error))
+    .replace("{error}", detailArg(args.error));
 }
 
 /**

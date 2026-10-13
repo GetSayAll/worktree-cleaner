@@ -513,37 +513,39 @@ export const mockHistory: HistoryEntry[] = [
     at: daysAgo(4),
     action: "trash-move",
     target: `${mockRoot}--codex-fix-ble/target/debug/incremental`,
-    reason: "Matched a rebuildable artifact type · unchanged for over 30 days",
+    reason_code: "af.rebuildable", reason: null,
     result: "ok",
     size_bytes: 812_000_000,
-    detail: "Moved to Trash, recoverable"
+    detail_code: "artifact.trashed", detail_args: {}, detail: null
   },
   {
     at: daysAgo(4),
     action: "worktree-remove",
     target: `${mockRoot}--codex-old-spike`,
-    reason: "clean working tree · merged into main",
+    reason_code: "wt.clean", reason: null,
     result: "ok",
     size_bytes: 1_240_000_000,
-    detail: "git worktree remove succeeded, then prune cleaned up metadata"
+    detail_code: "worktree.removed", detail_args: {}, detail: null
   },
   {
     at: daysAgo(4),
     action: "trash-move",
     target: `${mockRoot}/apps/desktop/node_modules`,
-    reason: "symlink pointing outside the project",
+    reason_code: "af.symlink_outside", reason: null,
     result: "skipped",
     size_bytes: 0,
-    detail: "path.symlink_outside check failed; not executed"
+    detail_code: "precondition.failed", detail_args: {}, detail: null
   },
   {
     at: daysAgo(11),
     action: "trash-move",
     target: `${mockRoot}/crates/remote-mic-core/build`,
-    reason: "suspected build artifact",
+    reason_code: "af.rebuildable", reason: null,
     result: "failed",
     size_bytes: 6_200_000,
-    detail: "git ls-files found 23 committed files; aborted. Confirm manually before retrying"
+    detail_code: "artifact.no_longer_safe",
+      detail_args: { reason: "af.git_tracked" },
+      detail: null
   }
 ];
 
