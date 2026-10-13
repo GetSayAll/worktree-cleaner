@@ -458,12 +458,13 @@ a { color: var(--accent); }
 .segmented button:last-child { border-right: 0; }
 .segmented button.is-active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
 
-/* ---------- table ---------- */
-/* `table-layout: fixed` so a `max-width` on a cell is honoured. Under the default
-   `auto` layout the browser sizes a column by its widest unbreakable content and
-   ignores the width it was given, which is how one long sentence of evidence came
-   to occupy a single word per line and stretch a table row to a paragraph tall.
-   The columns are sized in `th`, so nothing depends on the content here. */
+/* ---------- table ----------
+   Two tables left (the cleanup plan and the execution result); the three list pages
+   moved to `.item-row` below. `table-layout: fixed` so a `max-width` on a cell is
+   honoured: under the default `auto` layout the browser sizes a column by its
+   widest unbreakable content and ignores the width it was given, which is how one
+   long sentence of evidence came to occupy a single word per line and stretch a
+   table row to a paragraph tall. */
 .table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .table thead th {
   /* The header stays while the body scrolls. Without this, a table long enough to
@@ -486,57 +487,80 @@ a { color: var(--accent); }
 .table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover { background: var(--surface-2); }
-.table tr.is-bundled { opacity: 0.62; }
 .table .cell-size, .table .cell-outcome { text-align: right; white-space: nowrap; }
-/* A cell clips what does not fit in it, and a one-line cell says so with an
-   ellipsis. Under `table-layout: fixed` a column given no width takes whatever is
-   left over, and its content then paints over the cell next door — which is how
-   "Safe to delete" ended up sliced in half by the reason box beside it. Clipped is
-   a shorter word; painted over is a wrong one, and this is the guard that makes the
-   second one impossible at any window width. */
 .table td.nowrap { text-overflow: ellipsis; }
-/* Every other column is given a share of the table rather than a pixel width: a
-   cell that cannot wrap has to be wide enough for its longest value in either
-   language (the Chinese labels are about a third narrower than the English ones),
-   and shares keep every column in a table growing together with the window. A
-   pixel column would be exactly right and never grow, and where a share and a
-   pixel share a row the browser hands the leftover to the pixels, which starves the
-   prose column beside them on a narrower window. The shares are set so each column
-   holds its longest value at the app's default window (1180px). */
-.table .cell-check { width: 44px; }
-.table .cell-git { width: 9.5%; }
-.table .cell-time { width: 12.3%; }
-.table .cell-bytes { width: 10.4%; }
-.table .cell-verdict { width: 18%; }
-.table .cell-agent { width: 10%; }
-.table .cell-status { width: 14%; }
-.table .cell-actions { width: 10.5%; }
-.table .cell-hint { width: 24%; min-width: 0; }
-/* The plan and result tables carry four and five columns, so the column holding a
-   path takes a far larger share than the same column in a seven-column list — the
-   shares are per table, not per column name. */
+/* Each column takes a share of the table, sized to the longest value it can show in
+   either language (the Chinese labels are about a third narrower than the English
+   ones). Shares rather than pixels: where the two share a row the browser hands the
+   leftover to the pixels, which starves the prose column beside them once the
+   window is narrower. */
+.table .cell-bytes { width: 10.4%; min-width: 0; }
 .table .cell-directory { width: 46%; min-width: 0; }
 .table .cell-recoverable { width: 25%; min-width: 0; }
 .table .cell-action { width: 16%; min-width: 0; }
 .table .cell-target { width: 28%; min-width: 0; }
 .table .cell-detail { width: 25%; min-width: 0; }
 .table .cell-outcome-cell { width: 14%; min-width: 0; }
-.table .cell-path { width: 16%; min-width: 0; }
-.table .cell-branch { width: 18%; min-width: 0; }
-/* The reason column is the one that used to stretch a row: it carries the evidence
-   text, which is prose. It is given a share and capped, so a row's height is
-   decided by the number of items rather than by the longest unbroken string in
-   the table. The width lives on the `th`, because under `table-layout: fixed` only
-   the first row sizes a column. */
-.table .cell-reason {
-  width: 29%;
-  min-width: 0;
-  overflow: hidden;
+/* A path is one unbreakable run of characters, so it needs somewhere to break when
+   the column is narrow. Without this it is clipped at the cell edge instead. */
+.table .cell-directory > div, .table .cell-target { overflow-wrap: anywhere; }
+
+/* ---------- item row ----------
+   One item on three lines — what it is, what the scanner found, why — instead of
+   seven columns on one horizontal axis. A path is the one value that cannot be
+   shortened without becoming ambiguous, and as a column it had to share that axis
+   with six short fields: it was the column that broke into five lines while three
+   columns beside it sat half empty. The three lines are
+
+     head   the identity: kind, name or path, and whatever else names it
+     meta   the supporting facts, in the words a column header used to carry
+     foot   the evidence, tinted by the verdict, with anything that acts on it
+
+   `minmax(0, 1fr)` on the middle track, not `1fr`: a grid track defaults to
+   `min-width: auto`, so the path inside it would widen the row past the window
+   instead of ellipsizing. The figures track is `auto`, so the size and the verdict
+   badge sit at the same x on every row and the reader scans one column, not seven. */
+.item-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
 }
-/* A path or a branch name is one unbreakable run of characters, so it needs
-   somewhere to break when the column is narrow. Without this it is clipped at the
-   cell edge instead of wrapping. */
-.table .cell-path > div, .table .cell-branch > div, .table .cell-directory > div, .table .cell-target { overflow-wrap: anywhere; }
+.item-row:last-child { border-bottom: 0; }
+.item-row:hover { background: var(--surface-2); }
+.item-row.is-bundled { opacity: 0.62; }
+/* The overview's rows are a reading list, not a selection: nothing to tick. */
+.item-row--plain { grid-template-columns: minmax(0, 1fr) auto; }
+.item-row__check { padding-top: 3px; }
+.item-row__main { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.item-row__head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+/* One line, always. The name is what the reader recognises the row by, so it gets
+   the width rather than the other fields, and a path too long for the window is
+   ellipsized instead of wrapping into a paragraph. */
+.item-row__name { font-family: var(--mono); font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-row__meta { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; color: var(--text-2); font-size: 13px; }
+.item-row__figures { display: flex; align-items: center; gap: var(--sp-3); padding-top: 1px; }
+.item-row__size { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.item-row__foot { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.item-row__reasons { flex: 1; min-width: 0; }
+.item-row__foot .btn { flex-shrink: 0; }
+/* The worktree page's own path, on the metadata line. It is a fact about the item,
+   not its name — the branch above is what the reader recognises the row by — so it
+   gives way first when the window is narrow. */
+.item-row__where { font-family: var(--mono); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* What the table's header row used to hold, since there is no header row now. */
+.select-all {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 13px;
+}
 
 .group-head {
   display: flex;
@@ -554,29 +578,36 @@ a { color: var(--accent); }
 }
 .group-head__path { font-family: var(--mono); font-size: 14px; }
 
-/* ---------- reasons ---------- */
-.reasons { display: flex; flex-direction: column; gap: var(--sp-2); }
+/* ---------- reasons ----------
+   A chip on one line: the verdict's own words, then the evidence that backs it. It
+   was a card with the evidence on a second line, which only worked as a column; on
+   a row it is one line of tinted text beside the item it explains. Evidence is
+   often one unbreakable run — a path, a SHA, a sentence with a number in it — so it
+   is allowed to break, and the chip then takes a second line rather than pushing
+   the width of the row. */
+.reasons { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
 .reason {
-  display: flex;
-  gap: var(--sp-2);
-  align-items: flex-start;
-  padding: var(--sp-2) var(--sp-3);
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  max-width: 100%;
+  padding: 2px var(--sp-2);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-2);
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1.5;
 }
-.reason__mark { flex-shrink: 0; margin-top: 3px; }
-.reason__text { color: var(--text); display: block; }
-.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: 13px; margin-top: 2px; display: block; overflow-wrap: anywhere; }
-/* Evidence is often one unbreakable run — a path, a SHA, a sentence with a number
-   in it — so it has to be allowed to break inside a narrow column. Without this a
-   long one pushes its cell to a single word per line and the row grows to a
-   paragraph. */
-.reason__text { overflow-wrap: anywhere; }
+.reason__mark { flex-shrink: 0; font-size: 12px; }
+.reason__text { min-width: 0; overflow-wrap: anywhere; }
+.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.reason__evidence::before { content: "· "; }
 .reason--safe { border-color: var(--safe-border); background: var(--safe-bg); }
+.reason--safe .reason__mark { color: var(--safe); }
 .reason--review { border-color: var(--review-border); background: var(--review-bg); }
+.reason--review .reason__mark { color: var(--review); }
 .reason--unsafe { border-color: var(--unsafe-border); background: var(--unsafe-bg); }
+.reason--unsafe .reason__mark { color: var(--unsafe); }
 
 /* ---------- misc blocks ---------- */
 .banner {

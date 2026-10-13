@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { artifacts, counts, goTo, primaryReason, selectedSummary, snapshot, worktrees } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
+import ReasonList from "../components/ReasonList.vue";
 import StatCard from "../components/StatCard.vue";
 import { compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
@@ -104,32 +105,34 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         <button class="btn btn--ghost" @click="goTo('worktrees')">{{ messages.overview.viewAll(worktrees.length) }}</button>
       </div>
       <div class="card__body card__body--flush">
-        <table class="table">
-          <tbody>
-            <tr v-for="item in topWorktrees" :key="item.path">
-              <td class="cell-path">
-                <div class="mono">{{ displayPath(item.path, root) }}</div>
-                <div class="tiny faint">
-                  {{ item.branch || messages.common.detached }}{{ item.is_main ? messages.overview.mainWorktreeSuffix : "" }}
-                  <span
-                    v-if="isOutsideRoot(item.path)"
-                    class="chip chip--outside"
-                    :title="messages.worktrees.outsideRootHint"
-                  >{{ messages.worktrees.outsideRoot }}</span>
-                </div>
-              </td>
-              <td class="cell-agent">
-                <span class="chip">{{ item.agent || messages.common.unknownAgent }}</span>
-              </td>
-              <td class="cell-size cell-bytes">
-                <div class="numeric">{{ formatBytes(item.size_bytes) }}</div>
-                <div class="tiny faint">{{ formatRelTime(item.last_updated_at) }}</div>
-              </td>
-              <td class="cell-verdict"><SafetyBadge :status="item.safety.status" /></td>
-              <td class="cell-hint tiny faint">{{ primaryReason(item.safety.reasons)?.text }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <!-- The same three lines as the worktree page, without the checkbox: this
+             page is a way in, not a place to choose. -->
+        <div v-for="item in topWorktrees" :key="item.path" class="item-row item-row--plain">
+          <div class="item-row__main">
+            <div class="item-row__head">
+              <span class="item-row__name" :title="item.path">{{ displayPath(item.path, root) }}</span>
+              <span class="chip">{{ item.agent || messages.common.unknownAgent }}</span>
+            </div>
+            <div class="item-row__meta">
+              <span>{{ item.branch || messages.common.detached }}</span>
+              <span>· {{ formatBytes(item.size_bytes) }}</span>
+              <span>· {{ formatRelTime(item.last_updated_at) }}</span>
+              <span
+                v-if="isOutsideRoot(item.path)"
+                class="chip chip--outside"
+                :title="messages.worktrees.outsideRootHint"
+              >{{ messages.worktrees.outsideRoot }}</span>
+            </div>
+            <div class="item-row__foot">
+              <div class="item-row__reasons">
+                <ReasonList :reasons="item.safety.reasons" />
+              </div>
+            </div>
+          </div>
+          <div class="item-row__figures">
+            <SafetyBadge :status="item.safety.status" />
+          </div>
+        </div>
       </div>
     </div>
 
@@ -139,25 +142,27 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         <button class="btn btn--ghost" @click="goTo('artifacts')">{{ messages.overview.viewAll(artifacts.length) }}</button>
       </div>
       <div class="card__body card__body--flush">
-        <table class="table">
-          <tbody>
-            <tr v-for="item in topArtifacts" :key="item.path">
-              <td class="cell-path">
-                <div class="row-wrap">
-                  <span class="chip">{{ item.kind }}</span>
-                  <span class="mono">{{ displayPath(item.path, root) }}</span>
-                </div>
-                <div class="tiny faint">{{ messages.overview.artifactMeta(item.ecosystem, formatCount(item.file_count)) }}</div>
-              </td>
-              <td class="cell-size cell-bytes">
-                <div class="numeric">{{ formatBytes(item.size_bytes) }}</div>
-                <div class="tiny faint">{{ formatRelTime(item.last_updated_at) }}</div>
-              </td>
-              <td class="cell-verdict"><SafetyBadge :status="item.safety.status" /></td>
-              <td class="cell-hint tiny faint">{{ primaryReason(item.safety.reasons)?.text }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-for="item in topArtifacts" :key="item.path" class="item-row item-row--plain">
+          <div class="item-row__main">
+            <div class="item-row__head">
+              <span class="chip">{{ item.kind }}</span>
+              <span class="item-row__name" :title="item.path">{{ displayPath(item.path, root) }}</span>
+            </div>
+            <div class="item-row__meta">
+              <span>{{ messages.overview.artifactMeta(item.ecosystem, formatCount(item.file_count)) }}</span>
+              <span>· {{ formatRelTime(item.last_updated_at) }}</span>
+            </div>
+            <div class="item-row__foot">
+              <div class="item-row__reasons">
+                <ReasonList :reasons="item.safety.reasons" />
+              </div>
+            </div>
+          </div>
+          <div class="item-row__figures">
+            <span class="item-row__size">{{ formatBytes(item.size_bytes) }}</span>
+            <SafetyBadge :status="item.safety.status" />
+          </div>
+        </div>
       </div>
     </div>
 

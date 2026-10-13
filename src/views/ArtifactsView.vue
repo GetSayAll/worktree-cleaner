@@ -73,17 +73,14 @@ function isCollapsed(key: string): boolean {
 }
 
 /**
- * The full text of an item's reasons, for the cell's tooltip.
- *
- * The row shows one line so it can be scanned; the evidence behind the verdict is
- * exactly the part a user needs when a row says "needs review" and they want to
- * know why, and a truncated cell would otherwise be all they get. Present on hover
- * rather than in the row, so the list keeps its height.
+ * A bundled artifact's git state, named as a fact rather than as a column header:
+ * the row says "Git ignored" where the column used to say "Git state" once.
  */
-function reasonTitle(item: ArtifactRecord): string {
-  return item.safety.reasons
-    .map((reason) => `${reason.text} — ${reason.evidence}`)
-    .join("\n");
+function gitState(item: ArtifactRecord): string {
+  if (item.git_tracked) return messages.artifacts.gitTracked;
+  if (item.git_ignored) return messages.artifacts.gitIgnored;
+  if (item.git_ignored === null) return messages.artifacts.gitUnverified;
+  return messages.artifacts.gitUntracked;
 }
 
 function toggleCollapsed(key: string) {
@@ -92,13 +89,6 @@ function toggleCollapsed(key: string) {
 
 function groupAllSelected(paths: string[]): boolean {
   return paths.length > 0 && paths.every((p) => isSelectedArtifact(p));
-}
-
-function gitState(item: ArtifactRecord): string {
-  if (item.git_tracked) return messages.artifacts.gitTracked;
-  if (item.git_ignored) return messages.artifacts.gitIgnored;
-  if (item.git_ignored === null) return messages.artifacts.gitUnverified;
-  return messages.artifacts.gitUntracked;
 }
 
 // No `approximate` here: formatBytes answers "unknown" for a null size before it
@@ -152,68 +142,55 @@ function sizeText(item: ArtifactRecord): string {
       </div>
 
       <div v-if="!isCollapsed(group.key)" class="card__body card__body--flush">
-        <table class="table">
-          <!-- The header was missing entirely, so a table long enough to scroll lost
-               its column labels on the way down and every row had to be read by
-               position. It also carries the column widths: under `table-layout:
-               fixed` only the first row decides them, and `auto` would give the
-               reason column no more room than any other. -->
-          <thead>
-            <tr>
-              <th class="cell-check"></th>
-              <th class="cell-path">{{ messages.artifacts.columns.path }}</th>
-              <th class="cell-git">{{ messages.artifacts.columns.git }}</th>
-              <th class="cell-time">{{ messages.artifacts.columns.lastActivity }}</th>
-              <th class="cell-size cell-bytes">{{ messages.artifacts.columns.size }}</th>
-              <th class="cell-verdict">{{ messages.artifacts.columns.safety }}</th>
-              <th class="cell-reason">{{ messages.artifacts.columns.reason }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-for="item in group.items" :key="item.path">
-              <tr :class="{ 'is-bundled': bundledOwner(item) !== null }">
-                <td class="cell-check">
-                  <input
-                    class="check"
-                    type="checkbox"
-                    :checked="isSelectedArtifact(item.path)"
-                    :disabled="item.safety.status === 'Unsafe' || bundledOwner(item) !== null"
-                    :title="
-                      item.safety.status === 'Unsafe'
-                        ? messages.common.unsafeTooltip
-                        : bundledOwner(item) !== null
-                          ? messages.artifacts.bundledTitle
-                          : ''
-                    "
-                    @change="toggleArtifact(item.path)"
-                  />
-                </td>
-                <td class="cell-path">
-                  <div class="row-wrap">
-                    <span class="chip">{{ item.kind }}</span>
-                    <span class="mono">{{ shortenPath(item.path, root) }}</span>
-                    <span v-if="bundledOwner(item) !== null" class="badge badge--neutral">{{ messages.artifacts.bundledBadge }}</span>
-                  </div>
-                  <div class="tiny faint">
-                    {{ item.ecosystem }} · {{ item.file_count > 0 ? messages.units.fileCount(formatCount(item.file_count)) : messages.artifacts.fileCountUnknown }}
-                    <span v-if="item.is_symlink">{{ messages.artifacts.symlink(item.symlink_target ?? "") }}</span>
-                  </div>
-                </td>
-                <td class="nowrap tiny cell-git">{{ gitState(item) }}</td>
-                <td class="nowrap tiny cell-time">{{ formatRelTime(item.last_updated_at) }}</td>
-                <td class="cell-size cell-bytes numeric">{{ sizeText(item) }}</td>
-                <td class="nowrap cell-verdict"><SafetyBadge :status="item.safety.status" /></td>
-                <!-- The reason is a title, not the whole story: the evidence under it
-                     can be a full sentence, and a list is for choosing items at a
-                     glance. The full reason is on the item's own page, and the row
-                     stays one line tall here. -->
-                <td class="cell-reason" :title="reasonTitle(item)">
-                  <ReasonList :reasons="item.safety.reasons" :limit="1" />
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
+        <div
+          v-for="item in group.items"
+          :key="item.path"
+          class="item-row"
+          :class="{ 'is-bundled': bundledOwner(item) !== null }"
+        >
+          <div class="item-row__check">
+            <input
+              class="check"
+              type="checkbox"
+              :checked="isSelectedArtifact(item.path)"
+              :disabled="item.safety.status === 'Unsafe' || bundledOwner(item) !== null"
+              :title="
+                item.safety.status === 'Unsafe'
+                  ? messages.common.unsafeTooltip
+                  : bundledOwner(item) !== null
+                    ? messages.artifacts.bundledTitle
+                    : ''
+              "
+              @change="toggleArtifact(item.path)"
+            />
+          </div>
+          <div class="item-row__main">
+            <div class="item-row__head">
+              <span class="chip">{{ item.kind }}</span>
+              <span class="item-row__name" :title="item.path">{{ shortenPath(item.path, root) }}</span>
+              <span v-if="bundledOwner(item) !== null" class="badge badge--neutral">{{ messages.artifacts.bundledBadge }}</span>
+            </div>
+            <div class="item-row__meta">
+              <span>{{ item.ecosystem }}</span>
+              <span>·</span>
+              <span>{{ item.file_count > 0 ? messages.units.fileCount(formatCount(item.file_count)) : messages.artifacts.fileCountUnknown }}</span>
+              <span>·</span>
+              <span>{{ messages.artifacts.gitLabel }} {{ gitState(item) }}</span>
+              <span>·</span>
+              <span>{{ formatRelTime(item.last_updated_at) }}</span>
+              <span v-if="item.is_symlink" class="chip chip--outside">{{ messages.artifacts.symlink(item.symlink_target ?? "") }}</span>
+            </div>
+            <div class="item-row__foot">
+              <div class="item-row__reasons">
+                <ReasonList :reasons="item.safety.reasons" />
+              </div>
+            </div>
+          </div>
+          <div class="item-row__figures">
+            <span class="item-row__size">{{ sizeText(item) }}</span>
+            <SafetyBadge :status="item.safety.status" />
+          </div>
+        </div>
       </div>
     </div>
 

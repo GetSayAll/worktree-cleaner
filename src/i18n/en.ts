@@ -212,14 +212,7 @@ export const en = {
     filterReview: (n: number) => `Needs review ${n}`,
     filterUnsafe: (n: number) => `Must not delete ${n}`,
     searchPlaceholder: "Search by path or branch",
-    columns: {
-      branch: "Branch",
-      status: "Status",
-      agent: "Agent",
-      lastActivity: "Last activity",
-      size: "Size",
-      safety: "Safety"
-    },
+    selectAll: "Select every worktree that can be removed",
     details: "Details",
     collapse: "Collapse",
     gitFacts: "Git facts",
@@ -235,7 +228,6 @@ export const en = {
     stashEntries: (n: number) => `${n} entries`,
     prunableBanner:
       "The working directory no longer exists; only git worktree prune runs to clean up metadata in .git/worktrees. No files are touched.",
-    reasons: "Reasons",
     untrackedLabel: "Untracked files (removing this worktree requires --force)",
     empty: "No worktrees match the current filters",
     upstreamGone: "working directory is gone",
@@ -276,14 +268,9 @@ export const en = {
     gitIgnored: "ignored",
     gitUnverified: "unverified",
     gitUntracked: "untracked",
-    columns: {
-      path: "Directory",
-      git: "Git state",
-      lastActivity: "Last activity",
-      size: "Size",
-      safety: "Verdict",
-      reason: "Reason"
-    },
+    // The rows name their own fields, so there is no column header to label.
+    // This prefix is what stands in for it: "Git ignored" rather than "ignored".
+    gitLabel: "Git",
     empty: "No artifact directories exceed the current size threshold",
     selectedSummary: (artifacts: number, worktrees: number) =>
       `Selected ${artifacts} artifacts · ${worktrees} worktrees · Estimated reclaimable`,

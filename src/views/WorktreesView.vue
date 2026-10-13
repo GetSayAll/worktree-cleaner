@@ -128,105 +128,91 @@ function stateText(item: WorktreeRecord): string {
 
     <div class="card">
       <div class="card__body card__body--flush">
-        <table class="table">
-          <thead>
-            <tr>
-              <th class="cell-check">
-                <input v-model="allSelected" class="check" type="checkbox" :disabled="selectable.length === 0" />
-              </th>
-              <th class="cell-branch">{{ messages.worktrees.columns.branch }}</th>
-              <th class="cell-status">{{ messages.worktrees.columns.status }}</th>
-              <th class="cell-agent">{{ messages.worktrees.columns.agent }}</th>
-              <th class="cell-time">{{ messages.worktrees.columns.lastActivity }}</th>
-              <th class="cell-size cell-bytes">{{ messages.worktrees.columns.size }}</th>
-              <th class="cell-verdict">{{ messages.worktrees.columns.safety }}</th>
-              <th class="cell-actions"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-for="item in filtered" :key="item.path">
-              <tr>
-                <td class="cell-check">
-                  <input
-                    class="check"
-                    type="checkbox"
-                    :checked="isSelectedWorktree(item.path)"
-                    :disabled="item.safety.status === 'Unsafe'"
-                    :title="item.safety.status === 'Unsafe' ? messages.common.unsafeTooltip : ''"
-                    @change="toggleWorktree(item.path)"
-                  />
-                </td>
-                <td class="cell-branch">
-                  <div>{{ item.branch || messages.common.detachedHead }}</div>
-                  <div class="mono tiny faint">
-                    {{ displayPath(item.path, root) }}
-                    <span
-                      v-if="isOutsideRoot(item.path)"
-                      class="chip chip--outside"
-                      :title="messages.worktrees.outsideRootHint"
-                    >{{ messages.worktrees.outsideRoot }}</span>
+        <div class="select-all">
+          <input v-model="allSelected" class="check" type="checkbox" :disabled="selectable.length === 0" />
+          <span>{{ messages.worktrees.selectAll }}</span>
+        </div>
+        <template v-for="item in filtered" :key="item.path">
+          <div class="item-row">
+            <div class="item-row__check">
+              <input
+                class="check"
+                type="checkbox"
+                :checked="isSelectedWorktree(item.path)"
+                :disabled="item.safety.status === 'Unsafe'"
+                :title="item.safety.status === 'Unsafe' ? messages.common.unsafeTooltip : ''"
+                @change="toggleWorktree(item.path)"
+              />
+            </div>
+            <div class="item-row__main">
+              <div class="item-row__head">
+                <span class="item-row__name">{{ item.branch || messages.common.detachedHead }}</span>
+                <span class="chip">{{ item.agent || messages.common.emDash }}</span>
+              </div>
+              <div class="item-row__meta">
+                <span class="item-row__where" :title="item.path">{{ displayPath(item.path, root) }}</span>
+                <span
+                  v-if="isOutsideRoot(item.path)"
+                  class="chip chip--outside"
+                  :title="messages.worktrees.outsideRootHint"
+                >{{ messages.worktrees.outsideRoot }}</span>
+                <span>· {{ stateText(item) }}</span>
+                <span>· {{ formatRelTime(item.last_updated_at) }}</span>
+              </div>
+              <div class="item-row__foot">
+                <div class="item-row__reasons">
+                  <ReasonList :reasons="item.safety.reasons" />
+                </div>
+                <button class="btn btn--ghost" @click="toggleExpanded(item.path)">
+                  {{ isExpanded(item.path) ? messages.worktrees.collapse : messages.worktrees.details }}
+                </button>
+              </div>
+            </div>
+            <div class="item-row__figures">
+              <span class="item-row__size">{{ formatBytes(item.size_bytes) }}</span>
+              <SafetyBadge :status="item.safety.status" />
+            </div>
+          </div>
+
+          <div v-if="isExpanded(item.path)" class="detail">
+            <div class="detail__grid">
+              <div class="stack stack--tight">
+                <h3>{{ messages.worktrees.gitFacts }}</h3>
+                <dl class="kv">
+                  <dt>{{ messages.worktrees.facts.fullPath }}</dt>
+                  <dd class="mono">{{ item.path }}</dd>
+                  <dt>{{ messages.worktrees.facts.head }}</dt>
+                  <dd class="mono">{{ item.head || messages.common.emDash }}</dd>
+                  <dt>{{ messages.worktrees.facts.upstream }}</dt>
+                  <dd>{{ upstreamText(item) }}</dd>
+                  <dt>{{ messages.worktrees.facts.mergeStatus }}</dt>
+                  <dd>{{ mergeText(item) }}</dd>
+                  <dt>{{ messages.worktrees.facts.stash }}</dt>
+                  <dd>{{ messages.worktrees.stashEntries(item.stash_count) }}</dd>
+                  <dt>{{ messages.worktrees.facts.untrackedFiles }}</dt>
+                  <dd>{{ item.untracked_files }}</dd>
+                  <dt>{{ messages.worktrees.facts.directorySize }}</dt>
+                  <dd>{{ formatBytes(item.size_bytes) }}</dd>
+                </dl>
+                <div v-if="item.is_prunable" class="banner banner--info">
+                  {{ " " + messages.worktrees.prunableBanner + " " }}
+                </div>
+              </div>
+              <!-- The reasons are on the row itself now, so this panel is what the
+                   row cannot show: the Git facts behind the verdict, and the
+                   untracked files that make a removal a force. -->
+              <div class="stack stack--tight">
+                <div v-if="item.untracked_file_list.length > 0">
+                  <div class="field__label">{{ messages.worktrees.untrackedLabel }}</div>
+                  <div class="untracked-list">
+                    <div v-for="file in item.untracked_file_list" :key="file">{{ file }}</div>
                   </div>
-                </td>
-                <!-- No `nowrap`: the state list joins up to three facts with a
-                     separator, which is wider than any column this table can spare.
-                     It wraps instead, and the row was already this tall. -->
-                <td class="tiny cell-status">{{ stateText(item) }}</td>
-                <td class="cell-agent"><span class="chip">{{ item.agent || messages.common.emDash }}</span></td>
-                <td class="nowrap tiny cell-time">{{ formatRelTime(item.last_updated_at) }}</td>
-                <td class="cell-size cell-bytes numeric">{{ formatBytes(item.size_bytes) }}</td>
-                <td class="nowrap cell-verdict"><SafetyBadge :status="item.safety.status" /></td>
-                <td class="nowrap cell-actions">
-                  <button class="btn btn--ghost" @click="toggleExpanded(item.path)">
-                    {{ isExpanded(item.path) ? messages.worktrees.collapse : messages.worktrees.details }}
-                  </button>
-                </td>
-              </tr>
-              <tr v-if="isExpanded(item.path)">
-                <td colspan="8" style="padding: 0">
-                  <div class="detail">
-                    <div class="detail__grid">
-                      <div class="stack stack--tight">
-                        <h3>{{ messages.worktrees.gitFacts }}</h3>
-                        <dl class="kv">
-                          <dt>{{ messages.worktrees.facts.fullPath }}</dt>
-                          <dd class="mono">{{ item.path }}</dd>
-                          <dt>{{ messages.worktrees.facts.head }}</dt>
-                          <dd class="mono">{{ item.head || messages.common.emDash }}</dd>
-                          <dt>{{ messages.worktrees.facts.upstream }}</dt>
-                          <dd>{{ upstreamText(item) }}</dd>
-                          <dt>{{ messages.worktrees.facts.mergeStatus }}</dt>
-                          <dd>{{ mergeText(item) }}</dd>
-                          <dt>{{ messages.worktrees.facts.stash }}</dt>
-                          <dd>{{ messages.worktrees.stashEntries(item.stash_count) }}</dd>
-                          <dt>{{ messages.worktrees.facts.untrackedFiles }}</dt>
-                          <dd>{{ item.untracked_files }}</dd>
-                          <dt>{{ messages.worktrees.facts.directorySize }}</dt>
-                          <dd>{{ formatBytes(item.size_bytes) }}</dd>
-                        </dl>
-                        <div v-if="item.is_prunable" class="banner banner--info">
-                          {{ " " + messages.worktrees.prunableBanner + " " }}
-                        </div>
-                      </div>
-                      <div class="stack stack--tight">
-                        <h3>{{ messages.worktrees.reasons }}</h3>
-                        <ReasonList :reasons="item.safety.reasons" />
-                        <div v-if="item.untracked_file_list.length > 0">
-                          <div class="field__label">{{ messages.worktrees.untrackedLabel }}</div>
-                          <div class="untracked-list">
-                            <div v-for="file in item.untracked_file_list" :key="file">{{ file }}</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            </template>
-            <tr v-if="filtered.length === 0">
-              <td colspan="8"><div class="empty">{{ messages.worktrees.empty }}</div></td>
-            </tr>
-          </tbody>
-        </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div v-if="filtered.length === 0" class="empty">{{ messages.worktrees.empty }}</div>
       </div>
     </div>
 

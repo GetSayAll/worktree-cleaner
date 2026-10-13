@@ -49,7 +49,7 @@ when the language changes. `locale.test.ts` fails if a table's keys differ.
 | a field of a contract type | `crates/worktree-core/src/lib.rs` **and** `src/types.ts` | §3 — `src/architecture.test.ts` fails if they disagree |
 | an IPC command | `src-tauri/src/lib.rs`, plus `capabilities/default.json` for its permissions, plus `src/platform.ts` | §2 — the dependency direction is `src/` → IPC → `src-tauri/` → `worktree-core`, never back |
 | a user-visible string | `src/i18n/en.ts` **and** every other table under `src/i18n/` | D23 — `locale.test.ts` fails if the key sets differ |
-| page width or table columns | `src/styles.css`, and the column class each view puts on its `th` | §7 decision 5 — `pnpm test:layout` checks margins and cell fit in a real browser |
+| what a list row shows, page width, or table columns | `src/styles.css`, and the row markup in `src/views/*.vue` (`item-row` for the three list pages, `cell-*` for the two tables left) | §7 decisions 5 and 6 — `pnpm test:layout` checks margins, row fit and name wrapping in a real browser |
 | what the UI does with scan or execution results | `src/state.ts`, through `src/platform.ts` | §2 — the front end never re-makes a decision (D9) |
 
 ## The gate

@@ -5,10 +5,14 @@
 //      text used to start and end in a different place on the welcome, overview,
 //      plan, history and settings pages, so switching views moved the page
 //      sideways under the reader.
-//   2. No cell's content spills out of its own cell, in either language. A table
-//      cell that is narrower than its content does not push the column wider —
-//      the content paints over the cell next door, which is how the verdict badge
-//      ended up sliced in half by the reason box beside it.
+//   2. Nothing spills out of the box it was put in, in either language: an item
+//      row stays inside the pane, its name stays on one line, the size and verdict
+//      stay beside the text rather than over it, no two rows overlap, and every
+//      row carries its reasons. The list pages were seven-column tables once, and a
+//      column narrower than its content did not push its neighbour — the content
+//      painted over the next column, which is how a verdict badge ended up sliced
+//      in half by the reason box beside it. The two tables that remain are checked
+//      the same way, cell by cell.
 //
 // Why a real browser: both are layout questions. happy-dom does not lay out a
 // table at all, and a stylesheet assertion cannot know how wide "Must not delete"
@@ -17,9 +21,9 @@
 // choice and the English labels are about a third wider than the Chinese ones.
 //
 // Both are checked at the app's default window size (the one in
-// src-tauri/tauri.conf.json), which is where the column shares in styles.css are
-// sized to fit. A narrower window legitimately clips some cells; that is a
-// graceful degradation, and it is why no cell paints over another there either.
+// src-tauri/tauri.conf.json), which is where styles.css is sized to fit. A
+// narrower window legitimately truncates a long path; that is a graceful
+// degradation, and it is why nothing spills over anything there either.
 //
 // Usage: node scripts/verify-layout.mjs [path-to-html]   (default dist/preview.html)
 // Env:   CHROME_PATH=/path/to/Chrome   (default: the macOS Chrome bundle)
@@ -199,26 +203,69 @@ async function click(cdp, selector) {
 /**
  * What one page looks like right now.
  *
- * `margin.left` and `margin.right` are the gaps between the page and the window
- * edge: the thing the reference page decides. `spills` lists the table cells whose
- * content is wider than the cell, one entry per cell — `scrollWidth` against
- * `clientWidth` is the whole measurement, and it needs no knowledge of what the
- * content is, only that it does not fit.
+ * `margins` is the gap between the page and the window edge — the thing the
+ * reference page decides. `problems` is everything the layout got wrong, each one
+ * naming what it saw:
+ *
+ *   - an item row wider than the container it sits in, so something inside it
+ *     spills sideways;
+ *   - a row's name wrapped onto a second line, which is the failure the three-line
+ *     row exists to prevent: the name is one line with an ellipsis, never a
+ *     paragraph;
+ *   - the figures sitting over the text instead of beside it;
+ *   - two rows overlapping each other;
+ *   - a row with no reason on it, since the row is what carries the evidence now;
+ *   - a table cell whose content is wider than the cell (the cleanup plan and the
+ *     execution result are still tables).
+ *
+ * The row measurements are geometric rather than textual because the thing that
+ * broke before was geometric: `scrollWidth` against `clientWidth` is the whole
+ * question "does this fit where it was put", and it needs no knowledge of what the
+ * content says.
  */
 const READ_PAGE = `(() => {
   const content = document.querySelector(".content");
   const page = content.firstElementChild;
   const box = page.getBoundingClientRect();
-  const spills = [];
+  const problems = [];
+
+  const rows = Array.from(document.querySelectorAll(".item-row"));
+  rows.forEach((row, index) => {
+    if (row.scrollWidth > row.clientWidth + 1) {
+      problems.push(\`row \${index} is \${row.scrollWidth - row.clientWidth}px wider than its container\`);
+    }
+    const name = row.querySelector(".item-row__name");
+    if (name) {
+      const lines = Math.round(name.getBoundingClientRect().height / 22);
+      if (lines > 1) problems.push(\`row \${index} wraps its name over \${lines} lines\`);
+    }
+    const main = row.querySelector(".item-row__main");
+    const figures = row.querySelector(".item-row__figures");
+    if (main && figures) {
+      const overlap = main.getBoundingClientRect().right - figures.getBoundingClientRect().left;
+      if (overlap > 0.5) problems.push(\`row \${index}: the figures sit \${Math.round(overlap)}px over the text\`);
+    }
+    // Painted, not present: a hidden reason chip is still in the DOM, and a row
+    // with no evidence on it is the failure this is here to catch.
+    const reason = row.querySelector(".reason");
+    if (!reason || reason.getClientRects().length === 0) problems.push(\`row \${index} shows no reason\`);
+  });
+
+  const boxes = rows.map((row) => row.getBoundingClientRect()).sort((a, b) => a.top - b.top);
+  for (let index = 1; index < boxes.length; index += 1) {
+    if (boxes[index - 1].bottom - boxes[index].top > 1) problems.push("two rows overlap");
+  }
+
   document.querySelectorAll("table.table th, table.table td").forEach((cell) => {
     if (cell.scrollWidth > cell.clientWidth + 1) {
-      spills.push(\`\${cell.textContent.trim().slice(0, 18)} needs \${cell.scrollWidth}px, has \${cell.clientWidth}px\`);
+      problems.push(\`a table cell overflows: "\${cell.textContent.trim().slice(0, 18)}" needs \${cell.scrollWidth}px, has \${cell.clientWidth}px\`);
     }
   });
+
   return {
     margins: { left: Math.round(box.left), right: Math.round(window.innerWidth - box.right) },
     paneOverflowX: content.scrollWidth - content.clientWidth,
-    spills
+    problems
   };
 })()`;
 
@@ -303,14 +350,13 @@ async function main() {
       }
 
       for (const entry of results) {
-        const problems = [];
+        const problems = [...entry.problems];
         if (entry.margins.left !== expected.left || entry.margins.right !== expected.right) {
           problems.push(
             `margins ${entry.margins.left}/${entry.margins.right}, the ${REFERENCE_VIEW} page has ${expected.left}/${expected.right}`
           );
         }
         if (entry.paneOverflowX > 0) problems.push(`the pane scrolls sideways by ${entry.paneOverflowX}px`);
-        for (const spill of entry.spills) problems.push(`a cell overflows: ${spill}`);
         if (problems.length > 0) {
           failures.push(`${locale} ${entry.view}: ${problems.join(" | ")}`);
         }
@@ -331,7 +377,7 @@ async function main() {
     for (const line of failures) console.error(`  - ${line}`);
     process.exit(1);
   }
-  console.log("\nevery page has the worktree page's margins, and no cell paints over its neighbour");
+  console.log("\nevery page has the worktree page's margins, and nothing spills out of its box");
 }
 
 main().catch((error) => {

@@ -386,6 +386,29 @@ export const mockSnapshot: ProjectSnapshot = {
       ])
     },
     {
+      // The longest path shape a real scan produces: an agent's nested worktree
+      // directory, whose relative path is long enough to have been the one value
+      // on the list pages that could not be shortened. The layout checks read it,
+      // so a row that wraps its name again fails `pnpm test:layout` rather than
+      // waiting to be seen on a screen.
+      path: `${mockRoot}/.claude/worktrees/payout-legal-name/node_modules`,
+      kind: "node_modules",
+      ecosystem: "node",
+      project_root: mockRoot,
+      worktree_path: null,
+      size_bytes: 1_350_000_000,
+      file_count: 83_401,
+      last_updated_at: daysAgo(34),
+      git_ignored: true,
+      git_tracked: false,
+      is_symlink: false,
+      symlink_target: null,
+      safety: assess([
+        { code: "af.rebuildable", severity: "Safe", text: "rebuildable with npm install", evidence: "package-lock.json exists" },
+        { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:72" }
+      ])
+    },
+    {
       path: `${mockRoot}--cursor-perf/target`,
       kind: "target",
       ecosystem: "rust",

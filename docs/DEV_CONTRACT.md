@@ -196,13 +196,13 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   decides what the user is told.
 - Front end: any UI change must leave `vue-tsc --noEmit` at zero errors and the
   build passing.
-- Front end layout is checked in a **real browser**, not in a unit test, because a
-  table's columns are a layout result: `pnpm test:theme` drives the appearance
-  modes and `pnpm test:layout` drives the page grid — every page's margins against
-  the worktree page's, and no cell's `scrollWidth` exceeding its `clientWidth`, in
-  both locales, at the app's default window size. A stylesheet assertion cannot
-  know how wide "Must not delete" is in the machine's font, and happy-dom does not
-  lay out a table at all.
+- Front end layout is checked in a **real browser**, not in a unit test, because
+  where a line breaks and how wide a row is are layout results: `pnpm test:theme`
+  drives the appearance modes and `pnpm test:layout` drives the page grid — every
+  page's margins against the worktree page's, and on the list pages that no row
+  spills, that no name wraps and no two rows overlap, in both locales, at the app's
+  default window size. A stylesheet assertion cannot know how wide "Must not
+  delete" is in the machine's font, and happy-dom does not lay out a row at all.
 - Rust: `pnpm lint:rust` must pass. It runs `cargo fmt --all -- --check` and
   `cargo clippy --workspace --all-targets`, and what that fails on is declared in
   `[workspace.lints]` in the root `Cargo.toml`: `clippy::all`, `clippy::pedantic`,
@@ -504,21 +504,38 @@ message):
    version note's prototype suffix are removed, and the buttons that used to only
    surface a notice (choose folder, open Trash, open log directory) now perform the
    real action through the Tauri dialog and opener plugins.
-5. **One page width, and no cell paints over its neighbour.** Both were reported
-   from a screenshot of the build-artifacts page. The width is the content pane's
-   own padding (24px) on every page: the welcome, overview, plan, history and
-   settings pages were capped at 860px and centred, so their left and right edges
-   sat 56px in and moved sideways whenever the user changed view. Table columns
-   take a share of the table instead of an ad-hoc width, because under
-   `table-layout: fixed` a column given no width takes what is left over and its
-   content then paints over the cell next door — the verdict badge was sliced in
-   half by the reason box beside it, and in English three more columns bled the
-   same way. Every cell now clips its own content (`overflow: hidden`, with an
-   ellipsis where the text is one line), so a narrower window degrades to a
-   truncated label rather than an overlap, at any width and in either language.
+5. **One page width, and nothing paints over anything beside it.** Both were
+   reported from a screenshot of the build-artifacts page. The width is the content
+   pane's own padding (24px) on every page: the welcome, overview, plan, history
+   and settings pages were capped at 860px and centred, so their left and right
+   edges sat 56px in and moved sideways whenever the user changed view. The general
+   rule the layout has to keep: a box never draws outside the box it was put in. It
+   was first fixed by giving every column a share of its table and letting each
+   cell clip its own content (`overflow: hidden`, an ellipsis where the text is one
+   line), because under `table-layout: fixed` a column given no width takes what
+   is left over and paints over the cell next door — the verdict badge was sliced
+   in half by the reason box beside it. Decision 6 removes the columns that made
+   it necessary on the three list pages.
+6. **The three list pages are rows, not columns.** Each item is three lines: the
+   identity (kind, name or path, and the size and verdict fixed at the right edge
+   so they scan vertically), the supporting facts in the words a column header
+   used to carry, and the evidence — every reason, tinted by the verdict, not one
+   behind a tooltip. This was a user decision after a screenshot showed the
+   artifact list reading left-heavy: a path is the one value that cannot be
+   shortened without becoming ambiguous, and as one of seven columns it shared a
+   horizontal axis with six short fields, so it broke into five lines while three
+   columns beside it sat half empty. A row gives the path the whole width, and a
+   narrow window now truncates it rather than wrapping it. The overview's rows
+   carry no checkbox — that page is a way in, not a place to choose. The cleanup
+   plan and the execution result stay tables: their columns are all short and none
+   of them holds a path.
    `pnpm test:layout` walks every page in a real browser, in both locales, at the
    app's default window size: it compares each page's margins with the worktree
-   page's and asserts that no cell's `scrollWidth` exceeds its `clientWidth`.
+   page's, and asserts that no row is wider than its container, that no row wraps
+   its name over a second line, that the figures stay beside the text rather than
+   over it, that no two rows overlap, and that every row paints its reasons. The
+   sample snapshot carries a path long enough to wrap on purpose — without it that
+   check cannot fail, which is how it was tested.
 
 **Decided (2026-10-12, while building the above)**
 

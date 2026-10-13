@@ -201,14 +201,7 @@ export const zhCN = {
     filterReview: (n: number) => `需人工确认 ${n}`,
     filterUnsafe: (n: number) => `禁止删除 ${n}`,
     searchPlaceholder: "按路径或分支搜索",
-    columns: {
-      branch: "分支",
-      status: "状态",
-      agent: "代理",
-      lastActivity: "最近活动",
-      size: "体积",
-      safety: "安全性"
-    },
+    selectAll: "全选可移除的工作树",
     details: "详情",
     collapse: "收起",
     gitFacts: "Git 事实",
@@ -224,7 +217,6 @@ export const zhCN = {
     stashEntries: (n: number) => `${n} 条`,
     prunableBanner:
       "工作目录已不存在，只会运行 git worktree prune 清理 .git/worktrees 里的元数据，不触碰任何文件。",
-    reasons: "判断理由",
     untrackedLabel: "未跟踪文件（删除此工作树需要 --force）",
     empty: "没有符合当前筛选条件的工作树",
     upstreamGone: "工作目录已消失",
@@ -265,14 +257,9 @@ export const zhCN = {
     gitIgnored: "已忽略",
     gitUnverified: "未核验",
     gitUntracked: "未跟踪",
-    columns: {
-      path: "目录",
-      git: "Git 状态",
-      lastActivity: "最近活动",
-      size: "体积",
-      safety: "判定",
-      reason: "原因"
-    },
+    // 每一行自带字段名，没有表头可标注。这个前缀就是表头的替身：写「Git 已忽略」
+    // 而不是孤零零一个「已忽略」。
+    gitLabel: "Git",
     empty: "没有超过当前体积阈值的产物目录",
     selectedSummary: (artifacts: number, worktrees: number) =>
       `已选 ${artifacts} 个产物 · ${worktrees} 个工作树 · 预计可回收`,
