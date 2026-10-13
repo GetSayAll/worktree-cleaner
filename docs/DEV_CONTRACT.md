@@ -293,6 +293,27 @@ and the optional Tauri desktop shell (Form C).
 4. if Form C is implemented: launching it calls the same core and the same execution
    module, and introduces no second decision implementation.
 
+### Current coverage status
+
+Last updated 2026-10-11. "Met" means a passing automated check exists and would
+fail if the behaviour regressed. "Blocked" means the criterion belongs to a
+deliverable that does not exist yet.
+
+| Stage | Criterion | Status |
+|---|---|---|
+| P0 | 1 · `cargo test` green | Met — 43 unit + 5 integration |
+| P0 | 2 · every `wt.*` reason code has a test case | **Blocked** — the worktree checks (the third P0 deliverable) are not implemented, so only `wt.clean`, `wt.unmerged`, `wt.recent_activity`, `wt.main` and `wt.dirty` are exercised as behaviour. The remaining 11 `wt.*` codes and all 10 `af.*` codes are covered only as contract: their wire format, uniqueness, and rejection of empty text or evidence |
+| P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 78 entries, plus a generated property test over 20,000 random paths |
+| P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | **Blocked** — needs the injectable Git runner that lands with the worktree checks |
+| P0 | 5 · `cargo clippy -- -D warnings` | Met |
+| P1 | artifact scan criteria | Blocked — P1 not started |
+| P2 | CLI and snapshot contract criteria | Blocked — P2 not started |
+| P3 | report page criteria | Partly met — the prototype opens offline over `file://` with no console errors and no non-English text, but it still reads the mock rather than a snapshot file |
+| P4 | execution criteria | Blocked — P4 not started |
+
+The rule for every row: a criterion counts as met only when a test in the
+repository fails if the behaviour regresses.
+
 ---
 
 ## 6. Change control
