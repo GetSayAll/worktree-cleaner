@@ -3,10 +3,21 @@ import { computed } from "vue";
 import { artifacts, counts, goTo, primaryReason, selectedSummary, snapshot, worktrees } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import StatCard from "../components/StatCard.vue";
-import { compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, displayPath } from "../format";
+import { compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
 const root = computed(() => snapshot.value?.root ?? "");
+
+/**
+ * Whether a worktree lives outside the directory the user picked.
+ *
+ * A worktree of the chosen repository can be anywhere — `git worktree add` takes any
+ * path — so a row in a "largest worktrees" list may name a directory the reader has
+ * never seen. Telling, not deciding: the verdict comes from Git.
+ */
+function isOutsideRoot(path: string): boolean {
+  return root.value.length > 0 && !isUnder(path, root.value);
+}
 
 // Unknown sizes sort first: an item whose size could not be measured must not be
 // buried at the bottom of a "largest" list (see compareSizeNullsFirst).
@@ -102,7 +113,14 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
             <tr v-for="item in topWorktrees" :key="item.path">
               <td>
                 <div class="mono">{{ displayPath(item.path, root) }}</div>
-                <div class="tiny faint">{{ item.branch || messages.common.detached }}{{ item.is_main ? messages.overview.mainWorktreeSuffix : "" }}</div>
+                <div class="tiny faint">
+                  {{ item.branch || messages.common.detached }}{{ item.is_main ? messages.overview.mainWorktreeSuffix : "" }}
+                  <span
+                    v-if="isOutsideRoot(item.path)"
+                    class="chip chip--outside"
+                    :title="messages.worktrees.outsideRootHint"
+                  >{{ messages.worktrees.outsideRoot }}</span>
+                </div>
               </td>
               <td class="nowrap">
                 <span class="chip">{{ item.agent || messages.common.unknownAgent }}</span>

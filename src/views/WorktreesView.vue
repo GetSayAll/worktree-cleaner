@@ -13,7 +13,7 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
-import { formatBytes, formatRelTime, displayPath } from "../format";
+import { formatBytes, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
 type FilterKey = "all" | SafetyStatus;
@@ -23,6 +23,18 @@ const query = ref("");
 const expanded = ref<string[]>([]);
 
 const root = computed(() => snapshot.value?.root ?? "");
+
+/**
+ * Whether a worktree lives outside the directory the user picked.
+ *
+ * Telling, not deciding: `git worktree add` accepts any path, so a worktree of the
+ * chosen repository can be a sibling directory, a path under `~/worktrees`, or a
+ * scratch directory in `/tmp`. Without this the page shows a path the reader cannot
+ * place and does not explain why it is there.
+ */
+function isOutsideRoot(path: string): boolean {
+  return root.value.length > 0 && !isUnder(path, root.value);
+}
 
 const filtered = computed<WorktreeRecord[]>(() => {
   const q = query.value.trim().toLowerCase();
@@ -129,7 +141,14 @@ function stateText(item: WorktreeRecord): string {
                 </td>
                 <td>
                   <div>{{ item.branch || messages.common.detachedHead }}</div>
-                  <div class="mono tiny faint">{{ displayPath(item.path, root) }}</div>
+                  <div class="mono tiny faint">
+                    {{ displayPath(item.path, root) }}
+                    <span
+                      v-if="isOutsideRoot(item.path)"
+                      class="chip chip--outside"
+                      :title="messages.worktrees.outsideRootHint"
+                    >{{ messages.worktrees.outsideRoot }}</span>
+                  </div>
                 </td>
                 <td class="nowrap tiny">{{ stateText(item) }}</td>
                 <td class="nowrap"><span class="chip">{{ item.agent || messages.common.emDash }}</span></td>

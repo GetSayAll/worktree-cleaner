@@ -100,6 +100,17 @@ impl Repo {
     /// the repository's own tree cannot disturb the linked one.
     pub fn add_worktree(&self, name: &str, branch: &str) -> PathBuf {
         let path = self.base.join(name);
+        self.add_worktree_at(&path, branch);
+        path
+    }
+
+    /// Adds a linked worktree at an explicit path, wherever that path is.
+    ///
+    /// `git worktree add` accepts any directory at all — a sibling of the repository,
+    /// `~/worktrees/…`, a scratch directory in `/tmp`, a path on another volume — and
+    /// nothing in the scanner may assume a worktree sits under the directory the user
+    /// picked.
+    pub fn add_worktree_at(&self, path: &Path, branch: &str) -> PathBuf {
         self.git(&[
             "worktree",
             "add",
@@ -108,7 +119,7 @@ impl Repo {
             "-b",
             branch,
         ]);
-        path
+        path.to_path_buf()
     }
 
     /// The worktree paths Git currently reports.

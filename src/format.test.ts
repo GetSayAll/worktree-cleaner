@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareSizeNullsFirst, formatBytes, formatCount } from "./format";
+import { compareSizeNullsFirst, formatBytes, formatCount, isUnder } from "./format";
 import { messages } from "./i18n";
 
 // `size_bytes` is `number | null` since schema version 2: an item whose size
@@ -70,5 +70,30 @@ describe("formatCount", () => {
   it("groups thousands for the file-count columns", () => {
     expect(formatCount(18240)).toBe("18,240");
     expect(formatCount(0)).toBe("0");
+  });
+});
+
+describe("isUnder", () => {
+  // Used to tell the reader that a worktree of the repository they picked lives
+  // somewhere else. `git worktree add` takes any path, so a sibling directory, a
+  // shared `~/worktrees/…` or a scratch directory in `/tmp` are all ordinary.
+  const root = "/Users/andy/MySrc/proj";
+
+  it("accepts the root itself and anything below it", () => {
+    expect(isUnder(root, root)).toBe(true);
+    expect(isUnder(`${root}/dist`, root)).toBe(true);
+    expect(isUnder(`${root}/node_modules/left-pad`, root)).toBe(true);
+  });
+
+  it("rejects a path outside it, including one that only shares a prefix", () => {
+    expect(isUnder("/Users/andy/MySrc/proj--feature", root)).toBe(false);
+    expect(isUnder("/Users/andy/MySrc", root)).toBe(false);
+    expect(isUnder("/tmp/scratch/wt", root)).toBe(false);
+    expect(isUnder("/Users/andy/worktrees/proj/feature", root)).toBe(false);
+  });
+
+  it("does not match everything when the root is empty", () => {
+    // A snapshot with no root must not make every path look like it is inside one.
+    expect(isUnder(root, "")).toBe(false);
   });
 });

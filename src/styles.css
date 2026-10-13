@@ -267,6 +267,14 @@ a { color: var(--accent); }
   color: var(--text-2);
   border: 1px solid var(--border);
 }
+/* A worktree of the chosen repository that lives somewhere else. Visible, not
+   alarming: it is an ordinary result whose path needs a word of explanation. */
+.chip--outside {
+  margin-left: 6px;
+  background: transparent;
+  color: var(--text-3);
+  border-style: dashed;
+}
 
 /* ---------- buttons ---------- */
 .btn {

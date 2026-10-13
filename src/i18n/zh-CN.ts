@@ -187,6 +187,9 @@ export const zhCN = {
     title: "工作树",
     dataSource:
       "数据来源：git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
+    outsideRoot: "在所选目录之外",
+    outsideRootHint:
+      "Git 报告这个工作树在你所选目录之外；git worktree add 可以指定任意路径。它和其他工作树一样会被扫描、判定，也可以删除。",
     filterAll: (n: number) => `全部 ${n}`,
     filterSafe: (n: number) => `可安全删除 ${n}`,
     filterReview: (n: number) => `需人工确认 ${n}`,

@@ -109,6 +109,20 @@ export function displayPath(path: string, root: string): string {
   return shortenPath(path, root);
 }
 
+/**
+ * Whether `path` is `root` itself or sits underneath it.
+ *
+ * For telling the reader about the shape of what they are looking at — a worktree of
+ * the repository they picked can live anywhere, and the pages say so. It decides no
+ * verdict: the scanner and the executor work from the paths Git reports.
+ */
+export function isUnder(path: string, root: string): boolean {
+  const key = normalizePathKey(path);
+  const rootKey = normalizePathKey(root);
+  if (rootKey.length === 0) return false;
+  return key === rootKey || key.startsWith(`${rootKey}/`);
+}
+
 /** Display-only abbreviation of a home directory; tolerates both separators. */
 export function homePath(path: string): string {
   return path.replace(/^(?:[A-Za-z]:)?[\\/](?:Users|home)[\\/][^\\/]+/, "~");

@@ -196,6 +196,12 @@ export const en = {
     title: "Worktree",
     dataSource:
       "Data source: git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
+    // `git worktree add` takes any path, so a worktree of the repository the user
+    // picked can sit anywhere. The page says so rather than leaving the reader to
+    // notice that a path is not under the directory at the top of the window.
+    outsideRoot: "outside the selected directory",
+    outsideRootHint:
+      "Git reports this worktree outside the directory you picked; git worktree add accepts any path. It is scanned, judged and can be removed like any other worktree.",
     filterAll: (n: number) => `All ${n}`,
     filterSafe: (n: number) => `Safe to delete ${n}`,
     filterReview: (n: number) => `Needs review ${n}`,

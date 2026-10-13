@@ -435,6 +435,101 @@ fn a_whitelisted_artifact_is_skipped_by_the_path_check() {
 
 // ---- D14: one item's outcome does not change another's ---------------------
 
+/// A marker in the name of a directory that lives outside the repository's own tree.
+const OUTSIDE_MARKER: &str = "worktree-cleaner-outside";
+
+/// A directory of its own, unrelated to `Repo::base`. The caller removes it: the
+/// repository's `Drop` only knows about its own tree.
+fn outside_directory(tag: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!("{OUTSIDE_MARKER}-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+    std::fs::create_dir_all(&path).expect("create the outside directory");
+    path
+}
+
+#[test]
+fn a_worktree_outside_the_scanned_directory_is_scanned_and_removed() {
+    // `git worktree add` takes any path at all: a sibling directory, `~/worktrees/…`,
+    // a scratch directory in `/tmp`, a path on another volume. Nothing may assume a
+    // worktree sits under the directory the user picked — the scanner asks Git where
+    // they are, and the executor hands Git the absolute path Git reported.
+    let repo = Repo::new("outside");
+    let elsewhere = outside_directory("worktree");
+    assert!(
+        !elsewhere.starts_with(&repo.base),
+        "the fixture has to be somewhere else for this to prove anything"
+    );
+
+    // Committed on `main` first, so the worktree checks out the same tree and comes
+    // out clean and merged.
+    std::fs::write(repo.root.join(".gitignore"), "node_modules/\n").expect("write .gitignore");
+    std::fs::write(repo.root.join("package.json"), "{}\n").expect("write manifest");
+    repo.git(&["add", ".gitignore", "package.json"]);
+    repo.git_dated_in(&repo.root, &["commit", "--quiet", "-m", "layout"], 80);
+
+    let linked = repo.add_worktree_at(&elsewhere, "outside/x");
+    repo.git_in(&linked, &["branch", "--set-upstream-to=main"]);
+    // Ignored, so the worktree stays clean and can come out Safe.
+    std::fs::create_dir_all(linked.join("node_modules/left-pad")).expect("create modules");
+    std::fs::write(
+        linked.join("node_modules/left-pad/index.js"),
+        "module.exports = 1;\n",
+    )
+    .expect("write module");
+    backdate_tree(&linked, 30);
+
+    let snapshot = scan(&repo);
+
+    // Reported, with the path Git gave, and demonstrably not under the scanned root.
+    let record = snapshot
+        .worktrees
+        .iter()
+        .find(|record| record.path.contains(OUTSIDE_MARKER))
+        .expect("a worktree outside the scanned directory is still reported");
+    assert!(!record.path.starts_with(&snapshot.root));
+    assert_eq!(record.branch.as_deref(), Some("outside/x"));
+    assert_eq!(
+        record.safety.status,
+        SafetyStatus::Safe,
+        "{:?}",
+        record.safety.reasons
+    );
+
+    // Its build output belongs to it, not to the main worktree.
+    let artifact = snapshot
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.path.contains(OUTSIDE_MARKER))
+        .expect("the artifact inside it is scanned");
+    assert!(artifact.path.ends_with("node_modules"));
+    assert!(artifact.project_root.contains(OUTSIDE_MARKER));
+
+    // And it can be removed: `git worktree remove -- <path>` takes the path wherever
+    // it points.
+    let log_path = repo.base.join("operations.log");
+    let outcome = execute_plan(
+        &plan_removing(&record.path),
+        &snapshot,
+        &options_with_log(&log_path),
+    );
+    assert_eq!(
+        outcome.entries[0].result,
+        ExecutionResult::Ok,
+        "{:?}",
+        outcome.entries[0]
+    );
+    assert!(!linked.exists(), "the worktree directory is gone");
+    assert!(
+        !repo
+            .worktree_paths()
+            .iter()
+            .any(|path| path.contains(OUTSIDE_MARKER)),
+        "git no longer lists it"
+    );
+
+    let _ = std::fs::remove_dir_all(&elsewhere);
+}
+
 #[test]
 fn a_skipped_item_does_not_stop_the_items_after_it() {
     let (repo, linked, _marker) = repo_with_a_safe_worktree("isolation");
