@@ -62,8 +62,7 @@ fn every_corpus_entry_is_rejected() {
     }
     assert!(
         accepted.is_empty(),
-        "the following corpus entries should have been rejected but passed validation: {:#?}",
-        accepted
+        "the following corpus entries should have been rejected but passed validation: {accepted:#?}"
     );
 }
 
@@ -127,11 +126,11 @@ fn corpus_covers_each_required_category() {
 struct XorShift(u64);
 
 impl XorShift {
-    fn new(seed: u64) -> Self {
+    const fn new(seed: u64) -> Self {
         Self(seed | 1)
     }
 
-    fn next(&mut self) -> u64 {
+    const fn next(&mut self) -> u64 {
         let mut x = self.0;
         x ^= x >> 12;
         x ^= x << 25;
@@ -202,20 +201,17 @@ fn accepted_paths_always_satisfy_the_invariant() {
         // NUL, and contain no `..` component.
         assert!(
             candidate.is_absolute(),
-            "accepted a relative path: {:?}",
-            candidate
+            "accepted a relative path: {candidate:?}"
         );
         assert!(
             !candidate.to_string_lossy().contains('\0'),
-            "accepted a path containing NUL: {:?}",
-            candidate
+            "accepted a path containing NUL: {candidate:?}"
         );
         assert!(
             !candidate
                 .components()
                 .any(|component| matches!(component, Component::ParentDir)),
-            "accepted a path containing a .. component: {:?}",
-            candidate
+            "accepted a path containing a .. component: {candidate:?}"
         );
 
         // The normalised target must satisfy the same constraints, and must not be a
@@ -223,13 +219,11 @@ fn accepted_paths_always_satisfy_the_invariant() {
         let target = validated.as_path();
         assert!(
             target.is_absolute(),
-            "normalised result is not an absolute path: {:?}",
-            target
+            "normalised result is not an absolute path: {target:?}"
         );
         assert!(
             target.components().count() > 2,
-            "accepted a top-level root: {:?}",
-            target
+            "accepted a top-level root: {target:?}"
         );
     }
 
@@ -251,8 +245,7 @@ fn generated_paths_never_accept_control_characters() {
             let rendered = candidate.to_string_lossy();
             assert!(
                 !rendered.chars().any(|c| c == '\0' || c.is_control()),
-                "accepted a path containing control characters: {:?}",
-                candidate
+                "accepted a path containing control characters: {candidate:?}"
             );
         }
     }

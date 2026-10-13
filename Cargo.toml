@@ -20,20 +20,60 @@ thiserror = "2"
 # through the Trash and Git, and the platform calls the `trash` crate makes are its
 # business, not ours.
 #
-# `pedantic` and `nursery` are warnings, not denials, and that is a temporary state:
-# they are enabled so the count is visible and does not grow unnoticed, and the
-# current tally is recorded in AGENTS.md. Raising them to `deny` is the second half of
-# this change and needs the triage first — a gate switched on while it is still red
-# gets switched off again.
+# `all` and `pedantic` are denied, so a new lint at either level fails the build
+# rather than scrolling past. `nursery` stays a warning on purpose: those lints are
+# explicitly experimental and can change or disappear between Clippy releases, and a
+# gate that goes red because the toolchain moved is a gate people learn to ignore.
 #
-# `unused` is denied (it is a warning by default) so a leftover variable or import
-# fails the gate rather than being scrolled past, which is the behaviour the proposal's
-# acceptance check asks for.
+# `unsafe_code` is denied because nothing here needs it: the deletion path goes
+# through the Trash and Git, and the platform calls the `trash` crate makes are its
+# business, not ours. `unused` is denied (a warning by default) so a leftover variable
+# or import fails the gate, which is the behaviour the proposal's acceptance check
+# asks for.
 [workspace.lints.rust]
 unsafe_code = "deny"
 unused = "deny"
 
 [workspace.lints.clippy]
-all = "deny"
-pedantic = "warn"
-nursery = "warn"
+# Every group carries the same explicit priority, lower than any individual lint
+# below. Without it Cargo and Clippy disagree about which setting wins and report
+# `lint_groups_priority` instead: the table's order is ignored, and an `allow` on one
+# lint has to outrank the group it belongs to for it to mean anything.
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# The error enums are read where they are produced, and `PathRejection::ProtectedLocation`
+# says what it is; `Self::…` sends the reader back to the impl header to find out.
+use_self = "allow"
+
+# An internal crate: the handful of functions whose result must be used are marked by
+# hand, and the rest return values rather than errors.
+must_use_candidate = "allow"
+
+# Every one of these casts is in `timefmt`, where the sign and the range are decided a
+# few lines earlier and pinned by round-trip tests, or comes from a counter. Writing
+# `try_into().unwrap()` would turn a case that cannot happen into a panic path.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+
+# The docs name technical identifiers (`node_modules`, `git worktree remove`,
+# `%WINDIR%`) on nearly every line; backticking them all is noise.
+doc_markdown = "allow"
+
+# Error and panic semantics are in the prose above each function. A mandatory section
+# would repeat it in weaker words.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# The long functions are decision tables and the scanner's walk. Splitting them would
+# hide the order that is the point of them.
+too_many_lines = "allow"
+
+# These are settings objects, and a bool is the honest type for each field.
+struct_excessive_bools = "allow"
+
+# `map_or_else(|| …, |v| …)` in place of a four-line `if let / else` reads worse, not
+# better: the two branches stop being branches and the reader has to hold both in
+# mind at once. The plain form states what happens in the order it happens.
+option_if_let_else = "allow"

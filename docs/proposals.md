@@ -582,7 +582,7 @@ Settled on 2026-10-12.
 | P-5 | Commit and finish the desktop wiring | **Already landed** before this review |
 | P-6 | Define released space; label the simulation | **Implemented** — the rule is in DEV_CONTRACT §3 and the pages say when there is no desktop. Note the preview no longer simulates at all: it refuses (see the P-5 resolution) |
 | P-7 | Field-for-field contract test | **Implemented** — `src/architecture.test.ts` compares ten contract structs and the reason-code list across the two languages |
-| P-8 | Lint policy, pinned toolchain, formatter | **Implemented, one half left open** — `[workspace.lints]`, `rustfmt.toml`, `rust-toolchain.toml` and `pnpm lint:rust` are in place; the triage that would raise `pedantic` and `nursery` to denials is not, and the current count is recorded in `AGENTS.md` |
+| P-8 | Lint policy, pinned toolchain, formatter | **Implemented** — `[workspace.lints]` with `clippy::all` and `clippy::pedantic` denied, plus `rustfmt.toml`, `rust-toolchain.toml` and `pnpm lint:rust`. The triage is done: 332 findings sorted into ten lints allowed with a written reason, and the rest fixed or applied mechanically. `clippy::nursery` stays a warning because those lints are experimental |
 | P-9 | `AGENTS.md` routing table | **Implemented** |
 | P-10 | Pin the check order; keep the corpus from shrinking | **Implemented** — a precedence test that applies two rules at once, and a corpus floor at the current entry count |
 

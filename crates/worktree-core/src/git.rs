@@ -85,7 +85,7 @@ pub struct ProcessGitRunner {
 }
 
 impl ProcessGitRunner {
-    pub fn new(timeout: Duration) -> Self {
+    pub const fn new(timeout: Duration) -> Self {
         Self { timeout }
     }
 }
@@ -210,7 +210,7 @@ pub(crate) mod testing {
 
     /// A canned answer for one exact argument list.
     #[derive(Debug, Clone)]
-    pub(crate) enum Canned {
+    pub enum Canned {
         Out(GitOutput),
         Failed {
             code: Option<i32>,
@@ -227,7 +227,7 @@ pub(crate) mod testing {
     /// silently returning empty output, so a test can never pass because a call was
     /// never made.
     #[derive(Debug, Default)]
-    pub(crate) struct FakeGitRunner {
+    pub struct FakeGitRunner {
         rules: Vec<(Vec<String>, Canned)>,
         calls: std::sync::Mutex<Vec<Vec<String>>>,
     }

@@ -198,10 +198,12 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   build passing.
 - Rust: `pnpm lint:rust` must pass. It runs `cargo fmt --all -- --check` and
   `cargo clippy --workspace --all-targets`, and what that fails on is declared in
-  `[workspace.lints]` in the root `Cargo.toml`: `clippy::all`, the rustc `unused`
-  group, and `unsafe_code` are **denied**. `clippy::pedantic` and `clippy::nursery`
-  are enabled as warnings, with the current count recorded in `AGENTS.md`; a green
-  gate therefore does **not** mean pedantic-clean.
+  `[workspace.lints]` in the root `Cargo.toml`: `clippy::all`, `clippy::pedantic`,
+  the rustc `unused` group and `unsafe_code` are **denied**. `clippy::nursery` stays a
+  warning on purpose — those lints are experimental and change between Clippy
+  releases. The ten `pedantic` lints that remain allowed are each listed with their
+  reason in `Cargo.toml` and in `AGENTS.md`; adding an exception without one is the
+  thing to look for in review.
 - Platform: macOS verifies the Trash path on a real machine before every release;
   Windows verifies the Recycle Bin path separately. Both results are recorded
   separately.
@@ -355,7 +357,7 @@ guarantee is named next to it.
 | P0 | 2 · every `wt.*` reason code has a test case | Met — all 16 `wt.*` codes have a positive and a negative case, and every reason asserts non-empty `text` and `evidence` |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 86 entries. The floor is set to the current count rather than left at 60, so the corpus cannot shrink unnoticed; a generated property test covers 20,000 random paths on top |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
-| P0 | 5 · `cargo clippy -- -D warnings` | Met, and widened into a real gate: `pnpm lint:rust` runs the format check and `cargo clippy --workspace --all-targets`, with `clippy::all`, the rustc `unused` group and `unsafe_code` denied in `[workspace.lints]`. `clippy::pedantic` and `clippy::nursery` are warnings — around 200 findings today — and are recorded in `AGENTS.md`, so a green gate is not the same as pedantic-clean |
+| P0 | 5 · `cargo clippy -- -D warnings` | Met, and widened into a real gate: `pnpm lint:rust` runs the format check and `cargo clippy --workspace --all-targets`, with `clippy::all`, `clippy::pedantic`, the rustc `unused` group and `unsafe_code` denied in `[workspace.lints]`. `clippy::nursery` stays a warning because those lints are experimental. The ten `pedantic` lints that remain allowed each carry their reason in `Cargo.toml` |
 | P1 | 1 · a tracked `build/` is `Unsafe`, evidence naming the match count | Met — unit, plus a real repository where `dist/` is committed despite an ignore rule |
 | P1 | 2 · `node_modules` is not recognised as a project root | Met — the walk never descends into a directory it has recognised as an artifact, and a real scan reports one record per worktree |
 | P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met for `.git`. **Credential files are not detected** — open item 4 |
@@ -584,8 +586,10 @@ Implemented on 2026-10-12:
   structs and the reason codes across the two languages; removing a field or adding a
   code on one side alone now fails.
 - **P-8 · the Rust gate.** `[workspace.lints]`, `rustfmt.toml`, `rust-toolchain.toml`
-  and `pnpm lint:rust`. The triage that would let `pedantic` and `nursery` become
-  denials is the remaining half, and the current count is recorded in `AGENTS.md`.
+  and `pnpm lint:rust`, with `clippy::all` and `clippy::pedantic` denied. The triage
+  is done: 332 findings were sorted into ten lints allowed with a written reason and
+  the rest either fixed or applied mechanically. `clippy::nursery` stays a warning on
+  purpose, because those lints are experimental.
 - **P-9 · a routing table.** `AGENTS.md` says where a change belongs.
 - **P-10 · check order and corpus size.** The precedence of D10's checks is pinned by
   a test that applies two rules at once, and the corpus floor is its current count.

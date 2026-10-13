@@ -22,6 +22,10 @@ struct Repo {
     worktrees: Vec<PathBuf>,
 }
 
+// `run_in_env` does not read `self` and is a method anyway: `repo.run_in_env(…)` reads
+// as "this repository runs git", and mixed conventions in one helper set are worse
+// than one lint.
+#[allow(clippy::unused_self)]
 impl Repo {
     fn run(&self, args: &[&str]) -> Output {
         self.run_in(&self.root, args)
@@ -120,7 +124,7 @@ fn build_repo(name: &str) -> Repo {
     // The initial commit is dated 90 days ago, so a worktree that sits on it (the
     // detached and newline ones) is not "recently active" by construction and its
     // verdict stays deterministic.
-    let old_init = SystemTime::now() - Duration::from_secs(90 * 86_400);
+    let old_init = SystemTime::now() - Duration::from_hours(2160);
     let init_stamp = format!(
         "@{} +0000",
         old_init
@@ -145,7 +149,7 @@ fn build_repo(name: &str) -> Repo {
     repo.run_in(&feature, &["branch", "--set-upstream-to=main"]);
     std::fs::write(feature.join("b.txt"), "two\n").expect("write b.txt");
     repo.run_in(&feature, &["add", "b.txt"]);
-    let old = SystemTime::now() - Duration::from_secs(60 * 86_400);
+    let old = SystemTime::now() - Duration::from_hours(1440);
     let stamp = format!(
         "@{} +0000",
         old.duration_since(UNIX_EPOCH)
@@ -193,7 +197,7 @@ fn build_repo(name: &str) -> Repo {
         let newline = repo.add_worktree("wt/new\nline", &["-b", "newline-branch"]);
         // Backdate the directory so the record is not "recently active" by
         // construction; the initial commit is already 90 days old.
-        let target = SystemTime::now() - Duration::from_secs(30 * 86_400);
+        let target = SystemTime::now() - Duration::from_hours(720);
         let file = std::fs::File::open(&newline).expect("open newline worktree dir");
         file.set_times(
             std::fs::FileTimes::new()
@@ -411,7 +415,7 @@ fn a_recently_modified_worktree_is_flagged() {
     // Phase 2: backdate the directory to 30 days ago. The commit is 60 days old,
     // so the later of the two signals is the mtime — and 30 days is outside the
     // 7-day window, so the worktree must no longer count as recently active.
-    let target = SystemTime::now() - Duration::from_secs(30 * 86_400);
+    let target = SystemTime::now() - Duration::from_hours(720);
     let file = std::fs::File::open(&feature).expect("open worktree dir");
     file.set_times(
         std::fs::FileTimes::new()
@@ -439,8 +443,8 @@ fn a_recently_modified_worktree_is_flagged() {
 
 fn secs(time: SystemTime) -> i128 {
     match time.duration_since(UNIX_EPOCH) {
-        Ok(delta) => delta.as_secs() as i128,
-        Err(error) => -(error.duration().as_secs() as i128),
+        Ok(delta) => i128::from(delta.as_secs()),
+        Err(error) => -i128::from(error.duration().as_secs()),
     }
 }
 

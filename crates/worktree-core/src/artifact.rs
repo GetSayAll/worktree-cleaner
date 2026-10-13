@@ -266,10 +266,11 @@ pub fn lookup_kind(name: &str) -> Option<&'static ArtifactKind> {
     ARTIFACT_KINDS.iter().find(|spec| spec.name == name)
 }
 
-/// Injection points for one artifact scan, mirroring
-/// [`crate::worktree::WorktreeCheckOptions`]: everything that depends on the
-/// clock, on a measurement, or on user policy is passed in, so the decision
-/// logic is a pure function of the filesystem and of Git output.
+/// Injection points for one artifact scan.
+///
+/// Mirrors [`crate::worktree::WorktreeCheckOptions`]: everything that depends on the
+/// clock, on a measurement, or on user policy is passed in, so the decision logic is
+/// a pure function of the filesystem and of Git output.
 #[derive(Debug, Clone)]
 pub struct ArtifactScanOptions {
     /// How deep below a worktree root a candidate may sit (settings.max_depth).
@@ -381,10 +382,9 @@ fn collect_candidates(root: &Path, max_depth: usize) -> Vec<Candidate> {
     let mut visited: usize = 0;
 
     while let Some((dir, depth)) = stack.pop() {
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            // An unreadable directory is not evidence that nothing is inside it.
-            Err(_) => continue,
+        // An unreadable directory is not evidence that nothing is inside it.
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
         };
         for entry in entries.flatten() {
             visited += 1;
@@ -395,7 +395,7 @@ fn collect_candidates(root: &Path, max_depth: usize) -> Vec<Candidate> {
             let path = entry.path();
             // `DirEntry::metadata` does not follow symlinks, which is what the
             // symlink checks below need.
-            let is_dir = entry.metadata().map(|meta| meta.is_dir()).unwrap_or(false);
+            let is_dir = entry.metadata().is_ok_and(|meta| meta.is_dir());
 
             if lookup_kind(&name).is_some() {
                 out.push(Candidate { path, name });
@@ -427,10 +427,7 @@ pub fn check_artifact(
 
     // ---- symlink: never follow, never delete through the link ----
     let link_meta = std::fs::symlink_metadata(dir);
-    let is_symlink = link_meta
-        .as_ref()
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false);
+    let is_symlink = link_meta.as_ref().is_ok_and(|m| m.file_type().is_symlink());
     let mut symlink_target: Option<String> = None;
     if is_symlink {
         let target = std::fs::canonicalize(dir).ok();
@@ -463,7 +460,7 @@ pub fn check_artifact(
                 reasons.push(Reason::review(
                     ReasonCode::AfCannotVerify,
                     "could not complete the check",
-                    format!("the symlink target of {} cannot be resolved", dir_text),
+                    format!("the symlink target of {dir_text} cannot be resolved"),
                 ));
             }
         }
@@ -638,7 +635,7 @@ pub fn check_artifact(
     // ---- activity ----
     if let Some(newest) = measurement.newest {
         let age_days = elapsed_days(opts.now, newest);
-        if age_days <= opts.recent_activity_days as u64 {
+        if age_days <= u64::from(opts.recent_activity_days) {
             reasons.push(Reason::review(
                 ReasonCode::AfRecentActivity,
                 "changed recently",
@@ -701,7 +698,7 @@ pub struct Measurement {
 }
 
 impl Measurement {
-    fn unknown() -> Self {
+    const fn unknown() -> Self {
         Self {
             bytes: None,
             files: 0,
@@ -748,9 +745,8 @@ fn walk_size_with_cap(root: &Path, cap: usize) -> Measurement {
     let mut visited: usize = 0;
 
     while let Some(dir) = stack.pop() {
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(_) => continue,
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
         };
         for entry in entries.flatten() {
             visited += 1;
@@ -760,9 +756,8 @@ fn walk_size_with_cap(root: &Path, cap: usize) -> Measurement {
             }
             // `DirEntry::metadata` is `lstat`: a symlink is neither a dir nor a
             // file here, so it is counted as nothing and never followed.
-            let meta = match entry.metadata() {
-                Ok(meta) => meta,
-                Err(_) => continue,
+            let Ok(meta) = entry.metadata() else {
+                continue;
             };
             if meta.is_dir() {
                 stack.push(entry.path());
@@ -860,7 +855,7 @@ mod tests {
             };
             for entry in entries.flatten() {
                 let path = entry.path();
-                let is_dir = entry.metadata().map(|meta| meta.is_dir()).unwrap_or(false);
+                let is_dir = entry.metadata().is_ok_and(|meta| meta.is_dir());
                 if is_dir {
                     stack.push(path);
                 } else if let Ok(file) = std::fs::File::open(&path) {
@@ -952,8 +947,8 @@ mod tests {
             &opts(),
         );
         assert_eq!(record.safety.status, SafetyStatus::Safe);
-        assert!(record.git_ignored == Some(true));
-        assert!(record.git_tracked == Some(false));
+        assert_eq!(record.git_ignored, Some(true));
+        assert_eq!(record.git_tracked, Some(false));
         let on_disk = std::fs::metadata(artifact.join("index.js")).expect("stat index.js");
         assert_eq!(
             record.size_bytes,
@@ -1525,7 +1520,7 @@ mod tests {
         let runner = runner_with(vec![]);
         let mut options = opts();
         // A deadline in the past stops the scan before the first candidate.
-        options.budget_deadline = Some(Instant::now() - Duration::from_secs(1));
+        options.budget_deadline = Some(Instant::now().checked_sub(Duration::from_secs(1)).unwrap());
         let result = scan_artifacts(&runner, std::slice::from_ref(&root), &options);
         assert!(
             result.records.is_empty(),

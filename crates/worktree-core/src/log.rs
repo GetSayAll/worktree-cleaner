@@ -76,9 +76,8 @@ pub fn append(path: &Path, entries: &[HistoryEntry]) -> std::io::Result<()> {
 /// A line that does not parse is skipped: the log is an audit trail, and one
 /// damaged record must not hide the rest.
 pub fn read(path: &Path) -> Vec<HistoryEntry> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(_) => return Vec::new(),
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
     };
     text.lines()
         .filter_map(|line| serde_json::from_str::<HistoryEntry>(line).ok())

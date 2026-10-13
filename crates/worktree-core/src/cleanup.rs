@@ -120,8 +120,7 @@ pub fn execute_plan(
         // ---- path re-validation (D10) ----
         let parent = Path::new(&record.path)
             .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from(&snapshot.root));
+            .map_or_else(|| PathBuf::from(&snapshot.root), Path::to_path_buf);
         let context = DeletionContext::new(parent).with_whitelist(whitelist.clone());
         if let Err(rejection) = validate_path_for_deletion(Path::new(&record.path), &context) {
             push(
@@ -463,7 +462,7 @@ struct Audit {
 }
 
 impl Audit {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             entries: Vec::new(),
             history: Vec::new(),
@@ -536,8 +535,10 @@ fn primary_reason(record: &WorktreeRecord) -> String {
         .reasons
         .iter()
         .max_by_key(|reason| reason.severity)
-        .map(|reason| reason.text.clone())
-        .unwrap_or_else(|| "executed after user confirmation".to_string())
+        .map_or_else(
+            || "executed after user confirmation".to_string(),
+            |reason| reason.text.clone(),
+        )
 }
 
 /// The most severe reason's text for an artifact record.
@@ -547,8 +548,10 @@ fn primary_reason_artifact(record: &crate::ArtifactRecord) -> String {
         .reasons
         .iter()
         .max_by_key(|reason| reason.severity)
-        .map(|reason| reason.text.clone())
-        .unwrap_or_else(|| "executed after user confirmation".to_string())
+        .map_or_else(
+            || "executed after user confirmation".to_string(),
+            |reason| reason.text.clone(),
+        )
 }
 
 /// Rebuilds a [`crate::worktree::WorktreeEntry`] from a scanned record, so the

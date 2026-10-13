@@ -3,6 +3,11 @@
 //! Cargo compiles this once per test binary, so an item one binary does not use
 //! would otherwise warn as dead code.
 #![allow(dead_code)]
+// A method that does not read `self` is a method here on purpose. `repo.git_in_env(…)`
+// reads as "this repository runs git", and turning some of these into associated
+// functions to satisfy one lint would leave the helper set half one thing and half
+// another.
+#![allow(clippy::unused_self)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -153,7 +158,7 @@ pub fn backdate_tree(root: &Path, days: u64) {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            let is_dir = entry.metadata().map(|meta| meta.is_dir()).unwrap_or(false);
+            let is_dir = entry.metadata().is_ok_and(|meta| meta.is_dir());
             if is_dir {
                 stack.push(path);
             } else if let Ok(file) = std::fs::File::open(&path) {
@@ -252,10 +257,7 @@ fn holds_marker(dir: &Path, marker: &str) -> bool {
             // `is_dir` follows a symlink; a link is never followed here.
             if path.is_dir() && !path.is_symlink() {
                 stack.push(path);
-            } else if std::fs::read_to_string(&path)
-                .map(|text| text.contains(marker))
-                .unwrap_or(false)
-            {
+            } else if std::fs::read_to_string(&path).is_ok_and(|text| text.contains(marker)) {
                 return true;
             }
         }

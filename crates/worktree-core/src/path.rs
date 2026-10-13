@@ -113,6 +113,8 @@ impl DeletionContext {
         }
     }
 
+    /// Adds whitelist rules to the context.
+    #[must_use]
     pub fn with_whitelist(mut self, whitelist: Vec<PathBuf>) -> Self {
         self.whitelist = whitelist;
         self
@@ -204,10 +206,10 @@ pub fn validate_path_for_deletion(
     if resolved != normalized {
         if let Err(rejection) = reject_roots(&resolved, home.as_ref()) {
             return Err(match (rejection, resolution.crossed_symlink) {
-                (PathRejection::ProtectedLocation(hit), true)
-                | (PathRejection::TopLevelRoot(hit), true) => {
-                    PathRejection::SymlinkEscape(literal.clone(), hit)
-                }
+                (
+                    PathRejection::ProtectedLocation(hit) | PathRejection::TopLevelRoot(hit),
+                    true,
+                ) => PathRejection::SymlinkEscape(literal, hit),
                 (other, _) => other,
             });
         }
@@ -247,8 +249,7 @@ pub fn whitelist_hit(candidate: &Path, rules: &[PathBuf]) -> Option<PathBuf> {
     }
     let normalized = lexical_normalize(candidate);
     let resolved = resolve_for_inspection(candidate)
-        .map(|resolution| resolution.resolved)
-        .unwrap_or_else(|_| normalized.clone());
+        .map_or_else(|_| normalized.clone(), |resolution| resolution.resolved);
     for rule in rules {
         // An empty rule would lexically normalise to the root and therefore match
         // every absolute path — fail-closed, but a surprising silent "protect
@@ -259,8 +260,7 @@ pub fn whitelist_hit(candidate: &Path, rules: &[PathBuf]) -> Option<PathBuf> {
         }
         let rule_literal = lexical_normalize(rule);
         let rule_resolved = resolve_for_inspection(rule)
-            .map(|resolution| resolution.resolved)
-            .unwrap_or_else(|_| rule_literal.clone());
+            .map_or_else(|_| rule_literal.clone(), |resolution| resolution.resolved);
         for rule_form in [&rule_literal, &rule_resolved] {
             let rule_key = guard_key(rule_form);
             for candidate_form in [&normalized, &resolved] {
@@ -629,8 +629,7 @@ fn is_reserved_device_name(stem: &str) -> bool {
 fn expected_parent_forms(ctx: &DeletionContext) -> (PathBuf, PathBuf) {
     let literal = lexical_normalize(&ctx.expected_parent);
     let resolved = resolve_for_inspection(&ctx.expected_parent)
-        .map(|resolution| resolution.resolved)
-        .unwrap_or_else(|_| literal.clone());
+        .map_or_else(|_| literal.clone(), |resolution| resolution.resolved);
     (literal, resolved)
 }
 
@@ -662,8 +661,12 @@ fn lexical_normalize(path: &Path) -> PathBuf {
             Component::Normal(segment) => out.push(segment),
         }
     }
+    // An empty path normalises to the root. Written as a `return` rather than a
+    // `push`: pushing a root component *replaces* whatever came before, and although
+    // `out` is empty in this branch, saying the result outright is clearer than
+    // leaning on that.
     if out.as_os_str().is_empty() {
-        out.push("/");
+        return PathBuf::from(Component::RootDir.as_os_str());
     }
     out
 }
@@ -721,9 +724,7 @@ fn resolve_for_inspection(path: &Path) -> Result<Resolution, PathRejection> {
 
 /// Whether the path itself is a symlink (without following it).
 fn is_symlink(path: &Path) -> bool {
-    std::fs::symlink_metadata(path)
-        .map(|meta| meta.file_type().is_symlink())
-        .unwrap_or(false)
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
 }
 
 /// Whether any strict ancestor of the path is a symlink.
@@ -795,8 +796,7 @@ mod tests {
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
+                    .map_or(0, |d| d.as_nanos())
             ));
             std::fs::create_dir_all(&dir).expect("create temp dir");
             Self(dir)
@@ -815,7 +815,7 @@ mod tests {
 
     fn assert_rejected(path: &str, context: &DeletionContext) {
         let result = validate_path_for_deletion(Path::new(path), context);
-        assert!(result.is_err(), "should be rejected but passed: {}", path);
+        assert!(result.is_err(), "should be rejected but passed: {path}");
     }
 
     #[test]
@@ -1296,10 +1296,9 @@ mod tests {
             Err(PathRejection::EmptyVariableCollapse(reported)) => {
                 assert_eq!(reported, display(&real));
             }
-            other => panic!(
-                "a candidate equal to the resolved parent must be rejected, got: {:?}",
-                other
-            ),
+            other => {
+                panic!("a candidate equal to the resolved parent must be rejected, got: {other:?}")
+            }
         }
     }
 
@@ -1360,10 +1359,9 @@ mod tests {
         let candidate = link.join("sub");
         match validate_path_for_deletion(&candidate, &context) {
             Err(PathRejection::Whitelisted(_)) => {}
-            other => panic!(
-                "the whitelist must apply to the resolved path as well, got: {:?}",
-                other
-            ),
+            other => {
+                panic!("the whitelist must apply to the resolved path as well, got: {other:?}")
+            }
         }
     }
 
@@ -1391,8 +1389,7 @@ mod tests {
         match validate_path_for_deletion(&link, &context) {
             Err(PathRejection::Whitelisted(_)) => {}
             other => panic!(
-                "a link resolving into a whitelisted directory must be rejected, got: {:?}",
-                other
+                "a link resolving into a whitelisted directory must be rejected, got: {other:?}"
             ),
         }
     }
@@ -1414,11 +1411,10 @@ mod tests {
                 );
                 assert!(
                     hit.starts_with("/System"),
-                    "evidence should point at the protected location: {}",
-                    hit
+                    "evidence should point at the protected location: {hit}"
                 );
             }
-            other => panic!("expected a symlink escape, got: {:?}", other),
+            other => panic!("expected a symlink escape, got: {other:?}"),
         }
     }
 
@@ -1449,7 +1445,7 @@ mod tests {
                     "the second field must name the protected location"
                 );
             }
-            other => panic!("expected a symlink escape, got: {:?}", other),
+            other => panic!("expected a symlink escape, got: {other:?}"),
         }
     }
 

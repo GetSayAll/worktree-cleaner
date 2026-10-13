@@ -370,8 +370,7 @@ mod tests {
             let s = code.as_str();
             assert!(
                 s.starts_with("wt.") || s.starts_with("af."),
-                "reason code must carry a wt. / af. prefix: {}",
-                s
+                "reason code must carry a wt. / af. prefix: {s}"
             );
         }
         assert_eq!(ReasonCode::ALL.len(), 26);
@@ -401,7 +400,7 @@ mod tests {
         let json = serde_json::to_value(&assessment).expect("serialize assessment");
         assert_eq!(json["status"], "Unsafe");
         assert!(json["reasons"].is_array());
-        assert_eq!(json.as_object().map(|object| object.len()), Some(2));
+        assert_eq!(json.as_object().map(serde_json::Map::len), Some(2));
     }
 
     #[test]

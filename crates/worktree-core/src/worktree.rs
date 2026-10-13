@@ -10,6 +10,7 @@
 //! mtime and the presence of `.git/index.lock`); the `.git` file format is never
 //! parsed (development contract section 2).
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -485,9 +486,13 @@ pub fn check_worktree(
                 let count = untracked_listed.unwrap_or(info.untracked_files);
                 let mut evidence = format!("{count} untracked files");
                 if untracked_listed.is_some_and(|listed| listed > MAX_UNTRACKED_LIST as u32) {
-                    evidence.push_str(&format!(
+                    // `write!` rather than `push_str(&format!(…))`: one allocation
+                    // instead of two, and the result is discarded either way because
+                    // writing into a `String` cannot fail.
+                    let _ = write!(
+                        evidence,
                         " (the list below shows the first {MAX_UNTRACKED_LIST})"
-                    ));
+                    );
                 }
                 reasons.push(Reason::new(
                     ReasonCode::WtUntracked,
@@ -506,9 +511,10 @@ pub fn check_worktree(
             &["log", "-1", "--format=%ct"],
             &mut reasons,
         )
-        .and_then(|output| match output.stdout.trim().parse::<i128>() {
-            Ok(seconds) => Some(from_unix_seconds(seconds)),
-            Err(_) => {
+        .and_then(|output| {
+            if let Ok(seconds) = output.stdout.trim().parse::<i128>() {
+                Some(from_unix_seconds(seconds))
+            } else {
                 reasons.push(Reason::review(
                     ReasonCode::WtCannotVerify,
                     "cannot read the HEAD commit time",
@@ -749,7 +755,7 @@ fn run_checked(
             let error = GitError::Failed {
                 command: display_command(repo, args),
                 code: output.code,
-                stderr: output.stderr.clone(),
+                stderr: output.stderr,
             };
             reasons.push(cannot_verify(label, &error));
             None
@@ -954,7 +960,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     fn default_options() -> WorktreeCheckOptions {
         WorktreeCheckOptions {
             default_branch: Some("main".to_string()),
-            now: UNIX_EPOCH + Duration::from_secs(1_800_000_000),
+            now: UNIX_EPOCH + Duration::from_hours(500_000),
             size_bytes: Some(1_234),
             ..WorktreeCheckOptions::default()
         }

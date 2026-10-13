@@ -60,19 +60,22 @@ when the language changes. `locale.test.ts` fails if a table's keys differ.
 
 What that fails on is declared in `[workspace.lints]` in the root `Cargo.toml`:
 
-- `clippy::all` — **denied**. A new default-level lint fails the build.
-- the rustc `unused` group — **denied**. A leftover variable or import fails the
-  build rather than being scrolled past.
-- `unsafe_code` — **denied**. Nothing here needs it: deletion goes through the
-  Trash and Git, and the platform calls the `trash` crate makes are its business.
+- `clippy::all` and `clippy::pedantic` — **denied**. A new lint at either level fails
+  the build.
+- the rustc `unused` group — **denied**. A leftover variable or import fails the build
+  rather than being scrolled past.
+- `unsafe_code` — **denied**. Nothing here needs it: deletion goes through the Trash
+  and Git, and the platform calls the `trash` crate makes are its business.
+- `clippy::nursery` — a **warning**, on purpose. Those lints are explicitly
+  experimental and come and go between Clippy releases; a gate that turns red because
+  the toolchain moved is a gate people learn to ignore.
 
-`clippy::pedantic` and `clippy::nursery` are enabled as **warnings**, and that is
-the current state rather than the target. They report around 200 findings today,
-mostly `module_name_repetitions` (53), `uninlined_format_args` (16) and
-`must_use_candidate` (24 between the two forms). The number is written down so it
-cannot grow unnoticed. **A green gate does not mean pedantic-clean**: raising
-those two to `deny` needs the triage first, and a gate switched on while it is
-still red gets switched off again.
+Ten `pedantic` lints are `allow`ed individually, each with its reason written beside
+it in `Cargo.toml`: `use_self`, `must_use_candidate`, `cast_possible_truncation`,
+`cast_sign_loss`, `doc_markdown`, `missing_errors_doc`, `missing_panics_doc`,
+`too_many_lines`, `struct_excessive_bools` and `option_if_let_else`. Each is a
+judgement about this codebase rather than a way to quiet the gate — read the reason
+before adding another.
 
 ## Frozen design
 

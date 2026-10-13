@@ -87,8 +87,7 @@ fn artifact_at<'a>(
             artifact.path.ends_with(name)
                 && Path::new(&artifact.project_root)
                     .file_name()
-                    .map(|leaf| leaf.to_string_lossy() == worktree_leaf)
-                    .unwrap_or(false)
+                    .is_some_and(|leaf| leaf.to_string_lossy() == worktree_leaf)
         })
         .unwrap_or_else(|| panic!("no {name} under {worktree_leaf}; got {:?}", paths(snapshot)))
 }

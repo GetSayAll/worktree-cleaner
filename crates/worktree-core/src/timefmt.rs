@@ -48,8 +48,8 @@ pub fn humanize_days(days: u64) -> String {
 /// Seconds since the Unix epoch as a signed value, so pre-epoch times work.
 fn unix_seconds(time: SystemTime) -> i128 {
     match time.duration_since(UNIX_EPOCH) {
-        Ok(delta) => delta.as_secs() as i128,
-        Err(error) => -(error.duration().as_secs() as i128),
+        Ok(delta) => i128::from(delta.as_secs()),
+        Err(error) => -i128::from(error.duration().as_secs()),
     }
 }
 
@@ -67,7 +67,7 @@ pub fn from_unix_seconds(seconds: i128) -> SystemTime {
 /// Days since 1970-01-01 to a `(year, month, day)` triple (Howard Hinnant's
 /// `civil_from_days`). All divisions are Euclidean, which is what makes the
 /// pre-epoch cases come out right.
-fn civil_from_days(days_since_epoch: i128) -> (i64, u32, u32) {
+const fn civil_from_days(days_since_epoch: i128) -> (i64, u32, u32) {
     let era_epoch = days_since_epoch + 719_468;
     let era = era_epoch.div_euclid(146_097);
     let day_of_era = era_epoch.rem_euclid(146_097); // [0, 146096]
