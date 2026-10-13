@@ -88,9 +88,10 @@ const gates = computed(() => {
       pending: false,
       label: messages.plan.checks.duplicateCheck(bundledCount.value)
     },
-    // Target identity and activity cannot be re-checked before execution (D11:
-    // the re-check happens between plan generation and execution); say so instead
-    // of claiming a check that never ran.
+    // Target identity and activity are re-checked between plan generation and
+    // execution (D11), never before, so these two stay pending here. Each label
+    // says what the re-check will look at; the dash in the list and `checks.note`
+    // already carry the state and the timing.
     { ok: false, pending: true, label: messages.plan.checks.identityNotRun },
     { ok: false, pending: true, label: messages.plan.checks.activityNotRun }
   ];

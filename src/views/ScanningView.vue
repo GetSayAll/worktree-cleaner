@@ -21,9 +21,15 @@ const stages = computed(() => SCAN_STAGES.map((key) => ({ key, ...messages.scan.
 
 // The desktop scan is one call that answers when it is finished, so the stages
 // do not report where the core has reached — they move to show that work is under
-// way. Without them the page showed four dead markers beside a running clock and
-// read as a hang. The `liveNote` on the page says plainly which it is, so the
-// movement is never mistaken for a real progress report.
+// way, and they stop at the last one rather than cycling (see startStageTimer).
+// Without them the page showed four dead markers beside a running clock and read
+// as a hang.
+//
+// The page does not explain the call model. It used to: a note said the core
+// answers in one call, so that the movement would not be taken for a real
+// progress report. The movement is the message, and an explanation aimed at the
+// reader only asks them to make an engineering inference the interface can make
+// on its own.
 
 function stageClass(index: number): string {
   if (index < scanState.stageIndex) return "stage is-done";
@@ -61,7 +67,6 @@ const scannedTrace = desktop ? [] : scanTrace;
             </span>
           </div>
         </div>
-        <p v-if="desktop" class="field__hint">{{ messages.scan.liveNote }}</p>
       </div>
       <div class="card__foot">
         <div class="spread">

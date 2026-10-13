@@ -106,11 +106,9 @@ export const en = {
     title: "Scanning",
     elapsed: (clock: string) => `Elapsed ${clock}`,
     cancel: "Cancel",
-    liveNote:
-      "The core scans in one call and answers when it is finished, so the step below is an indication that the work is under way rather than a report of where it has reached. The clock and the cancel button stay live throughout.",
     scanning: "scanning…",
     budgetNote:
-      'Each directory probe has a timeout and the whole scan has a total budget; if the budget runs out it honestly reports "scan incomplete" and marks the affected items as "Needs review" instead of filling them in silently.',
+      'Each directory probe has a timeout and the whole scan has a total budget; if the budget runs out it reports "scan incomplete" and marks the affected items as "Needs review".',
     stages: {
       worktrees: {
         label: "Parse Git worktrees",
@@ -206,7 +204,7 @@ export const en = {
     // notice that a path is not under the directory at the top of the window.
     outsideRoot: "outside the selected directory",
     outsideRootHint:
-      "Git reports this worktree outside the directory you picked; git worktree add accepts any path. It is scanned, judged and can be removed like any other worktree.",
+      "This worktree sits outside the directory you picked. It is scanned, judged and can be removed like any other worktree.",
     filterAll: (n: number) => `All ${n}`,
     filterSafe: (n: number) => `Safe to delete ${n}`,
     filterReview: (n: number) => `Needs review ${n}`,
@@ -227,7 +225,7 @@ export const en = {
     },
     stashEntries: (n: number) => `${n} entries`,
     prunableBanner:
-      "The working directory no longer exists; only git worktree prune runs to clean up metadata in .git/worktrees. No files are touched.",
+      "The working directory no longer exists; only git worktree prune runs to clean up leftover metadata. No files are touched.",
     untrackedLabel: "Untracked files (removing this worktree requires --force)",
     empty: "No worktrees match the current filters",
     upstreamGone: "working directory is gone",
@@ -317,17 +315,19 @@ export const en = {
     },
     checks: {
       title: "Precondition checks (dry run)",
-      note: "Checks marked with a dash run at the execution stage, just before each deletion",
+      note: "Checks marked with a dash run again just before each deletion",
       pathCheck: (n: number) =>
         `Path check passed: non-empty absolute paths, symlinks resolved, no .. components, none pointing at system directories (${n} items)`,
       whitelistPassed: "Whitelist check passed: no item matches a protection rule",
       whitelistBlocked: (n: number) => `${n} items matched the whitelist and have been blocked`,
       duplicateCheck: (n: number) =>
         `Duplicate-deletion check passed: ${n} artifacts are removed with their owning worktree and counted only once`,
-      identityNotRun:
-        "Target identity re-check (path, size, last-modified time) has not been performed yet; the execution stage runs it before deleting",
-      activityNotRun:
-        "Activity re-check (no new writes since the plan was generated) has not been performed yet; the execution stage runs it before deleting"
+      // Each deferred check now says only what it will look at. Saying "has not
+      // been performed yet" here repeated the dash in the list and the timing in
+      // `note` a third time, and the re-check is an implementation, not a thing a
+      // reader can act on.
+      identityNotRun: "Re-check of path, size and last-modified time",
+      activityNotRun: "Whether anything was written since this plan was generated"
     },
     channelA: "Channel A · Remove worktrees",
     items: (n: number) => `${n} items`,

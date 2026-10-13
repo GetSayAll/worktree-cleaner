@@ -101,11 +101,9 @@ export const zhCN = {
     title: "正在扫描",
     elapsed: (clock: string) => `已用时 ${clock}`,
     cancel: "取消",
-    liveNote:
-      "核心是一次调用、完成后整体返回，所以下面的步骤表示「正在干活」，不是精确到阶段的位置。计时与取消按钮全程可用。",
     scanning: "扫描中…",
     budgetNote:
-      "每个目录探测都有超时，整次扫描也有总预算；预算用尽时会如实报告「扫描未完成」，并把受影响的条目标为「需人工确认」，而不是悄悄补全。",
+      "每个目录探测都有超时，整次扫描也有总预算；预算用尽时会如实报告「扫描未完成」，并把受影响的条目标为「需人工确认」。",
     stages: {
       worktrees: {
         label: "解析 Git 工作树",
@@ -195,7 +193,7 @@ export const zhCN = {
       "数据来源：git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
     outsideRoot: "在所选目录之外",
     outsideRootHint:
-      "Git 报告这个工作树在你所选目录之外；git worktree add 可以指定任意路径。它和其他工作树一样会被扫描、判定，也可以删除。",
+      "这个工作树在你所选目录之外。它和其他工作树一样会被扫描、判定，也可以删除。",
     filterAll: (n: number) => `全部 ${n}`,
     filterSafe: (n: number) => `可安全删除 ${n}`,
     filterReview: (n: number) => `需人工确认 ${n}`,
@@ -216,7 +214,7 @@ export const zhCN = {
     },
     stashEntries: (n: number) => `${n} 条`,
     prunableBanner:
-      "工作目录已不存在，只会运行 git worktree prune 清理 .git/worktrees 里的元数据，不触碰任何文件。",
+      "工作目录已不存在，只会运行 git worktree prune 清理残留元数据，不触碰任何文件。",
     untrackedLabel: "未跟踪文件（删除此工作树需要 --force）",
     empty: "没有符合当前筛选条件的工作树",
     upstreamGone: "工作目录已消失",
@@ -304,17 +302,18 @@ export const zhCN = {
     },
     checks: {
       title: "前置条件检查（dry run）",
-      note: "标有短横线的检查会在执行阶段、每次删除之前运行",
+      note: "标有短横线的检查会在每项删除之前重新运行",
       pathCheck: (n: number) =>
         `路径检查通过：非空绝对路径、软链接已解析、不含 .. 组件、均不指向系统目录（${n} 项）`,
       whitelistPassed: "白名单检查通过：没有任何条目命中保护规则",
       whitelistBlocked: (n: number) => `${n} 项命中白名单，已被拦截`,
       duplicateCheck: (n: number) =>
         `重复删除检查通过：${n} 个产物随所属工作树移除，只计一次`,
-      identityNotRun:
-        "目标身份复检（路径、体积、最近修改时间）尚未运行；执行阶段会在删除前运行",
-      activityNotRun:
-        "活动时间复检（计划生成后没有新的写入）尚未运行；执行阶段会在删除前运行"
+      // 每条只说「要看什么」，不再重复「尚未运行」：列表里的短横线已经说明了状态，
+      // `note` 已经说明了时机，两条里各再写一遍就是同一句话说三遍。复检本身是
+      // 实现细节，读者拿它做不了什么决策。
+      identityNotRun: "路径、体积与最近修改时间的复检",
+      activityNotRun: "计划生成之后有没有新的写入"
     },
     channelA: "通道 A · 移除工作树",
     items: (n: number) => `${n} 项`,
