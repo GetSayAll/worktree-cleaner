@@ -141,7 +141,7 @@ a { color: var(--accent); }
    fixed and hands the scrolling to `.content` alone. */
 .app {
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-columns: 208px minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
 }
@@ -635,7 +635,20 @@ a { color: var(--accent); }
 
 /* ---------- detail panel ---------- */
 .detail { background: var(--surface-2); border-top: 1px solid var(--border); }
-.detail__grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); padding: var(--sp-4); }
+/* `minmax(0, 1fr)` on both tracks, and not `1fr`: a grid track defaults to
+   `min-width: auto`, so one long path or one long commit hash — both of which
+   this panel is full of — widens its column past the window and the row runs off
+   the right edge with no way to scroll to it. Zeroing the minimum is what keeps
+   the overflow inside the column, where the path wraps and the hash ellipses. */
+.detail__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-5);
+  padding: var(--sp-4);
+}
+/* The value side of the key/value list: a path or a SHA is one unbreakable run of
+   characters, so it needs somewhere to go when it does not fit. */
+.detail__grid .kv dd { min-width: 0; overflow-wrap: anywhere; }
 
 /* ---------- action bar ---------- */
 .actionbar {
@@ -650,6 +663,13 @@ a { color: var(--accent); }
   border-radius: var(--radius-lg);
   box-shadow: 0 -1px 2px rgba(16, 24, 40, 0.06);
 }
+
+/* Back on the left, forward on the right, summary in the middle — the same three
+   slots on every page, so the buttons are in the same place each time rather than
+   wherever that page's layout left room. */
+.actionbar__side { flex: 0 0 auto; display: flex; gap: var(--sp-2); }
+.actionbar__side--end { margin-left: auto; }
+.actionbar__summary { min-width: 0; flex: 1; text-align: center; }
 
 /* ---------- plan ---------- */
 .plan-item {

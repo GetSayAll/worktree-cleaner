@@ -143,10 +143,16 @@ const logFailure = computed(() => {
     </div>
 
     <div class="actionbar">
-      <span class="muted">{{ messages.result.complete }}</span>
-      <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('history')">{{ messages.result.viewHistory }}</button>
-      <button class="btn btn--primary" @click="goTo('overview')">{{ messages.result.backToOverview }}</button>
+      <div class="actionbar__side">
+        <button class="btn" data-nav-back="plan" @click="goTo('plan')">{{ messages.plan.title }}</button>
+      </div>
+      <span class="actionbar__summary muted">{{ messages.result.complete }}</span>
+      <div class="actionbar__side" style="margin-left: auto">
+        <button class="btn" @click="goTo('history')">{{ messages.result.viewHistory }}</button>
+        <button class="btn btn--primary" @click="goTo('overview')">
+          {{ messages.result.backToOverview }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

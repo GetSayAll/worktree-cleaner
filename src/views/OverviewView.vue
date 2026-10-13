@@ -168,11 +168,20 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
     </div>
 
     <div class="actionbar">
-      <span :class="selectionCount > 0 ? 'muted' : 'faint'">{{ " " + messages.overview.selected(selectionCount) }} <strong>{{ formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 }) }}</strong></span>
-      <span v-if="selectionCount === 0" class="faint tiny">{{ messages.overview.selectHint }}</span>
-      <span style="flex: 1"></span>
-      <button class="btn" :disabled="selectionCount === 0" @click="goTo('worktrees')">{{ messages.overview.adjustSelection }}</button>
-      <button class="btn btn--primary" :disabled="selectionCount === 0" @click="goTo('plan')">{{ messages.overview.generatePlan }}</button>
+      <div class="actionbar__side">
+        <button class="btn" data-nav-back="worktrees" :disabled="selectionCount === 0" @click="goTo('worktrees')">
+          {{ messages.overview.adjustSelection }}
+        </button>
+      </div>
+      <span class="actionbar__summary" :class="selectionCount > 0 ? 'muted' : 'faint'">
+        {{ " " + messages.overview.selected(selectionCount) }} <strong>{{ formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 }) }}</strong>
+        <span v-if="selectionCount === 0" class="faint tiny">{{ messages.overview.selectHint }}</span>
+      </span>
+      <div class="actionbar__side" style="margin-left: auto">
+        <button class="btn btn--primary" :disabled="selectionCount === 0" @click="goTo('plan')">
+          {{ messages.overview.generatePlan }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

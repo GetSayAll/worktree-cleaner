@@ -103,7 +103,8 @@ export const en = {
     elapsed: (clock: string) => `Elapsed ${clock}`,
     cancel: "Cancel",
     liveNote:
-      "The desktop app scans in one pass and reports the whole result when it is done, so there is no per-stage progress to show. The stages below are what the scan checks, not a progress bar.",
+      "The core scans in one call and answers when it is finished, so the step below is an indication that the work is under way rather than a report of where it has reached. The clock and the cancel button stay live throughout.",
+    scanning: "scanning…",
     budgetNote:
       'Each directory probe has a timeout and the whole scan has a total budget; if the budget runs out it honestly reports "scan incomplete" and marks the affected items as "Needs review" instead of filling them in silently.',
     stages: {

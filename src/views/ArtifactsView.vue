@@ -15,7 +15,7 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
-import { compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, shortenPath } from "../format";
+import { compareByActionability, compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, shortenPath } from "../format";
 import { messages } from "../i18n";
 
 const sortMode = ref<"size" | "time">("size");
@@ -41,11 +41,17 @@ const groups = computed(() => {
     return total(b) - total(a);
   });
   return keys.map((key) => {
-    const items = [...(buckets.get(key) ?? [])].sort((a, b) =>
-      sortMode.value === "size"
+    const items = [...(buckets.get(key) ?? [])].sort((a, b) => {
+      // Safe first and largest first, whatever the sort control says — a
+      // "newest" view that buried the removable items under the forbidden ones
+      // was not answering the question the user is on this page to ask. The
+      // control still decides within a level.
+      const byStatus = compareByActionability(a, b);
+      if (byStatus !== 0) return byStatus;
+      return sortMode.value === "size"
         ? compareSizeNullsFirst(a.size_bytes, b.size_bytes)
-        : (b.last_updated_at ?? "").localeCompare(a.last_updated_at ?? "")
-    );
+        : (b.last_updated_at ?? "").localeCompare(a.last_updated_at ?? "");
+    });
     return {
       key,
       label: key === root.value ? messages.common.mainWorktree(shortenPath(key, root.value)) : shortBounded(key),
@@ -180,18 +186,23 @@ function sizeText(item: ArtifactRecord): string {
     </div>
 
     <div class="actionbar">
-      <span class="muted">
+      <div class="actionbar__side">
+        <button class="btn" data-nav-back="worktrees" @click="goTo('worktrees')">
+          {{ messages.artifacts.backToWorktrees }}
+        </button>
+      </div>
+      <span class="actionbar__summary muted">
         {{ " " + messages.artifacts.selectedSummary(selectedSummary.artifacts, selectedSummary.worktrees) }} <strong>{{ formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 }) }}</strong>
       </span>
-      <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('worktrees')">{{ messages.artifacts.backToWorktrees }}</button>
-      <button
-        class="btn btn--primary"
-        :disabled="selectedSummary.worktrees + selectedSummary.artifacts === 0"
-        @click="goTo('plan')"
-      >
-        {{ " " + messages.artifacts.generatePlan + " " }}
-      </button>
+      <div class="actionbar__side" style="margin-left: auto">
+        <button
+          class="btn btn--primary"
+          :disabled="selectedSummary.worktrees + selectedSummary.artifacts === 0"
+          @click="goTo('plan')"
+        >
+          {{ " " + messages.artifacts.generatePlan + " " }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

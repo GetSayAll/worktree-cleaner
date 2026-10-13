@@ -10,6 +10,7 @@ import {
   lastResult,
   projectPath,
   resetToWelcome,
+  scanState,
   selectedSummary,
   snapshot,
   startScan,
@@ -123,16 +124,21 @@ function rescan() {
 
     <main class="main">
       <header class="topbar">
-        <template v-if="hasSnapshot">
+        <!-- The path is shown whenever there is one, including *during* a scan:
+             `projectPath` is set before the scan starts, and a bar that says "no
+             project selected" while the app is visibly scanning that project
+             reads as a bug. The counts and the actions wait for the result. -->
+        <template v-if="projectPath">
           <span class="topbar__path" :title="projectPath">{{ homePath(projectPath) }}</span>
+          <span v-if="scanState.running" class="faint tiny">{{ messages.scan.scanning }}</span>
           <span v-if="isDemoData" class="badge badge--accent">{{ messages.app.sampleData }}</span>
-          <div class="topbar__group">
+          <div v-if="hasSnapshot" class="topbar__group">
             <span class="badge badge--safe">{{ messages.status.short.Safe }} {{ totals.safe }}</span>
             <span class="badge badge--review">{{ messages.status.short.Review }} {{ totals.review }}</span>
             <span class="badge badge--unsafe">{{ messages.status.short.Unsafe }} {{ totals.unsafe }}</span>
           </div>
-          <button class="btn" @click="rescan">{{ messages.common.rescan }}</button>
-          <button class="btn" @click="resetToWelcome">{{ messages.app.switchProject }}</button>
+          <button v-if="hasSnapshot" class="btn" @click="rescan">{{ messages.common.rescan }}</button>
+          <button v-if="hasSnapshot" class="btn" @click="resetToWelcome">{{ messages.app.switchProject }}</button>
         </template>
         <template v-else>
           <span class="topbar__path">{{ messages.app.noProject }}</span>

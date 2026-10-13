@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { compareSizeNullsFirst, formatBytes, formatCount, isUnder } from "./format";
+import {
+  compareByActionability,
+  compareSizeNullsFirst,
+  formatBytes,
+  formatCount,
+  isUnder
+} from "./format";
 import { messages } from "./i18n";
 
 // `size_bytes` is `number | null` since schema version 2: an item whose size
@@ -95,5 +101,31 @@ describe("isUnder", () => {
   it("does not match everything when the root is empty", () => {
     // A snapshot with no root must not make every path look like it is inside one.
     expect(isUnder(root, "")).toBe(false);
+  });
+});
+
+describe("compareByActionability", () => {
+  // The list order answers "where do I start". Keeping the scan's own order
+  // scattered the removable items among the main worktree and the dirty ones, so
+  // finding them meant reading every row.
+  const rec = (status: string) => ({ safety: { status } });
+
+  it("puts the safe ones first, then the ones needing a decision, then the rest", () => {
+    const order = ["Unsafe", "Safe", "Review"].map(rec).sort(compareByActionability);
+    expect(order.map((r) => r.safety.status)).toEqual(["Safe", "Review", "Unsafe"]);
+  });
+
+  it("sorts anything it does not recognise to the end, never to the front", () => {
+    // An unknown level is a level this build does not know about. Putting it
+    // first would offer it as the obvious thing to act on; putting it last keeps
+    // it out of the way until someone reads it.
+    const order = ["?weird", "Safe"].map(rec).sort(compareByActionability);
+    expect(order.map((r) => r.safety.status)).toEqual(["Safe", "?weird"]);
+  });
+
+  it("leaves items of the same level in step with the caller", () => {
+    // Zero, deliberately: the volume ordering is a second pass, composed by the
+    // caller. A non-zero here would fight it.
+    expect(compareByActionability(rec("Safe"), rec("Safe"))).toBe(0);
   });
 });

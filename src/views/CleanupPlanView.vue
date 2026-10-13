@@ -280,20 +280,25 @@ async function copyPlan() {
     </div>
 
     <div class="actionbar">
-      <button class="btn btn--ghost" @click="showExport = !showExport">
-        {{ showExport ? messages.plan.hideExport : messages.plan.exportPlan }}
-      </button>
-      <span class="faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
-      <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('artifacts')">{{ messages.plan.backToAdjust }}</button>
-      <button
-        class="btn btn--danger btn--lg"
-        data-action="run-cleanup"
-        :disabled="!canExecute || executing || !desktop"
-        @click="executeCleanup"
-      >
-        {{ executing ? messages.plan.running : messages.plan.runCleanup }}
-      </button>
+      <div class="actionbar__side">
+        <button class="btn" data-nav-back="artifacts" @click="goTo('artifacts')">
+          {{ messages.plan.backToAdjust }}
+        </button>
+      </div>
+      <span class="actionbar__summary faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
+      <div class="actionbar__side" style="margin-left: auto">
+        <button class="btn" @click="showExport = !showExport">
+          {{ showExport ? messages.plan.hideExport : messages.plan.exportPlan }}
+        </button>
+        <button
+          class="btn btn--danger btn--lg"
+          data-action="run-cleanup"
+          :disabled="!canExecute || executing || !desktop"
+          @click="executeCleanup"
+        >
+          {{ executing ? messages.plan.running : messages.plan.runCleanup }}
+        </button>
+      </div>
     </div>
 
     <p v-if="!desktop" class="notice">{{ messages.preview.notice }}</p>

@@ -19,20 +19,19 @@ const visibleTrace = computed(() =>
  */
 const stages = computed(() => SCAN_STAGES.map((key) => ({ key, ...messages.scan.stages[key] })));
 
-// The desktop app scans in one call, so the stages there describe what is being
-// checked rather than pretending to advance; only the preview, which really does
-// walk the sample snapshot step by step, can highlight a stage.
-const showProgress = computed(() => !desktop);
+// The desktop scan is one call that answers when it is finished, so the stages
+// do not report where the core has reached — they move to show that work is under
+// way. Without them the page showed four dead markers beside a running clock and
+// read as a hang. The `liveNote` on the page says plainly which it is, so the
+// movement is never mistaken for a real progress report.
 
 function stageClass(index: number): string {
-  if (!showProgress.value) return "stage";
   if (index < scanState.stageIndex) return "stage is-done";
   if (index === scanState.stageIndex) return "stage is-active";
   return "stage";
 }
 
 function stageMark(index: number): string {
-  if (!showProgress.value) return "·";
   if (index < scanState.stageIndex) return "✓";
   if (index === scanState.stageIndex) return "●";
   return "○";

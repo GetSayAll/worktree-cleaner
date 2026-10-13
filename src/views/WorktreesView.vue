@@ -13,7 +13,7 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
-import { formatBytes, formatRelTime, displayPath, isUnder } from "../format";
+import { compareByActionability, compareSizeNullsFirst, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
 type FilterKey = "all" | SafetyStatus;
@@ -36,12 +36,29 @@ function isOutsideRoot(path: string): boolean {
   return root.value.length > 0 && !isUnder(path, root.value);
 }
 
+/**
+ * What the list is ordered by, and why.
+ *
+ * Safe first, then the ones that need a decision, then the ones that cannot be
+ * touched — and largest first inside each level. The page used to keep the scan's
+ * own order, which is whatever Git listed: the removable worktrees were scattered
+ * among the main worktree and the dirty ones, and finding the ones worth acting on
+ * meant reading every row. Now the order answers "where do I start" without the
+ * reader sorting anything.
+ */
 const filtered = computed<WorktreeRecord[]>(() => {
   const q = query.value.trim().toLowerCase();
-  return worktrees.value.filter((item) => {
+  const matched = worktrees.value.filter((item) => {
     if (filter.value !== "all" && item.safety.status !== filter.value) return false;
     if (!q) return true;
     return item.path.toLowerCase().includes(q) || (item.branch || "").toLowerCase().includes(q);
+  });
+  // Copied before sorting: `worktrees` is a computed over the snapshot, and
+  // sorting in place would reorder the array the other pages read.
+  return [...matched].sort((a, b) => {
+    const byStatus = compareByActionability(a, b);
+    if (byStatus !== 0) return byStatus;
+    return compareSizeNullsFirst(a.size_bytes, b.size_bytes);
   });
 });
 
@@ -210,19 +227,28 @@ function stateText(item: WorktreeRecord): string {
       </div>
     </div>
 
+    <!-- Two ways forward, because this step is one of two: pick worktrees, then
+         pick artifacts. Both sit on the right so "back" stays on the left on every
+         page, and the shorter hop ("look at the artifacts") is the quiet one. -->
     <div class="actionbar">
-      <span class="muted">
+      <div class="actionbar__side">
+        <button class="btn" data-nav-back="overview" @click="goTo('overview')">
+          {{ messages.nav.overview }}
+        </button>
+      </div>
+      <span class="actionbar__summary muted">
         {{ " " + messages.worktrees.selectedSummary(selectedSummary.worktrees, selectedSummary.artifacts) }} <strong>{{ formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 }) }}</strong>
       </span>
-      <span style="flex: 1"></span>
-      <button class="btn" @click="goTo('artifacts')">{{ messages.worktrees.continueToArtifacts }}</button>
-      <button
-        class="btn btn--primary"
-        :disabled="selectedSummary.worktrees + selectedSummary.artifacts === 0"
-        @click="goTo('plan')"
-      >
-        {{ " " + messages.worktrees.generatePlan + " " }}
-      </button>
+      <div class="actionbar__side" style="margin-left: auto">
+        <button class="btn" @click="goTo('artifacts')">{{ messages.worktrees.continueToArtifacts }}</button>
+        <button
+          class="btn btn--primary"
+          :disabled="selectedSummary.worktrees + selectedSummary.artifacts === 0"
+          @click="goTo('plan')"
+        >
+          {{ " " + messages.worktrees.generatePlan + " " }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

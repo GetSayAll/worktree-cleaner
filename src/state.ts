@@ -219,6 +219,28 @@ function startClock() {
 }
 
 /**
+ * How long each stage is shown before the marker moves on.
+ *
+ * The desktop scan is one call that answers when it is done, so the front end
+ * cannot know which stage the core is in. What it can do is show that the work is
+ * moving: without this the page sat on a dead-looking list while only the clock
+ * advanced, and a user reasonably read that as a hang. The steps are labelled as
+ * an indication of work under way, not as a report of position, and the copy on
+ * the page says so. The walk stops at the last stage, so the marker never runs
+ * past what the scan is doing and then sits there claiming more.
+ */
+const STAGE_INTERVAL_MS = 700;
+
+/** Advances the step marker while a real scan runs. */
+function startStageTimer() {
+  stageTimer = window.setInterval(() => {
+    if (scanState.stageIndex < SCAN_STAGES.length - 1) {
+      scanState.stageIndex += 1;
+    }
+  }, STAGE_INTERVAL_MS);
+}
+
+/**
  * Budget for one Git command.
  *
  * Not a setting: a single hung `git` must not be able to stall a scan or an
@@ -257,8 +279,7 @@ export async function startScan(path: string) {
   acknowledged.value = false;
   confirmText.value = "";
   scanState.stageIndex = 0;
-  scanState.traceLine = 0;
-  scanState.elapsed = 0;
+  scanState.traceLine = 0;  scanState.elapsed = 0;
   scanState.cancelled = false;
   scanState.running = true;
   scanError.value = null;
@@ -269,9 +290,12 @@ export async function startScan(path: string) {
   startClock();
 
   if (!isDesktop()) {
+    // The preview drives the steps itself and finishes on the last one, so it
+    // takes the stage timer over rather than racing a second one for the handle.
     runPreviewScan();
     return;
   }
+  startStageTimer();
 
   try {
     const result = await scanProject(target, scanKnobs());
