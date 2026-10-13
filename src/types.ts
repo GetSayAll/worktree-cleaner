@@ -119,6 +119,13 @@ export interface CleanupPlan {
   trash_moves: TrashMoveItem[];
   excluded_unsafe: number;
   total_bytes: number;
+  /**
+   * How many of the independently deleted items have an unknown size. While this
+   * is above zero, `total_bytes` is a lower bound and the 10 GB confirmation
+   * threshold cannot be evaluated — the UI must say so instead of implying the
+   * total is exact.
+   */
+  total_bytes_unknown: number;
   blockers: string[];
   ack_reasons: string[];
 }
@@ -129,7 +136,8 @@ export interface HistoryEntry {
   target: string;
   reason: string;
   result: "ok" | "skipped" | "failed";
-  size_bytes: number;
+  /** `null` = the size was never measurable; must not collapse to 0. */
+  size_bytes: number | null;
   detail: string;
 }
 
@@ -138,7 +146,8 @@ export interface ResultEntry {
   target: string;
   result: "ok" | "skipped" | "failed";
   detail: string;
-  size_bytes: number;
+  /** `null` = the size was never measurable; must not collapse to 0. */
+  size_bytes: number | null;
 }
 
 export interface Settings {

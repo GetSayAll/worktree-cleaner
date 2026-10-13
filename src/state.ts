@@ -54,7 +54,7 @@ export const selectedWorktrees = ref<string[]>([]);
 export const selectedArtifacts = ref<string[]>([]);
 export const history = ref<HistoryEntry[]>([...mockHistory]);
 export const lastResult = ref<ResultEntry[]>([]);
-export const resultSummary = ref({ freed: 0, trashed: 0, removed: 0, failed: 0 });
+export const resultSummary = ref({ freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 0 });
 export const acknowledged = ref(false);
 export const confirmText = ref("");
 
@@ -159,7 +159,10 @@ export function applyDefaultSelection() {
   selectedWorktrees.value = snap.worktrees.filter((w) => w.safety.status === "Safe").map((w) => w.path);
   selectedArtifacts.value = snap.artifacts
     .filter((a) => a.safety.status === "Safe")
-    .filter((a) => (a.size_bytes ?? 0) >= settings.min_artifact_mb * 1024 * 1024)
+    // An unmeasurable size is not "below the threshold": hiding it would silently
+    // drop an item the user cannot assess (and `visibleArtifacts` keeps it for the
+    // same reason).
+    .filter((a) => a.size_bytes === null || a.size_bytes >= settings.min_artifact_mb * 1024 * 1024)
     .map((a) => a.path);
   // Artifacts inside a worktree that is also selected are removed with it; drop
   // them here so `selectedSummary` and `cleanupPlan` never disagree.
@@ -266,20 +269,22 @@ export const counts = computed(() => ({
 
 export const selectedSummary = computed(() => {
   const snap = snapshot.value;
-  if (!snap) return { worktrees: 0, artifacts: 0, bytes: 0 };
-  const wtBytes = snap.worktrees
-    .filter((w) => selectedWorktrees.value.includes(w.path))
-    .reduce((sum, w) => sum + (w.size_bytes ?? 0), 0);
+  if (!snap) return { worktrees: 0, artifacts: 0, bytes: 0, unknown: 0 };
+  const selectedWts = snap.worktrees.filter((w) => selectedWorktrees.value.includes(w.path));
+  const wtBytes = selectedWts.reduce((sum, w) => sum + (w.size_bytes ?? 0), 0);
+  const wtUnknown = selectedWts.filter((w) => w.size_bytes === null).length;
   // Artifacts removed together with a selected worktree are not counted again:
   // their bytes are already inside the worktree's size.
   const independentArtifacts = snap.artifacts.filter(
     (a) => selectedArtifacts.value.includes(a.path) && bundledOwner(a) === null
   );
   const afBytes = independentArtifacts.reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
+  const afUnknown = independentArtifacts.filter((a) => a.size_bytes === null).length;
   return {
     worktrees: selectedWorktrees.value.length,
     artifacts: independentArtifacts.length,
-    bytes: wtBytes + afBytes
+    bytes: wtBytes + afBytes,
+    unknown: wtUnknown + afUnknown
   };
 });
 
@@ -292,6 +297,7 @@ function buildPlan(): CleanupPlan {
     trash_moves: [],
     excluded_unsafe: 0,
     total_bytes: 0,
+    total_bytes_unknown: 0,
     blockers: [],
     ack_reasons: []
   };
@@ -350,6 +356,12 @@ function buildPlan(): CleanupPlan {
   const total_bytes =
     worktree_removals.reduce((sum, w) => sum + (w.size_bytes ?? 0), 0) +
     independentMoves.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0);
+  // An unknown size contributes nothing to the total, so it must be counted
+  // separately: the total is then a lower bound and the size threshold below
+  // cannot be evaluated.
+  const total_bytes_unknown =
+    worktree_removals.filter((w) => w.size_bytes === null).length +
+    independentMoves.filter((t) => t.size_bytes === null).length;
 
   const ack_reasons: string[] = [];
   const independentItems = worktree_removals.length + independentMoves.length;
@@ -358,11 +370,26 @@ function buildPlan(): CleanupPlan {
     ack_reasons.push(messages.plan.ack.force(forcedItems.length));
   }
   if (independentItems >= 5) ack_reasons.push(messages.plan.ack.count(independentItems));
+  if (total_bytes_unknown > 0) {
+    // With unknown sizes in the plan the total is a lower bound, so the size
+    // threshold below cannot be evaluated — this reason gates the run instead.
+    ack_reasons.push(messages.plan.ack.unmeasurable(total_bytes_unknown));
+  }
   if (total_bytes > 10 * 1024 * 1024 * 1024) {
+    // The *known* part already exceeds the threshold, which is true regardless of
+    // what the unmeasurable items turn out to be.
     ack_reasons.push(messages.plan.ack.size);
   }
 
-  return { worktree_removals, trash_moves, excluded_unsafe, total_bytes, blockers, ack_reasons };
+  return {
+    worktree_removals,
+    trash_moves,
+    excluded_unsafe,
+    total_bytes,
+    total_bytes_unknown,
+    blockers,
+    ack_reasons
+  };
 }
 
 export function executeCleanup() {
@@ -370,6 +397,7 @@ export function executeCleanup() {
   if (plan.worktree_removals.length === 0 && plan.trash_moves.length === 0 && plan.blockers.length === 0) return;
   const entries: ResultEntry[] = [];
   let freed = 0;
+  let freedUnknown = 0;
   let trashed = 0;
   let removed = 0;
   let failed = 0;
@@ -380,9 +408,12 @@ export function executeCleanup() {
       target: item.path,
       result: "ok",
       detail: item.command,
-      size_bytes: item.size_bytes ?? 0
+      // `null` stays `null`: an unmeasurable item must not be reported as 0 B
+      // freed (development contract section 3).
+      size_bytes: item.size_bytes
     });
-    freed += item.size_bytes ?? 0;
+    if (item.size_bytes === null) freedUnknown += 1;
+    else freed += item.size_bytes;
     removed += 1;
   }
 
@@ -393,10 +424,11 @@ export function executeCleanup() {
       target: item.path,
       result: "ok",
       detail: bundled ? messages.result.detail.bundled : messages.result.detail.trashed,
-      size_bytes: bundled ? 0 : item.size_bytes ?? 0
+      size_bytes: bundled ? 0 : item.size_bytes
     });
     if (!bundled) {
-      freed += item.size_bytes ?? 0;
+      if (item.size_bytes === null) freedUnknown += 1;
+      else freed += item.size_bytes;
       trashed += 1;
     }
   }
@@ -440,7 +472,7 @@ export function executeCleanup() {
   history.value = [...newHistory, ...history.value];
 
   lastResult.value = entries;
-  resultSummary.value = { freed, trashed, removed, failed };
+  resultSummary.value = { freed, freed_unknown: freedUnknown, trashed, removed, failed };
   acknowledged.value = false;
   confirmText.value = "";
   view.value = "result";

@@ -55,6 +55,21 @@ export function formatCount(n: number): string {
   return n.toLocaleString("en-US");
 }
 
+/**
+ * Sort comparator for "largest first" lists that keeps an unmeasurable item at
+ * the top instead of burying it at the bottom.
+ *
+ * Treating `null` as `0` would sort an item whose size could not be measured
+ * *below* every measured one — the one item the user cannot assess would be the
+ * hardest to find. Unknown sizes come first; measured sizes follow, descending.
+ */
+export function compareSizeNullsFirst(a: number | null, b: number | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return -1;
+  if (b === null) return 1;
+  return b - a;
+}
+
 export function formatRelTime(iso: string | null): string {
   if (!iso) return messages.common.unknown;
   const diff = Date.now() - new Date(iso).getTime();

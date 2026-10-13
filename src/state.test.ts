@@ -3,6 +3,7 @@ import { mockRoot, mockSnapshot } from "./mock/snapshot";
 import { assess } from "./types";
 import { basename, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
 import { messages } from "./i18n";
+import { primaryReason } from "./state";
 
 // The state module keeps mutable refs at module scope, so every test imports a
 // fresh copy: `vi.resetModules()` clears the registry and the dynamic import below
@@ -24,6 +25,9 @@ const cursorNodeModules = `${cursor}/node_modules`;
 const cursorCoverage = `${cursor}/coverage`;
 const nuxt = `${cursor}/.nuxt`;
 const trackedBuild = `${mockRoot}/crates/remote-mic-core/build`;
+// Safe to delete, but its size walk timed out: `size_bytes` is null and every
+// total that includes it is a lower bound.
+const mainCoverage = `${mockRoot}/coverage`;
 
 const MIN_MB = 10 * 1024 * 1024;
 
@@ -245,5 +249,117 @@ describe("visibleArtifacts", () => {
     // measured" is not the same as "smaller than the threshold".
     expect(paths).toContain(nuxt);
     expect(state.visibleArtifacts.value.find((a) => a.path === nuxt)?.size_bytes).toBeNull();
+  });
+});
+
+describe("an unmeasurable size travels as unknown", () => {
+  it("is selected by default even above the size threshold", async () => {
+    const state = await freshState();
+    state.snapshot.value = mockSnapshot;
+    state.settings.min_artifact_mb = 500;
+    state.applyDefaultSelection();
+
+    // Safe, so selected by default; unmeasurable, so the threshold must not hide
+    // it — a user cannot weigh an item whose size the scan never measured.
+    expect(state.isSelectedArtifact(mainCoverage)).toBe(true);
+  });
+
+  it("is counted separately and keeps every total a lower bound", async () => {
+    const state = await freshState();
+    state.snapshot.value = mockSnapshot;
+    state.settings.whitelist_paths = [];
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [venv, mainCoverage];
+
+    const summary = state.selectedSummary.value;
+    // venv is measured; coverage contributes nothing to the bytes but one to the
+    // unknown count, so the figure is a lower bound.
+    expect(summary.bytes).toBe(214_000_000);
+    expect(summary.unknown).toBe(1);
+
+    const plan = state.cleanupPlan.value;
+    expect(plan.total_bytes).toBe(214_000_000);
+    expect(plan.total_bytes_unknown).toBe(1);
+    // With an unknown size in the plan the 10 GB threshold cannot be evaluated,
+    // so the run is gated on its own reason.
+    expect(plan.ack_reasons).toEqual([messages.plan.ack.unmeasurable(1)]);
+  });
+
+  it("stays null through execution instead of collapsing to zero", async () => {
+    const state = await freshState();
+    state.snapshot.value = mockSnapshot;
+    state.settings.whitelist_paths = [];
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [mainCoverage];
+    state.executeCleanup();
+
+    const entry = state.lastResult.value.find((item) => item.target === mainCoverage);
+    expect(entry?.size_bytes).toBeNull();
+    // "0 B freed" would be a measurement that never happened.
+    expect(state.resultSummary.value.freed).toBe(0);
+    expect(state.resultSummary.value.freed_unknown).toBe(1);
+    // The history entry keeps the same value.
+    expect(state.history.value[0]?.size_bytes).toBeNull();
+  });
+});
+
+describe("group selection and blocked execution", () => {
+  it("refuses Unsafe and bundled items in a group toggle", async () => {
+    const state = await freshState();
+    state.snapshot.value = mockSnapshot;
+    // The owning worktree is selected, so its artifacts are bundled with it.
+    state.selectedWorktrees.value = [codex];
+    state.toggleGroupArtifacts([trackedBuild, `${codex}/target`, venv], true);
+
+    expect(state.isSelectedArtifact(trackedBuild)).toBe(false);
+    expect(state.isSelectedArtifact(`${codex}/target`)).toBe(false);
+    expect(state.isSelectedArtifact(venv)).toBe(true);
+  });
+
+  it("skips a whitelist-blocked item instead of executing it", async () => {
+    const state = await freshState();
+    state.snapshot.value = mockSnapshot;
+    state.settings.whitelist_paths = [venv];
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [venv];
+    state.executeCleanup();
+
+    expect(state.lastResult.value).toHaveLength(1);
+    expect(state.lastResult.value[0]?.result).toBe("skipped");
+    expect(state.lastResult.value[0]?.target).toBe(venv);
+    // Skipped counts toward the failure figure and frees nothing.
+    expect(state.resultSummary.value.failed).toBe(1);
+    expect(state.resultSummary.value.freed).toBe(0);
+  });
+});
+
+describe("primaryReason", () => {
+  it("surfaces the most severe reason", () => {
+    const primary = primaryReason([
+      { code: "wt.clean", severity: "Safe", text: "clean", evidence: "no changes" },
+      { code: "wt.unmerged", severity: "Review", text: "not merged", evidence: "not an ancestor" },
+      { code: "wt.locked", severity: "Unsafe", text: "locked", evidence: "porcelain marks it locked" }
+    ]);
+    expect(primary?.code).toBe("wt.locked");
+  });
+});
+
+describe("canOpen", () => {
+  it("gates each view on the data it needs", async () => {
+    const state = await freshState();
+    expect(state.canOpen("welcome")).toBe(true);
+    expect(state.canOpen("settings")).toBe(true);
+    // Without a scan there is nothing to show; without a run there is no result.
+    expect(state.canOpen("overview")).toBe(false);
+    expect(state.canOpen("result")).toBe(false);
+
+    state.snapshot.value = mockSnapshot;
+    expect(state.canOpen("overview")).toBe(true);
+    expect(state.canOpen("result")).toBe(false);
+
+    state.lastResult.value = [
+      { action: "prune", target: mockRoot, result: "ok", detail: "prune", size_bytes: 0 }
+    ];
+    expect(state.canOpen("result")).toBe(true);
   });
 });

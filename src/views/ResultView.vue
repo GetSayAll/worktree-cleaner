@@ -47,7 +47,12 @@ function openTrash() {
     </div>
 
     <div class="stat-grid stat-grid--4">
-      <StatCard :label="messages.result.stats.spaceFreed" tone="accent" :value="formatBytes(resultSummary.freed)" :sub="messages.result.stats.spaceFreedSub" />
+      <StatCard
+        :label="messages.result.stats.spaceFreed"
+        tone="accent"
+        :value="formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 })"
+        :sub="resultSummary.freed_unknown > 0 ? messages.result.stats.spaceFreedSubUnknown(resultSummary.freed_unknown) : messages.result.stats.spaceFreedSub"
+      />
       <StatCard :label="messages.result.stats.succeeded" tone="safe" value-tone :value="String(okCount)" :sub="messages.result.stats.succeededSub" />
       <StatCard :label="messages.result.stats.movedToTrash" :value="String(resultSummary.trashed)" :sub="messages.result.stats.movedToTrashSub" />
       <StatCard

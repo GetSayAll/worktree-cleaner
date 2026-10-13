@@ -3,23 +3,31 @@ import { computed } from "vue";
 import { artifacts, counts, goTo, primaryReason, selectedSummary, snapshot, worktrees } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import StatCard from "../components/StatCard.vue";
-import { formatBytes, formatCount, formatRelTime, displayPath } from "../format";
+import { compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, displayPath } from "../format";
 import { messages } from "../i18n";
 
 const root = computed(() => snapshot.value?.root ?? "");
 
+// Unknown sizes sort first: an item whose size could not be measured must not be
+// buried at the bottom of a "largest" list (see compareSizeNullsFirst).
 const topWorktrees = computed(() =>
-  [...worktrees.value].sort((a, b) => (b.size_bytes ?? 0) - (a.size_bytes ?? 0)).slice(0, 5)
+  [...worktrees.value].sort((a, b) => compareSizeNullsFirst(a.size_bytes, b.size_bytes)).slice(0, 5)
 );
 
 const topArtifacts = computed(() =>
-  [...artifacts.value].sort((a, b) => (b.size_bytes ?? 0) - (a.size_bytes ?? 0)).slice(0, 5)
+  [...artifacts.value].sort((a, b) => compareSizeNullsFirst(a.size_bytes, b.size_bytes)).slice(0, 5)
 );
 
-const safeBytes = computed(() =>
-  worktrees.value.filter((w) => w.safety.status === "Safe").reduce((sum, w) => sum + (w.size_bytes ?? 0), 0) +
-  artifacts.value.filter((a) => a.safety.status === "Safe").reduce((sum, a) => sum + (a.size_bytes ?? 0), 0)
-);
+const safeBytes = computed(() => {
+  const items = [
+    ...worktrees.value.filter((w) => w.safety.status === "Safe"),
+    ...artifacts.value.filter((a) => a.safety.status === "Safe")
+  ];
+  return {
+    bytes: items.reduce((sum, item) => sum + (item.size_bytes ?? 0), 0),
+    unknown: items.filter((item) => item.size_bytes === null).length
+  };
+});
 
 const reviewCount = computed(() => counts.value.worktree.Review + counts.value.artifact.Review);
 const unsafeCount = computed(() => counts.value.worktree.Unsafe + counts.value.artifact.Unsafe);
@@ -45,7 +53,11 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         tone="safe"
         value-tone
         :value="String(counts.worktree.Safe + counts.artifact.Safe)"
-        :sub="messages.overview.stats.safeSub(formatBytes(safeBytes))"
+        :sub="
+          safeBytes.unknown > 0
+            ? messages.overview.stats.safeSubUnknown(formatBytes(safeBytes.bytes, { approximate: true }), safeBytes.unknown)
+            : messages.overview.stats.safeSub(formatBytes(safeBytes.bytes))
+        "
       />
       <StatCard
         :label="messages.overview.stats.reviewLabel"
@@ -64,9 +76,12 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
       <StatCard
         :label="messages.overview.stats.reclaimableLabel"
         tone="accent"
-        :value="formatBytes(selectedSummary.bytes)"
+        :value="formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 })"
         :sub="messages.overview.stats.reclaimableSub(selectionCount, selectedSummary.worktrees, selectedSummary.artifacts)"
       />
+      <p v-if="selectedSummary.unknown > 0" class="faint tiny">
+        {{ messages.overview.selectedUnknown(selectedSummary.unknown) }}
+      </p>
     </div>
 
     <div v-for="warning in snapshot?.warnings || []" :key="warning" class="banner banner--warn">
@@ -135,7 +150,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
     </div>
 
     <div class="actionbar">
-      <span :class="selectionCount > 0 ? 'muted' : 'faint'">{{ " " + messages.overview.selected(selectionCount) }} <strong>{{ formatBytes(selectedSummary.bytes) }}</strong></span>
+      <span :class="selectionCount > 0 ? 'muted' : 'faint'">{{ " " + messages.overview.selected(selectionCount) }} <strong>{{ formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 }) }}</strong></span>
       <span v-if="selectionCount === 0" class="faint tiny">{{ messages.overview.selectHint }}</span>
       <span style="flex: 1"></span>
       <button class="btn" :disabled="selectionCount === 0" @click="goTo('worktrees')">{{ messages.overview.adjustSelection }}</button>

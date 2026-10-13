@@ -388,6 +388,16 @@ message):
 3. **The Tauri crate is built through the CLI.** A bare `cargo build` links without
    the `custom-protocol` feature, so the window loads `build.devUrl` and shows a
    blank page when no dev server runs. Use `pnpm tauri build` / `pnpm tauri dev`.
+4. **An unmeasurable size stays unknown end to end.** `size_bytes: null` is not
+   "0 B" anywhere: totals that omit it are shown as lower bounds (`≥` prefix plus
+   a count of unmeasurable items), an unmeasurable Safe artifact still passes the
+   display threshold and the default selection, result and history entries keep
+   `null` instead of collapsing it, and a plan containing one gains its own
+   confirmation reason because the 10 GB threshold cannot be evaluated.
+   `src/format.test.ts` pins the formatting, `src/state.test.ts` the selection,
+   plan and execution behaviour, and `src/architecture.test.ts` keeps the safety
+   derivation out of production code and the schema version in step with the
+   Rust core.
 
 **Open**
 

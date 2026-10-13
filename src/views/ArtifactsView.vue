@@ -15,7 +15,7 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
-import { formatBytes, formatCount, formatRelTime, shortenPath } from "../format";
+import { compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, shortenPath } from "../format";
 import { messages } from "../i18n";
 
 const sortMode = ref<"size" | "time">("size");
@@ -31,19 +31,27 @@ const groups = computed(() => {
     list.push(item);
     buckets.set(key, list);
   }
+  // A group holding unmeasurable items sorts first: its total is a lower bound,
+  // and burying the one group the user cannot assess at the bottom of the list
+  // would hide exactly the item that most needs a look (compareSizeNullsFirst).
+  const unknownCount = (key: string) => (buckets.get(key) ?? []).filter((item) => item.size_bytes === null).length;
+  const total = (key: string) => (buckets.get(key) ?? []).reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
   const keys = [...buckets.keys()].sort((a, b) => {
-    const total = (key: string) => (buckets.get(key) ?? []).reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
+    if (unknownCount(a) !== unknownCount(b)) return unknownCount(b) - unknownCount(a);
     return total(b) - total(a);
   });
   return keys.map((key) => {
     const items = [...(buckets.get(key) ?? [])].sort((a, b) =>
-      sortMode.value === "size" ? (b.size_bytes ?? 0) - (a.size_bytes ?? 0) : (b.last_updated_at ?? "").localeCompare(a.last_updated_at ?? "")
+      sortMode.value === "size"
+        ? compareSizeNullsFirst(a.size_bytes, b.size_bytes)
+        : (b.last_updated_at ?? "").localeCompare(a.last_updated_at ?? "")
     );
     return {
       key,
       label: key === root.value ? messages.common.mainWorktree(shortenPath(key, root.value)) : shortBounded(key),
       items,
       bytes: items.reduce((sum, a) => sum + (a.size_bytes ?? 0), 0),
+      unknown: items.filter((a) => a.size_bytes === null).length,
       selectable: items.filter((a) => a.safety.status !== "Unsafe" && bundledOwner(a) === null).map((a) => a.path)
     };
   });
@@ -73,8 +81,11 @@ function gitState(item: ArtifactRecord): string {
   return messages.artifacts.gitUntracked;
 }
 
+// No `approximate` here: formatBytes answers "unknown" for a null size before it
+// ever looks at the prefix, so the flag could not take effect. The row shows
+// "unknown" and the group header carries the "at least" wording instead.
 function sizeText(item: ArtifactRecord): string {
-  return formatBytes(item.size_bytes, { approximate: item.size_bytes === null && item.file_count > 0 });
+  return formatBytes(item.size_bytes);
 }
 </script>
 
@@ -105,7 +116,7 @@ function sizeText(item: ArtifactRecord): string {
         <button class="btn btn--ghost" @click="toggleCollapsed(group.key)">
           <span>{{ isCollapsed(group.key) ? "▸" : "▾" }}</span>
           <span class="group-head__path">{{ group.label }}</span>
-          <span class="faint tiny">{{ messages.artifacts.groupMeta(group.items.length, formatBytes(group.bytes)) }}</span>
+          <span class="faint tiny">{{ messages.artifacts.groupMeta(group.items.length, formatBytes(group.bytes, { approximate: group.unknown > 0 })) }}</span>
         </button>
         <span style="flex: 1"></span>
         <label class="row-wrap tiny faint" style="gap: 6px; padding-right: 12px">
@@ -170,7 +181,7 @@ function sizeText(item: ArtifactRecord): string {
 
     <div class="actionbar">
       <span class="muted">
-        {{ " " + messages.artifacts.selectedSummary(selectedSummary.artifacts, selectedSummary.worktrees) }} <strong>{{ formatBytes(selectedSummary.bytes) }}</strong>
+        {{ " " + messages.artifacts.selectedSummary(selectedSummary.artifacts, selectedSummary.worktrees) }} <strong>{{ formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 }) }}</strong>
       </span>
       <span style="flex: 1"></span>
       <button class="btn" @click="goTo('worktrees')">{{ messages.artifacts.backToWorktrees }}</button>

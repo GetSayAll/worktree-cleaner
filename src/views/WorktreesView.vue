@@ -193,7 +193,7 @@ function stateText(item: WorktreeRecord): string {
 
     <div class="actionbar">
       <span class="muted">
-        {{ " " + messages.worktrees.selectedSummary(selectedSummary.worktrees, selectedSummary.artifacts) }} <strong>{{ formatBytes(selectedSummary.bytes) }}</strong>
+        {{ " " + messages.worktrees.selectedSummary(selectedSummary.worktrees, selectedSummary.artifacts) }} <strong>{{ formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 }) }}</strong>
       </span>
       <span style="flex: 1"></span>
       <button class="btn" @click="goTo('artifacts')">{{ messages.worktrees.continueToArtifacts }}</button>

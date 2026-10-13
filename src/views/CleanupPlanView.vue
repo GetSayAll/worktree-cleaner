@@ -23,6 +23,13 @@ const plan = computed(() => cleanupPlan.value);
 
 const bundledCount = computed(() => plan.value.trash_moves.filter((item) => item.bundled_with_worktree !== null).length);
 const independentMoves = computed(() => plan.value.trash_moves.filter((item) => item.bundled_with_worktree === null));
+// Independent trash moves summed on their own: an unmeasurable item adds nothing
+// to the total, so the header figure is a lower bound and the count of
+// unmeasurable items must travel with it.
+const trashBytes = computed(() => ({
+  bytes: independentMoves.value.reduce((sum, item) => sum + (item.size_bytes ?? 0), 0),
+  unknown: independentMoves.value.filter((item) => item.size_bytes === null).length
+}));
 const forceItems = computed(() => plan.value.worktree_removals.filter((item) => item.force));
 const needsAck = computed(() => plan.value.ack_reasons.length > 0);
 const needsName = computed(() => settings.require_project_name);
@@ -120,7 +127,12 @@ async function copyPlan() {
         :value="`${independentMoves.length}`"
         :sub="messages.plan.stats.moveToTrashSub(bundledCount)"
       />
-      <StatCard :label="messages.plan.stats.reclaimable" tone="accent" :value="formatBytes(plan.total_bytes)" :sub="messages.plan.stats.reclaimableSub" />
+      <StatCard
+        :label="messages.plan.stats.reclaimable"
+        tone="accent"
+        :value="formatBytes(plan.total_bytes, { approximate: plan.total_bytes_unknown > 0 })"
+        :sub="plan.total_bytes_unknown > 0 ? messages.plan.stats.reclaimableSubUnknown(plan.total_bytes_unknown) : messages.plan.stats.reclaimableSub"
+      />
       <StatCard
         :label="messages.plan.stats.autoExcluded"
         tone="unsafe"
@@ -194,7 +206,7 @@ async function copyPlan() {
     <div class="card">
       <div class="card__head">
         <h2>{{ messages.plan.channelB }}</h2>
-        <span class="faint tiny">{{ messages.plan.trashHeader(independentMoves.length, formatBytes(independentMoves.reduce((s, i) => s + (i.size_bytes ?? 0), 0))) }}</span>
+        <span class="faint tiny">{{ messages.plan.trashHeader(independentMoves.length, formatBytes(trashBytes.bytes, { approximate: trashBytes.unknown > 0 })) }}</span>
       </div>
       <div class="card__body card__body--flush">
         <table class="table">

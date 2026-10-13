@@ -98,7 +98,7 @@ export const en = {
     stages: {
       worktrees: {
         label: "Parse Git worktrees",
-        detail: "git worktree list --porcelain"
+        detail: "git worktree list --porcelain -z"
       },
       status: {
         label: "Check each worktree's status",
@@ -148,6 +148,12 @@ export const en = {
     stats: {
       safeLabel: "Safe to delete",
       safeSub: (bytes: string) => `Total ${bytes} · Safe items are selected by default`,
+      // Some Safe items timed out during measurement: their bytes are missing, so
+      // the total is a lower bound and the count of unmeasurable items is stated
+      // rather than silently dropped. The `bytes` argument already carries the
+      // "≥" prefix (formatBytes with approximate), so this text must not repeat it.
+      safeSubUnknown: (bytes: string, unknown: number) =>
+        `${bytes} total · ${unknown} unmeasurable · Safe items are selected by default`,
       reviewLabel: "Needs review",
       reviewSub: "not merged / recently changed / check incomplete",
       unsafeLabel: "Must not delete",
@@ -163,6 +169,10 @@ export const en = {
     largestArtifacts: "Largest build artifacts",
     artifactMeta: (ecosystem: string, files: string) => `${ecosystem} · ${files} files`,
     selected: (n: number) => `Selected ${n} items · Estimated reclaimable`,
+    // Under the reclaimable card: an unmeasurable selection makes the figure a
+    // lower bound, and the user must be able to see that at a glance.
+    selectedUnknown: (n: number) =>
+      `${n} selected items have no measurable size, so the total shown is a lower bound`,
     selectHint: "Select items on the Worktree or Build artifacts page; Safe items are selected by default",
     adjustSelection: "Adjust selection",
     generatePlan: "Generate cleanup plan"
@@ -170,7 +180,7 @@ export const en = {
   worktrees: {
     title: "Worktree",
     dataSource:
-      "Data source: git worktree list --porcelain · status --porcelain=v2 · merge-base --is-ancestor",
+      "Data source: git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
     filterAll: (n: number) => `All ${n}`,
     filterSafe: (n: number) => `Safe to delete ${n}`,
     filterReview: (n: number) => `Needs review ${n}`,
@@ -257,6 +267,10 @@ export const en = {
       moveToTrashSub: (bundled: number) => `plus ${bundled} items removed with their worktree`,
       reclaimable: "Estimated reclaimable",
       reclaimableSub: "based on sizes measured at scan time",
+      // The total omits items whose size could not be measured, so it is a lower
+      // bound; the count keeps that visible instead of implying an exact figure.
+      reclaimableSubUnknown: (n: number) =>
+        `At least the measured sizes · ${n} items have no measurable size`,
       autoExcluded: "Auto-excluded",
       autoExcludedSub: "Must not delete items are excluded from the plan"
     },
@@ -267,7 +281,12 @@ export const en = {
       force: (n: number) =>
         `Includes ${n} worktrees that need --force; their untracked files will be deleted too`,
       count: (n: number) => `This run will process ${n} items, above the 5-item confirmation threshold`,
-      size: "A single run frees more than 10 GB"
+      size: "A single run frees more than 10 GB",
+      // With unmeasurable items in the plan the total is a lower bound, so the
+      // 10 GB threshold above cannot be evaluated: this reason gates the run on
+      // its own instead of guessing.
+      unmeasurable: (n: number) =>
+        `Includes ${n} items whose size could not be measured, so the total is a lower bound and the 10 GB threshold cannot be evaluated`
     },
     checks: {
       title: "Precondition checks (dry run)",
@@ -329,6 +348,10 @@ export const en = {
     stats: {
       spaceFreed: "Space freed",
       spaceFreedSub: "includes Trash moves and worktrees",
+      // Items that could never be measured contribute nothing to `freed`; saying
+      // "at least" keeps the number honest instead of reporting a false total.
+      spaceFreedSubUnknown: (n: number) =>
+        `At least the measured sizes · ${n} items had no measurable size`,
       succeeded: "Succeeded",
       succeededSub: "includes metadata cleanup",
       movedToTrash: "Moved to Trash",
