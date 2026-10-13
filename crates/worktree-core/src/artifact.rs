@@ -642,7 +642,13 @@ fn check_artifact_with_credential_limit(
     } else {
         measure_dir(dir, opts.per_dir_timeout)
     };
-    if measurement.bytes.is_none() && !is_symlink {
+    if measurement.vanished {
+        // Not a timing problem, and saying it was one would send the reader
+        // looking for a slow disk instead of a directory that has to go.
+        warnings.push(format!(
+            "{dir_text} is no longer on disk; it is reported as unmeasurable rather than empty"
+        ));
+    } else if measurement.bytes.is_none() && !is_symlink {
         warnings.push(format!(
             "size measurement of {} did not complete within {}s; the size is recorded as unknown",
             dir_text,
@@ -658,6 +664,12 @@ fn check_artifact_with_credential_limit(
     // handed a 50-file directory an `af.empty` Safe reason the moment its size
     // measurement timed out. "Could not measure" is not "empty" (D3), and the size
     // walk already said so in `size_bytes: null` plus a warning.
+    //
+    // The gate covers all three unmeasurable outcomes, because the walk now
+    // separates them from a walk that really did read an empty directory: a
+    // timeout, a directory that cannot be read, and a directory that is gone.
+    // Only the last of those left `Some(0)` behind, which is why this test existed
+    // and still did not catch it.
     if !is_symlink && measurement.bytes.is_some() && measurement.files == 0 {
         reasons.push(Reason::safe(
             ReasonCode::AfEmpty,
@@ -908,13 +920,21 @@ fn parse_ignore_source(stdout: &str) -> Option<String> {
 /// One size measurement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Measurement {
-    /// `None` = unmeasurable (timeout or an entry-count cap), which must stay
-    /// distinguishable from `0` (development contract section 3).
+    /// `None` = unmeasurable (timeout, an entry-count cap, or a directory that
+    /// could not be read), which must stay distinguishable from `0`
+    /// (development contract section 3).
     pub bytes: Option<u64>,
     /// File count; `0` also covers "not counted", which the UI shows as unknown.
     pub files: u64,
     /// Newest modification time seen, when the walk completed.
     pub newest: Option<SystemTime>,
+    /// The directory itself is gone, as opposed to merely unreadable.
+    ///
+    /// The two are different facts and want different sentences: a vanished
+    /// directory needs nothing doing, an unreadable one needs somebody to fix a
+    /// permission. Reporting either as "0 bytes, 0 files" called it empty, and
+    /// `af.empty` is a Safe verdict — deletable without confirmation.
+    pub vanished: bool,
 }
 
 impl Measurement {
@@ -923,6 +943,21 @@ impl Measurement {
             bytes: None,
             files: 0,
             newest: None,
+            vanished: false,
+        }
+    }
+
+    /// The directory is not on disk any more.
+    ///
+    /// Deliberately not `unknown()`: nothing failed to be read, and calling it a
+    /// timeout would send the reader looking for a slow disk instead of a
+    /// directory they have to decide about.
+    const fn vanished() -> Self {
+        Self {
+            bytes: None,
+            files: 0,
+            newest: None,
+            vanished: true,
         }
     }
 }
@@ -965,8 +1000,21 @@ fn walk_size_with_cap(root: &Path, cap: usize) -> Measurement {
     let mut visited: usize = 0;
 
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(error) => {
+                // The first pop is the root, and whether the root is gone is a
+                // fact about the directory rather than about this walk. `visited`
+                // is still 0 there: nothing has been counted yet.
+                if visited == 0 && error.kind() == std::io::ErrorKind::NotFound {
+                    return Measurement::vanished();
+                }
+                // Everything else — a root that cannot be read, or a child that
+                // disappeared part-way through — leaves the totals a partial sum.
+                // A partial sum reads as a measurement, which is the thing D3
+                // exists to prevent, so the walk ends the way a timeout ends.
+                return Measurement::unknown();
+            }
         };
         for entry in entries.flatten() {
             visited += 1;
@@ -1001,6 +1049,7 @@ fn walk_size_with_cap(root: &Path, cap: usize) -> Measurement {
         bytes: Some(bytes),
         files,
         newest,
+        vanished: false,
     }
 }
 
@@ -2030,6 +2079,140 @@ mod tests {
         assert_eq!(complete.bytes, Some(30));
         assert_eq!(complete.files, 3);
         assert!(complete.newest.is_some());
+    }
+
+    #[test]
+    fn a_directory_that_is_gone_is_vanished_and_not_empty() {
+        // The regression this pins: a missing directory came back as "0 bytes, 0
+        // files", which reads as empty -- and an empty artifact directory is
+        // `af.empty`, a Safe verdict, so it was offered for deletion without
+        // confirmation.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let missing = dir.path().join("gone");
+
+        let measurement = walk_size(&missing);
+        assert_eq!(
+            measurement.bytes, None,
+            "a vanished directory has no size, not a size of zero"
+        );
+        assert_eq!(measurement.files, 0);
+        assert!(
+            measurement.vanished,
+            "the directory is gone, not unreadable"
+        );
+        assert!(measurement.newest.is_none());
+
+        // A directory that really is empty is a different fact, and it keeps its
+        // measurement: "empty" is a verdict the scanner is allowed to act on.
+        let measured = walk_size(dir.path());
+        assert_eq!(measured.bytes, Some(0));
+        assert_eq!(measured.files, 0);
+        assert!(!measured.vanished, "an empty directory is empty, not gone");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_child_that_cannot_be_read_leaves_no_partial_sum() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // The other half of the same bug: a child that fails to read left the
+        // totals a partial sum, and a partial sum reads as a measurement.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let locked = root.join("locked");
+        std::fs::create_dir_all(&locked).expect("create locked");
+        std::fs::write(locked.join("payload.bin"), vec![b'x'; 4096]).expect("write payload");
+        std::fs::write(root.join("readable.txt"), vec![b'r'; 8]).expect("write readable");
+
+        let mode = std::fs::metadata(&locked)
+            .expect("stat")
+            .permissions()
+            .mode();
+        // The mode goes on the child, not on its parent: `read_dir` opens the
+        // directory it is given, so this leaf's own read permission is what the
+        // walk runs into. (A `stat` of a child would instead need the parent's
+        // search permission — see the sibling case in worktree.rs.)
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+        let measurement = walk_size(&root);
+        // Put the mode back, or the temp dir cannot be cleaned up afterwards.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(mode)).expect("restore");
+
+        if measurement.bytes.is_some() {
+            // The walk got through, so the denial never happened — root, or a
+            // filesystem that does not enforce the mode. Nothing to assert here.
+            return;
+        }
+        assert_eq!(
+            measurement.bytes, None,
+            "a partial sum must not pass for a measurement"
+        );
+        assert!(
+            !measurement.vanished,
+            "the directory is there, it just cannot be read"
+        );
+    }
+
+    #[test]
+    fn a_vanished_artifact_is_never_judged_empty() {
+        // End to end, because the Safe verdict is what made the walk's zero
+        // dangerous: an unreadable directory was "empty", and empty is deletable
+        // without confirmation.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let artifact = root.join("node_modules");
+        std::fs::create_dir_all(&artifact).expect("create artifact");
+        std::fs::write(artifact.join("index.js"), b"x").expect("write");
+        std::fs::write(root.join("package.json"), "{}\n").expect("write manifest");
+        // Present when the candidate was collected, gone by the time it is checked.
+        std::fs::remove_dir_all(&artifact).expect("remove artifact");
+
+        let path = artifact.display().to_string();
+        let runner = runner_with(vec![
+            (vec!["ls-files".into(), "--".into(), path.clone()], out("")),
+            (
+                vec![
+                    "check-ignore".into(),
+                    "-v".into(),
+                    "--".into(),
+                    path.clone(),
+                ],
+                ignored(".gitignore:15"),
+            ),
+            (
+                vec![
+                    "status".into(),
+                    "--porcelain".into(),
+                    "--untracked-files=all".into(),
+                    "--".into(),
+                    path,
+                ],
+                out(""),
+            ),
+        ]);
+
+        let (record, warnings) = check_artifact(
+            &runner,
+            &root,
+            &artifact,
+            lookup_kind("node_modules").expect("kind"),
+            &opts(),
+        );
+
+        assert!(
+            !record
+                .safety
+                .reasons
+                .iter()
+                .any(|reason| reason.code == ReasonCode::AfEmpty),
+            "a directory that cannot be measured is not an empty one"
+        );
+        assert_eq!(record.size_bytes, None);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("no longer on disk")),
+            "{warnings:?}"
+        );
     }
 
     #[test]
