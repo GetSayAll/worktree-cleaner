@@ -218,6 +218,14 @@ function startClock() {
   }, 100);
 }
 
+/**
+ * Budget for one Git command.
+ *
+ * Not a setting: a single hung `git` must not be able to stall a scan or an
+ * execution, and the whole run is bounded separately by the scan budget.
+ */
+const GIT_TIMEOUT_MS = 10_000;
+
 /** The scan knobs the core expects, derived from the settings page. */
 function scanKnobs(): ScanOptions {
   return {
@@ -227,9 +235,7 @@ function scanKnobs(): ScanOptions {
     recent_activity_days: settings.active_days,
     untracked_as_unsafe: settings.untracked_is_unsafe,
     whitelist: settings.whitelist_paths,
-    // One Git command is not allowed to hang the scan; the core applies this per
-    // call, and the scan budget above bounds the whole run.
-    git_timeout_ms: 10_000
+    git_timeout_ms: GIT_TIMEOUT_MS
   };
 }
 
@@ -636,6 +642,11 @@ export async function executeCleanup() {
       recent_activity_days: settings.active_days,
       untracked_as_unsafe: settings.untracked_is_unsafe,
       whitelist: settings.whitelist_paths,
+      // The same two budgets the scan used. The re-check measures the very same
+      // directories, so a setting that shaped the scan and was then replaced by a
+      // default here would mean one thing on the way in and another on the way out.
+      per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+      git_timeout_ms: GIT_TIMEOUT_MS,
       // `null` disables the audit log, which the user is then told about.
       log_path: await logPath()
     });

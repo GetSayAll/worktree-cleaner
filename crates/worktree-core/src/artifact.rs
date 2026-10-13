@@ -421,6 +421,19 @@ pub fn check_artifact(
     spec: &ArtifactKind,
     opts: &ArtifactScanOptions,
 ) -> (ArtifactRecord, Vec<String>) {
+    check_artifact_with_credential_limit(runner, root, dir, spec, opts, CREDENTIAL_SCAN_LIMIT)
+}
+
+/// [`check_artifact`] with the credential walk's entry bound as a parameter, so the
+/// truncation branch is reachable from a small fixture.
+fn check_artifact_with_credential_limit(
+    runner: &dyn GitRunner,
+    root: &Path,
+    dir: &Path,
+    spec: &ArtifactKind,
+    opts: &ArtifactScanOptions,
+    credential_limit: usize,
+) -> (ArtifactRecord, Vec<String>) {
     let mut reasons: Vec<Reason> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let dir_text = dir.display().to_string();
@@ -544,18 +557,27 @@ pub fn check_artifact(
     // list, so `git status` reports nothing and the authored-content check cannot fire
     // for exactly the files this is about.
     //
-    // The check walks the directory, bounded — see `credential_in` for what the bound
-    // is for and what happens past it.
+    // The check walks the directory, bounded. Passing the bound is a `Review` with
+    // the count in the evidence rather than a silent pass: a partial walk cannot
+    // claim the directory is clean, but it is not the same as being unable to look
+    // at all, and treating the two alike would leave every large `node_modules`
+    // permanently unverifiable (D3, without turning the tool into noise).
     if !is_symlink {
-        match credential_in(dir) {
-            Ok(Some(name)) => reasons.push(Reason::blocking(
+        match credential_in_with_limit(dir, credential_limit) {
+            CredentialScan::Complete(Some(name)) => reasons.push(Reason::blocking(
                 ReasonCode::AfCredentials,
                 "contains what looks like a credential file",
                 format!("{name} is inside; deleting the directory would delete it too"),
             )),
-            Ok(None) => {}
-            // Failing to look is not evidence of absence (D3).
-            Err(error) => reasons.push(cannot_verify(&format!(
+            CredentialScan::Complete(None) => {}
+            CredentialScan::Truncated { scanned } => reasons.push(Reason::review(
+                ReasonCode::AfCannotVerify,
+                "could not complete the check",
+                format!(
+                    "the credential check stopped after {scanned} entries without covering the whole directory; a credential further inside would not have been found"
+                ),
+            )),
+            CredentialScan::Failed(error) => reasons.push(cannot_verify(&format!(
                 "could not list {dir_text} to check for credentials: {error}"
             ))),
         }
@@ -619,7 +641,13 @@ pub fn check_artifact(
     let last_updated_at = measurement.newest.map(format_rfc3339);
 
     // ---- emptiness ----
-    if !is_symlink && measurement.files == 0 {
+    //
+    // Gated on the measurement having *completed*, not on the file count alone: an
+    // unmeasurable directory also reports `files == 0`, and reading that as "empty"
+    // handed a 50-file directory an `af.empty` Safe reason the moment its size
+    // measurement timed out. "Could not measure" is not "empty" (D3), and the size
+    // walk already said so in `size_bytes: null` plus a warning.
+    if !is_symlink && measurement.bytes.is_some() && measurement.files == 0 {
         reasons.push(Reason::safe(
             ReasonCode::AfEmpty,
             "the directory is empty",
@@ -698,9 +726,31 @@ fn cannot_verify(evidence: &str) -> Reason {
 /// How many entries the credential check looks at before it gives up.
 ///
 /// The bound is what keeps this from becoming a second full walk of a large
-/// `node_modules`. Exceeding it is reported as unverifiable rather than as "nothing
-/// found": failing to look is not evidence of absence (D3).
-const CREDENTIAL_SCAN_LIMIT: usize = 2_000;
+/// `node_modules`, and it has to be high enough to cover a real one: the previous
+/// 2,000 was below the ~5,800 entries this repository's own `node_modules` holds, so
+/// the *most common* artifact kind always ended in `cannot_verify` and the check was
+/// effectively off exactly where a stray `.env` would do the most damage. 50,000
+/// covers ordinary dependency trees while still bounding the work.
+const CREDENTIAL_SCAN_LIMIT: usize = 50_000;
+
+/// The outcome of looking for credential files in a directory.
+#[derive(Debug, PartialEq, Eq)]
+enum CredentialScan {
+    /// The whole directory was walked; `name` is the hit, relative to the directory.
+    Complete(Option<String>),
+    /// The walk hit its entry bound, so the rest of the tree was never looked at.
+    /// `scanned` says how far it got, which is what the user is told.
+    Truncated { scanned: usize },
+    /// A directory could not be read at all. Carries the message rather than the
+    /// `io::Error` itself, so the outcome stays comparable in tests.
+    Failed(String),
+}
+
+/// [`credential_in_with_limit`] at the bound the app ships.
+#[cfg(test)]
+fn credential_in(dir: &Path) -> CredentialScan {
+    credential_in_with_limit(dir, CREDENTIAL_SCAN_LIMIT)
+}
 
 /// A credential-looking entry inside `dir`, named relative to `dir`, if there is one.
 ///
@@ -709,17 +759,28 @@ const CREDENTIAL_SCAN_LIMIT: usize = 2_000;
 /// when the `.env` was written one directory down. Symlinks are not followed
 /// (`DirEntry::metadata` is `lstat`), so the walk cannot leave the directory, and
 /// `.git` is skipped so a nested repository is not walked for nothing.
-fn credential_in(dir: &Path) -> std::io::Result<Option<String>> {
+///
+/// The entry bound is a parameter, so the truncation branch is reachable from a
+/// small fixture — the same reason `walk_size_with_cap` takes its cap. Callers pass
+/// [`CREDENTIAL_SCAN_LIMIT`].
+fn credential_in_with_limit(dir: &Path, limit: usize) -> CredentialScan {
     let mut visited = 0usize;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
-        for entry in std::fs::read_dir(&current)? {
-            let entry = entry?;
+        let entries = match std::fs::read_dir(&current) {
+            Ok(entries) => entries,
+            Err(error) => return CredentialScan::Failed(error.to_string()),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => return CredentialScan::Failed(error.to_string()),
+            };
             visited += 1;
-            if visited > CREDENTIAL_SCAN_LIMIT {
-                return Err(std::io::Error::other(format!(
-                    "the credential check stopped after {CREDENTIAL_SCAN_LIMIT} entries"
-                )));
+            if visited > limit {
+                return CredentialScan::Truncated {
+                    scanned: visited - 1,
+                };
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             if looks_like_credential(&name) {
@@ -730,14 +791,14 @@ fn credential_in(dir: &Path) -> std::io::Result<Option<String>> {
                     // somehow not below the directory it was listed from, and an
                     // absolute path is still something the user can act on.
                     .map_or_else(|_| entry.path(), Path::to_path_buf);
-                return Ok(Some(relative.display().to_string()));
+                return CredentialScan::Complete(Some(relative.display().to_string()));
             }
             if name != ".git" && entry.metadata().is_ok_and(|meta| meta.is_dir()) {
                 stack.push(entry.path());
             }
         }
     }
-    Ok(None)
+    CredentialScan::Complete(None)
 }
 
 /// Whether a file name is one people keep secrets in.
@@ -1110,8 +1171,109 @@ mod tests {
         std::fs::create_dir_all(&nested).expect("create nested");
         std::fs::write(nested.join(".env"), "API_KEY=live\n").expect("write the secret");
 
-        let found = credential_in(dir.path()).expect("a readable directory");
-        assert_eq!(found.as_deref(), Some("left-pad/.env"));
+        assert_eq!(
+            credential_in_with_limit(dir.path(), CREDENTIAL_SCAN_LIMIT),
+            CredentialScan::Complete(Some("left-pad/.env".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_credential_walk_past_its_bound_reports_the_count_instead_of_passing() {
+        // The regression: a real `node_modules` in this repository holds ~5,800
+        // entries, so the old 2,000 bound meant the *most common* artifact kind
+        // always ended in `cannot_verify` — the check was off precisely where a stray
+        // `.env` would do the most damage. Crossing the bound is now its own reported
+        // outcome, and the bound itself is high enough to cover ordinary trees.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        for name in ["a", "b", "c"] {
+            std::fs::write(dir.path().join(name), "x").expect("write");
+        }
+
+        // Under the bound: a completed walk with nothing to report.
+        assert_eq!(
+            credential_in_with_limit(dir.path(), 4),
+            CredentialScan::Complete(None)
+        );
+        // Over the bound: reported as a partial walk, with the count it reached —
+        // never as a clean result.
+        assert_eq!(
+            credential_in_with_limit(dir.path(), 2),
+            CredentialScan::Truncated { scanned: 2 }
+        );
+    }
+
+    #[test]
+    fn the_shipped_credential_bound_covers_a_tree_larger_than_the_old_one() {
+        // Pins the constant itself, which the case above cannot: it passes a limit of
+        // its own, so lowering `CREDENTIAL_SCAN_LIMIT` back to 2,000 would leave it
+        // green while every real `node_modules` became permanently unverifiable.
+        //
+        // The fixture is built at the size that actually caused the problem — past
+        // the old bound — and walked with the limit the app ships.
+        const OLD_BOUND: usize = 2_000;
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        // One directory holding enough entries to pass the old bound, so the walk has
+        // to descend rather than stop at the top level.
+        let many = dir.path().join("node_modules");
+        std::fs::create_dir_all(&many).expect("create");
+        for index in 0..OLD_BOUND + 10 {
+            std::fs::write(many.join(format!("package-{index}")), "x").expect("write");
+        }
+
+        // With the old bound this tree was cut short and reported as unverifiable.
+        assert_eq!(
+            credential_in_with_limit(dir.path(), OLD_BOUND),
+            CredentialScan::Truncated { scanned: OLD_BOUND }
+        );
+        // With the shipped bound the very same tree is walked whole.
+        assert_eq!(
+            credential_in(dir.path()),
+            CredentialScan::Complete(None),
+            "the shipped bound must cover a node_modules larger than the old one"
+        );
+    }
+
+    #[test]
+    fn a_credential_beyond_the_bound_is_a_review_not_a_silent_pass() {
+        // The verdict side of the bound: a partial walk cannot claim the directory is
+        // clean, but it is not the same as being unable to look at all. Treating the
+        // two alike left every large artifact permanently unverifiable.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let artifact = root.join("node_modules");
+        std::fs::create_dir_all(&artifact).expect("create artifact");
+        for index in 0..50 {
+            std::fs::write(artifact.join(format!("f{index}.txt")), vec![b'x'; 8]).expect("write");
+        }
+        std::fs::write(root.join("package.json"), "{}\n").expect("write manifest");
+        let p = artifact.display().to_string();
+        let runner = runner_with(vec![
+            (vec!["ls-files".into(), "--".into(), p.clone()], out("")),
+            (
+                vec!["check-ignore".into(), "-v".into(), "--".into(), p],
+                ignored(".gitignore:1"),
+            ),
+        ]);
+        let (record, _warnings) = check_artifact_with_credential_limit(
+            &runner,
+            &root,
+            &artifact,
+            lookup_kind("node_modules").expect("kind"),
+            &opts(),
+            10,
+        );
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::AfCannotVerify)
+            .expect("cannot_verify reason");
+        assert!(
+            reason.evidence.contains("stopped after 10 entries"),
+            "{}",
+            reason.evidence
+        );
     }
 
     #[test]
@@ -1159,6 +1321,54 @@ mod tests {
             .reasons
             .iter()
             .any(|reason| reason.code == ReasonCode::AfCredentials));
+    }
+
+    #[test]
+    fn an_unmeasurable_directory_is_never_reported_as_empty() {
+        // The regression: `Measurement::unknown()` carries `files: 0`, so the
+        // emptiness check read a size timeout as proof that the directory held
+        // nothing, and stamped `af.empty` — a **Safe** reason — onto a directory
+        // full of files whose contents nobody had looked at. The probe that found it
+        // wrote 50 files and set the timeout to zero.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let artifact = root.join("coverage");
+        std::fs::create_dir_all(&artifact).expect("create artifact");
+        for index in 0..50 {
+            std::fs::write(artifact.join(format!("f{index}.txt")), vec![b'x'; 8]).expect("write");
+        }
+        std::fs::write(root.join("package.json"), "{}\n").expect("write manifest");
+        let p = artifact.display().to_string();
+        let runner = runner_with(vec![
+            (vec!["ls-files".into(), "--".into(), p.clone()], out("")),
+            (
+                vec!["check-ignore".into(), "-v".into(), "--".into(), p],
+                ignored(".gitignore:1"),
+            ),
+        ]);
+        let mut options = opts();
+        options.per_dir_timeout = Duration::from_nanos(0);
+        let (record, warnings) = check_artifact(
+            &runner,
+            &root,
+            &artifact,
+            lookup_kind("coverage").expect("kind"),
+            &options,
+        );
+
+        assert_eq!(record.size_bytes, None, "the size stays unknown");
+        assert!(
+            !record
+                .safety
+                .reasons
+                .iter()
+                .any(|reason| reason.code == ReasonCode::AfEmpty),
+            "a directory that could not be measured must not claim to be empty: {:?}",
+            record.safety.reasons
+        );
+        // The warning is what tells the user the size is unknown.
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("size measurement"), "{}", warnings[0]);
     }
 
     #[test]
@@ -1701,8 +1911,17 @@ mod tests {
         );
         assert_eq!(record.file_count, 0);
         // The Git facts still stand: the verdict stays Safe and only the size is
-        // unknown, with a warning that says so.
+        // unknown, with a warning that says so. It is *not* also reported as empty —
+        // the walk never finished, so nobody knows what is in there.
         assert_eq!(record.safety.status, SafetyStatus::Safe);
+        assert!(
+            !record
+                .safety
+                .reasons
+                .iter()
+                .any(|reason| reason.code == ReasonCode::AfEmpty),
+            "an unfinished walk cannot establish emptiness"
+        );
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("size measurement"), "{}", warnings[0]);
     }

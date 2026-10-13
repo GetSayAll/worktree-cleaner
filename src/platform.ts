@@ -61,6 +61,10 @@ export interface ExecuteKnobs {
   recent_activity_days: number;
   untracked_as_unsafe: boolean;
   whitelist: string[];
+  /** Budget for one size measurement during the re-check, in milliseconds. */
+  per_dir_timeout_ms: number;
+  /** Budget for one Git command during the re-check, in milliseconds. */
+  git_timeout_ms: number;
   /** `null` disables the audit log. */
   log_path: string | null;
 }

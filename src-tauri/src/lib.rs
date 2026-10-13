@@ -15,6 +15,7 @@
 //! blocking pool rather than on an async worker.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Deserialize;
 use worktree_core::cleanup::{execute_plan as core_execute, ExecuteOptions, ExecutionOutcome};
@@ -52,6 +53,14 @@ struct ExecuteRequest {
     recent_activity_days: u32,
     untracked_as_unsafe: bool,
     whitelist: Vec<String>,
+    /// Budget for one directory size measurement during the re-check, in
+    /// milliseconds. It travels from the settings page rather than being taken from
+    /// `ExecuteOptions::default()`: the scan and the re-check measure the same
+    /// directories, so honouring one setting and ignoring it in the other would make
+    /// the same knob mean two different things in one run.
+    per_dir_timeout_ms: u64,
+    /// Budget for one Git command during the re-check, in milliseconds.
+    git_timeout_ms: u64,
     /// Where to append the audit log; `null` disables logging.
     log_path: Option<String>,
 }
@@ -64,6 +73,11 @@ async fn execute_plan(request: ExecuteRequest) -> Result<ExecutionOutcome, Strin
             recent_activity_days: request.recent_activity_days,
             untracked_as_unsafe: request.untracked_as_unsafe,
             whitelist: request.whitelist,
+            // `max(1)`: a zero budget would make every measurement time out before it
+            // starts, which reads as "unmeasurable" rather than as the setting the
+            // user chose. The same guard the scan path applies.
+            per_dir_timeout: Duration::from_millis(request.per_dir_timeout_ms.max(1)),
+            git_timeout: Duration::from_millis(request.git_timeout_ms.max(1)),
             log_path: request.log_path.map(PathBuf::from),
             ..ExecuteOptions::default()
         };

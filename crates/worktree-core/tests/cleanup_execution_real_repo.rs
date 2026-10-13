@@ -70,6 +70,16 @@ fn repo_with_a_safe_worktree(name: &str) -> (Repo, PathBuf, String) {
     let linked = repo.add_worktree("wt-removable", "removable/x");
     repo.git_in(&linked, &["branch", "--set-upstream-to=main"]);
 
+    // A build directory inside the linked worktree as well: an artifact that belongs
+    // to a worktree that can actually be removed. The one in the main worktree can
+    // never be swept up with anything, because the main worktree is never removed.
+    std::fs::create_dir_all(linked.join("node_modules/left-pad")).expect("create modules");
+    std::fs::write(
+        linked.join("node_modules/left-pad/index.js"),
+        format!("// {marker}\nmodule.exports = 1;\n"),
+    )
+    .expect("write module");
+
     backdate_tree(&repo.root, 30);
     backdate_tree(&linked, 30);
     (repo, linked, marker)
@@ -98,6 +108,51 @@ fn ignored_modules(snapshot: &ProjectSnapshot) -> &worktree_core::ArtifactRecord
             artifact.path.ends_with("node_modules") && artifact.git_ignored == Some(true)
         })
         .expect("the ignored node_modules is reported")
+}
+
+/// The ignored `node_modules` **inside the linked worktree**, as opposed to the one
+/// in the main worktree. Only this one can be swept up by a worktree removal.
+///
+/// Matched on the path ending in `<worktree-name>/node_modules` rather than on
+/// `worktree_path`: macOS reports the worktree as `/var/...` while the scan reports
+/// artifacts under `/private/var/...`, and the two are one directory.
+fn ignored_modules_in<'a>(
+    snapshot: &'a ProjectSnapshot,
+    worktree: &Path,
+) -> &'a worktree_core::ArtifactRecord {
+    let needle = format!(
+        "/{}/node_modules",
+        worktree.file_name().expect("a name").to_string_lossy()
+    );
+    snapshot
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.path.ends_with(&needle) && artifact.git_ignored == Some(true))
+        .unwrap_or_else(|| {
+            panic!(
+                "no ignored node_modules at {needle}; artifacts were {:?}",
+                snapshot
+                    .artifacts
+                    .iter()
+                    .map(|a| a.path.as_str())
+                    .collect::<Vec<_>>()
+            )
+        })
+}
+
+/// The removable linked worktree's path **as the scan reported it**.
+///
+/// The executor looks the removal up in the snapshot and matches a bundled artifact's
+/// owner against what it removed, so both must use this spelling. It is not always the
+/// same as the fixture's own path: on macOS `Repo` builds the worktree under `/var`,
+/// which is a symlink to `/private/var`, and `git worktree list` may report either.
+fn snapshot_worktree_path(snapshot: &ProjectSnapshot) -> String {
+    snapshot
+        .worktrees
+        .iter()
+        .find(|w| !w.is_main)
+        .map(|w| w.path.clone())
+        .expect("the linked worktree is in the scan result")
 }
 
 fn plan_removing(path: &str) -> CleanupPlan {
@@ -353,12 +408,73 @@ fn an_ignored_artifact_is_moved_to_the_system_trash() {
 
 #[test]
 fn a_bundled_artifact_is_not_deleted_a_second_time() {
-    let (repo, _linked, marker) = repo_with_a_safe_worktree("bundled");
+    let (repo, linked, marker) = repo_with_a_safe_worktree("bundled");
     let snapshot = scan(&repo);
-    let artifact = ignored_modules(&snapshot);
+    // The artifact inside the linked worktree: this one really can go away with it.
+    let artifact = ignored_modules_in(&snapshot, &linked);
 
     // The owning worktree is selected too, so the artifact disappears with it;
-    // a second operation would be a double delete.
+    // a second operation would be a double delete. The plan has to actually remove
+    // that worktree: reporting the artifact as swept up with a removal that did not
+    // happen is what this test now pins down.
+    let mut plan = plan_removing(&snapshot_worktree_path(&snapshot));
+    plan.trash_moves = vec![TrashMoveItem {
+        kind: PlanItemKind::Artifact,
+        path: artifact.path.clone(),
+        artifact_kind: artifact.kind.clone(),
+        size_bytes: artifact.size_bytes,
+        file_count: artifact.file_count,
+        // The worktree's path as the scan reported it, which is the spelling the
+        // executor will match the removal result against. macOS reports `/var/...`
+        // for the worktree and `/private/var/...` for what is inside it, so the two
+        // are compared against the record rather than against the fixture's own path.
+        bundled_with_worktree: Some(snapshot_worktree_path(&snapshot)),
+    }];
+    let outcome = execute_plan(&plan, &snapshot, &options_without_log());
+
+    // The worktree removal itself succeeded, and that is the fact the artifact's row
+    // is reported against.
+    let removed = outcome
+        .entries
+        .iter()
+        .find(|entry| entry.target == snapshot_worktree_path(&snapshot))
+        .expect("the worktree has a row");
+    assert_eq!(removed.result, ExecutionResult::Ok, "{:?}", outcome.entries);
+
+    let bundled = outcome
+        .entries
+        .iter()
+        .find(|entry| entry.target == artifact.path)
+        .expect("the bundled artifact has a row");
+    assert_eq!(bundled.result, ExecutionResult::Ok, "{bundled:?}");
+    assert!(
+        bundled.detail.contains("no separate operation"),
+        "{bundled:?}"
+    );
+    assert!(
+        !Path::new(&artifact.path).exists(),
+        "the artifact went with its worktree"
+    );
+    assert!(!linked.exists(), "the worktree is gone");
+    if trash_inspectable() {
+        assert!(
+            purge_marked_from_trash("node_modules", &marker).is_empty(),
+            "the artifact must not be moved to the Trash a second time"
+        );
+    }
+}
+
+#[test]
+fn a_bundled_artifact_is_not_claimed_as_removed_when_its_worktree_stays() {
+    // The other half, and the reason the one above has to remove the worktree for
+    // real: a plan that names an owning worktree but does not remove it must not
+    // report the artifact as deleted. The audit log would otherwise record a
+    // deletion that never happened.
+    let (repo, linked, marker) = repo_with_a_safe_worktree("bundled-orphan");
+    let snapshot = scan(&repo);
+    let artifact = ignored_modules_in(&snapshot, &linked);
+
+    // The owning worktree is *not* in this plan, so nothing removed it.
     let plan = CleanupPlan {
         trash_moves: vec![TrashMoveItem {
             kind: PlanItemKind::Artifact,
@@ -366,30 +482,38 @@ fn a_bundled_artifact_is_not_deleted_a_second_time() {
             artifact_kind: artifact.kind.clone(),
             size_bytes: artifact.size_bytes,
             file_count: artifact.file_count,
-            bundled_with_worktree: Some(snapshot.root.clone()),
+            bundled_with_worktree: Some(snapshot_worktree_path(&snapshot)),
         }],
         ..CleanupPlan::default()
     };
     let outcome = execute_plan(&plan, &snapshot, &options_without_log());
 
     assert_eq!(outcome.entries.len(), 1, "{:?}", outcome.entries);
-    assert_eq!(outcome.entries[0].result, ExecutionResult::Ok);
+    let entry = &outcome.entries[0];
+    // What matters is *how* it is accounted for. Reporting "removed together with its
+    // owning worktree" would put a deletion in the audit log that never happened —
+    // the worktree is still on disk. The artifact instead goes through the Trash on
+    // its own, which is what actually happens to it and what the log must say.
     assert!(
-        outcome.entries[0].detail.contains("no separate operation"),
-        "{:?}",
-        outcome.entries[0]
+        !entry.detail.contains("no separate operation"),
+        "the owning worktree was never removed, so the artifact cannot be reported as swept up with it: {entry:?}"
     );
-    let target = Path::new(&artifact.path);
     assert!(
-        target.exists(),
-        "the artifact is left for the worktree removal"
+        linked.exists(),
+        "the worktree was never in the plan, so it is still there"
     );
-    assert!(target.join("left-pad/index.js").exists());
-    if trash_inspectable() {
+    if entry.detail.contains("moved to the system Trash") {
         assert!(
-            purge_marked_from_trash("node_modules", &marker).is_empty(),
-            "nothing was moved to the Trash"
+            !Path::new(&artifact.path).exists(),
+            "it really went to the Trash"
         );
+        if trash_inspectable() {
+            let _ = purge_marked_from_trash("node_modules", &marker);
+        }
+    } else {
+        // Re-check refused it (it is not Safe any more): then it stays on disk, and
+        // that is the honest outcome rather than a claimed deletion.
+        assert!(Path::new(&artifact.path).exists(), "{entry:?}");
     }
 }
 

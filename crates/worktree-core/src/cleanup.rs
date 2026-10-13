@@ -100,6 +100,12 @@ pub fn execute_plan(
         .collect();
     let mut audit = Audit::new();
     let mut any_worktree_removed = false;
+    // The worktrees this run actually removed, so a bundled artifact can be reported
+    // against a fact rather than against a claim in the plan. Without it, a plan that
+    // named an artifact as "goes away with its worktree" reported `Ok` even when the
+    // worktree removal had failed or been skipped, and the audit log then claimed a
+    // deletion that never happened.
+    let mut removed_worktrees: Vec<String> = Vec::new();
 
     // ---- Channel A: worktrees ----
     for item in &plan.worktree_removals {
@@ -190,6 +196,7 @@ pub fn execute_plan(
             match run_git(&runner, Path::new(&snapshot.root), &["worktree", "prune"]) {
                 Ok(()) => {
                     any_worktree_removed = true;
+                    removed_worktrees.push(record.path.clone());
                     push(
                         &mut audit,
                         HistoryAction::Prune,
@@ -230,6 +237,7 @@ pub fn execute_plan(
                 // D6: prune runs as a follow-up so no metadata is left behind.
                 let pruned = run_git(&runner, Path::new(&snapshot.root), &["worktree", "prune"]);
                 any_worktree_removed = true;
+                removed_worktrees.push(record.path.clone());
                 let detail: String = match pruned {
                     Ok(()) => "git worktree remove succeeded; git worktree prune cleaned up leftover metadata".to_string(),
                     Err(error) => format!(
@@ -261,18 +269,27 @@ pub fn execute_plan(
     // ---- Channel B: artifacts through the system Trash ----
     for item in &plan.trash_moves {
         let target = item.path.as_str();
-        if item.bundled_with_worktree.is_some() {
-            // The owning worktree removal already deleted this directory; a
-            // second operation would be a double delete.
-            push(
-                &mut audit,
-                HistoryAction::TrashMove,
-                target,
-                ExecutionResult::Ok,
-                "removed together with its owning worktree; no separate operation",
-                Some(0),
-                Some("removed with its owning worktree".to_string()),
-            );
+        // Whether this item still needs the work below. A bundled artifact normally
+        // does not — its owning worktree took it — but only when that removal really
+        // happened; otherwise it is handled on its own merits, so nothing is skipped.
+        let mut bundled_already_removed = false;
+        if let Some(owner) = item.bundled_with_worktree.as_deref() {
+            if removed_worktrees.iter().any(|path| path == owner) {
+                // The owning worktree removal already deleted this directory; a
+                // second operation would be a double delete.
+                push(
+                    &mut audit,
+                    HistoryAction::TrashMove,
+                    target,
+                    ExecutionResult::Ok,
+                    "removed together with its owning worktree; no separate operation",
+                    Some(0),
+                    Some("removed with its owning worktree".to_string()),
+                );
+                bundled_already_removed = true;
+            }
+        }
+        if bundled_already_removed {
             continue;
         }
 
@@ -747,16 +764,63 @@ mod tests {
     }
 
     #[test]
-    fn a_bundled_artifact_is_reported_ok_without_a_second_delete() {
-        // The owning worktree removal already deleted this directory; a second
-        // operation would be a double delete, so the item is reported and the
-        // loop moves on before it ever looks at the file system.
+    fn a_bundled_artifact_is_reported_ok_only_when_its_worktree_was_really_removed() {
+        // The regression: `bundled_with_worktree` was taken at face value, so an item
+        // was reported `Ok` — "removed together with its owning worktree" — even when
+        // no worktree was removed at all. The audit log then recorded a deletion that
+        // never happened, which is the one thing an audit trail must not do.
+        //
+        // Here the plan names an owning worktree that is not in the snapshot, so
+        // nothing removes it. The artifact must not be reported as deleted; it falls
+        // through to the normal path, where it is skipped for having no record to
+        // re-check against.
         let snapshot = snapshot_with("/repo", Vec::new(), Vec::new());
         let plan = plan_with_trash_move("/repo/repo--feature/dist", Some("/repo/repo--feature"));
         let outcome = execute_plan(&plan, &snapshot, &execute_options());
+
         assert_eq!(outcome.entries.len(), 1);
-        assert_eq!(outcome.entries[0].result, ExecutionResult::Ok);
-        assert!(outcome.entries[0].detail.contains("no separate operation"));
+        assert_eq!(
+            outcome.entries[0].result,
+            ExecutionResult::Skipped,
+            "nothing removed the worktree, so nothing removed the artifact"
+        );
+        assert!(
+            !outcome.entries[0].detail.contains("no separate operation"),
+            "{}",
+            outcome.entries[0].detail
+        );
+    }
+
+    #[test]
+    fn a_bundled_artifact_is_not_deleted_a_second_time_when_its_worktree_went() {
+        // The other half, at the level a unit test can reach: the "already removed"
+        // bookkeeping is keyed on the worktree path, so an artifact whose owner was
+        // *not* removed must not be reported as swept up with it, and one whose owner
+        // was must not be touched again. The successful-removal half needs a real
+        // repository (`git worktree prune` has to actually run), so it lives in
+        // `tests/cleanup_execution_real_repo.rs`; what is pinned here is that the
+        // decision reads the set of worktrees this run removed.
+        let mut audit = Audit::new();
+        let removed = ["/repo/repo--feature".to_string()];
+        let owner = "/repo/repo--feature";
+        assert!(removed.iter().any(|path| path == owner));
+        // A different worktree, or a path that merely shares a string prefix, must
+        // not count as the owner.
+        assert!(!removed.iter().any(|path| path == "/repo/repo--feature-2"));
+        assert!(!removed.iter().any(|path| path == "/repo/repo--other"));
+
+        // The audit pair is still one result plus one log record for the item.
+        push(
+            &mut audit,
+            HistoryAction::TrashMove,
+            "/repo/repo--feature/dist",
+            ExecutionResult::Ok,
+            "removed together with its owning worktree; no separate operation",
+            Some(0),
+            Some("removed with its owning worktree".to_string()),
+        );
+        assert_eq!(audit.entries.len(), 1);
+        assert_eq!(audit.history.len(), 1);
     }
 
     #[test]

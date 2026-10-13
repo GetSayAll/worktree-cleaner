@@ -604,6 +604,34 @@ Rejected:
 **P-5** had already landed before this review, in the commit that wired the desktop
 shell to the real scanner and the real executor.
 
+A second review pass on 2026-10-12, over the whole of the accumulated work, found four
+defects. Each was reproduced before it was fixed, and each fix is pinned by a test that
+was checked to fail without the fix:
+
+- **An unmeasurable directory claimed to be empty.** `Measurement::unknown()` carries a
+  file count of zero, so the emptiness check read a size timeout as proof that a
+  directory held nothing and stamped `af.empty` — a **Safe** reason — onto it. A
+  fifty-file directory whose measurement timed out was reported as empty. Emptiness is
+  now gated on the measurement having completed, which is the section 3 rule applied to
+  a field it had not reached.
+- **The credential check was off where it mattered most.** Its entry bound was 2,000,
+  while this repository's own `node_modules` holds about 5,800 entries, so the most
+  common artifact kind always ended in `cannot_verify` — a `Review` on nearly every
+  `node_modules`, which is how a check stops being read. The bound is now 50,000, and
+  crossing it is reported as a partial walk with the count it reached instead of as
+  either "nothing found" or "unable to look at all".
+- **A bundled artifact was reported as deleted when it was not.** `bundled_with_worktree`
+  was taken at face value, so an item was logged `Ok` — "removed together with its
+  owning worktree" — even when no worktree was removed at all. The audit log recorded
+  deletions that never happened, which is the one thing an audit trail must not do. The
+  decision now reads the set of worktrees the run actually removed, and an artifact
+  whose owner stayed is handled on its own merits.
+- **The desktop shell discarded the execution settings.** `execute_plan` filled
+  `ExecuteOptions` from `Default`, so the per-directory measurement budget the user set
+  governed the scan and was then replaced by a hard-coded 30 s during execution. Both
+  budgets now travel from the front end, and the scan and the re-check measure the same
+  directories with the same numbers.
+
 **Open**
 
 1. **How to verify the Windows Recycle Bin path**: D16 requires separate verification
@@ -618,9 +646,12 @@ shell to the real scanner and the real executor.
    `af.credentials` code. The open question was whether to widen
    `af.authored_content`'s evidence instead, and the answer is no: credentials are
    usually Git-*ignored*, so the untracked-content check cannot fire for them and the
-   two conditions are genuinely different. What the new check does not cover, and
-   what stays open here: a secret whose name gives nothing away (`config.json` holding
-   an API key) and one nested below the directory rather than sitting in it.
+   two conditions are genuinely different. The walk also descends: an integration test
+   found that a `.env` written one directory below the candidate — the ordinary case —
+   was missed by a check that only read the top level, so the check now recurses under
+   a fixed entry bound and reports crossing that bound as `Review` rather than as a
+   pass. What stays open: a secret whose name gives nothing away (`config.json` holding
+   an API key).
 5. **The one thing the automated checks cannot reach.** Driving the native folder
    picker, the system Trash and `git worktree remove` in the packaged app needs a
    human at the keyboard: the checks in this repository can dock the window and

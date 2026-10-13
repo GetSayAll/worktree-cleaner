@@ -295,12 +295,12 @@ Decision table:
 | `af.git_tracked` | files tracked by git exist in the directory | Unsafe | `N files committed to the repository, not a pure artifact` |
 | `af.nested_git` | a nested `.git` exists in the directory | Unsafe | `the directory contains a standalone repository` |
 | `af.authored_content` | a directory with a generic name such as `dist/` holds files that are neither tracked nor ignored | Unsafe | `N files inside are neither tracked by Git nor ignored; they look like authored content` |
-| `af.credentials` | a credential-looking file (`.env`, `id_rsa`, `*.pem`, `credentials.json`, …) sits directly inside the directory | Unsafe | `<file name> is inside; deleting the directory would delete it too` |
+| `af.credentials` | a credential-looking file (`.env`, `id_rsa`, `*.pem`, `credentials.json`, …) sits anywhere inside the directory, at any depth | Unsafe | `<relative path> is inside; deleting the directory would delete it too` |
 | `af.symlink_outside` | the directory is a symlink and points outside the project root | Unsafe | `points to <target path>` |
 | `af.whitelisted` | matches the whitelist | Unsafe | `matches whitelist: <rule>` |
 | `af.recent_activity` | a write occurred within the recent activity days | Review | `last activity: 3 days ago` |
-| `af.cannot_verify` | a Git call failed, or the size computation or directory listing did not complete | Review | `could not complete the check` |
-| `af.empty` | the directory contains no files | Safe (positive) | `it contains no files` |
+| `af.cannot_verify` | a Git call failed, or the size computation or directory listing did not complete, or the credential walk hit its entry bound | Review | `could not complete the check` |
+| `af.empty` | the directory contains no files **and the size measurement completed** — an unmeasurable directory also reports a file count of zero, and "could not measure" is not "empty" | Safe (positive) | `it contains no files` |
 | `af.git_ignored` | the directory as a whole is ignored by gitignore | Safe (positive) | `ignored by .gitignore` |
 | `af.rebuildable` | matches a known rebuildable artifact type | Safe (positive) | `can be rebuilt via npm install / cargo build` |
 
@@ -309,6 +309,8 @@ The necessary and sufficient condition for **Safe**: matches a rebuildable type,
 **Key counterexample (must be written into the tests)**: a directory named `build/` must never be deleted if it contains files tracked by git — some projects commit build artifacts into the repository, so deleting it is losing source code. An artifact name is only a "candidate", not a "criterion."
 
 Also: the artifact directory itself must never be treated as a "project root" and expanded for scanning. Treating `node_modules` as a project root would delete the package's internal `dist/`, leaving a state where "npm thinks the dependency tree is intact but the package is actually broken", and recovery requires re-installing over the network. This must be hard-excluded in worktree boundary detection.
+
+**The credential walk is bounded, and the bound is a review rather than a pass.** The check descends into the directory rather than reading only its top level, because a secret is as ordinary in `config/` as in the directory itself. A large `node_modules` is tens of thousands of entries, so the walk stops at a fixed entry count (50,000, comfortably above an ordinary dependency tree). Crossing that bound produces `af.cannot_verify` at `Review` with the count it reached, and never "nothing found": a partial walk has not established that the directory is clean. The bound must stay high enough to cover a real dependency tree — set it too low and the check silently stops protecting the single directory kind it matters most for.
 
 ### 5.3 Fail closed
 
