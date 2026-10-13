@@ -16,7 +16,9 @@ const blockerPrefix = "Blocked by whitelist protection: ";
 export const en = {
   app: {
     name: "Worktree Cleaner",
-    tagline: "Safe cleanup audit",
+    // Intentionally blank until the tagline is decided. The key stays so that
+    // landing the copy later is a one-line edit and nothing else has to move.
+    tagline: "",
     readOnlyNote:
       "The scan phase runs only read-only Git commands; deletions always go to the system Trash and are never permanent.",
     versionNote: "v0.1.0",
@@ -132,7 +134,7 @@ export const en = {
     eyebrow: "Worktree Cleaner",
     title: "Project cleanup audit",
     lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted. Scanning is read-only by default; deletions always go to the system Trash.",
-    pathPlaceholder: "/Users/andy/MySrc/your-repo",
+    pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "Choose folder",
     chooseFolderTitle: "Open the system folder picker",
     chooseFolderUnavailable:
@@ -290,7 +292,7 @@ export const en = {
   },
   plan: {
     title: "Cleanup plan",
-    lede: "Review each item before executing; this page only describes what will happen and has not performed any operation yet.",
+    lede: "Review each item before executing; this page only describes what will happen — nothing has been executed yet.",
     backToAdjustSelection: "Back to adjust selection",
     stats: {
       removeWorktree: "Remove Worktree",
@@ -312,13 +314,19 @@ export const en = {
     ack: {
       force: (n: number) =>
         `Includes ${n} worktrees that need --force; their untracked files will be deleted too`,
-      count: (n: number) => `This run will process ${n} items, above the 5-item confirmation threshold`,
-      size: "A single run frees more than 10 GB",
+      // The thresholds are arguments rather than literals: the plan code owns
+      // them (ACK_COUNT_THRESHOLD / ACK_SIZE_THRESHOLD_BYTES) and passes them in,
+      // so the numbers a reader sees cannot drift from the numbers the code
+      // actually enforces. The size limit arrives already formatted, so the unit
+      // follows the active language.
+      count: (n: number, threshold: number) =>
+        `This run will process ${n} items, above the ${threshold}-item confirmation threshold`,
+      size: (limit: string) => `A single run frees more than ${limit}`,
       // With unmeasurable items in the plan the total is a lower bound, so the
-      // 10 GB threshold above cannot be evaluated: this reason gates the run on
+      // size threshold above cannot be evaluated: this reason gates the run on
       // its own instead of guessing.
-      unmeasurable: (n: number) =>
-        `Includes ${n} items whose size could not be measured, so the total is a lower bound and the 10 GB threshold cannot be evaluated`
+      unmeasurable: (n: number, limit: string) =>
+        `Includes ${n} items whose size could not be measured, so the total is a lower bound and the ${limit} threshold cannot be evaluated`
     },
     checks: {
       title: "Precondition checks (dry run)",
@@ -480,7 +488,7 @@ export const en = {
       "When enabled, the project directory name must be typed by hand before cleanup",
     logsTitle: "Logs, language and appearance",
     operationLog: "Operation log",
-    operationLogHint: (n: number) => `Written locally and never online. ${n} records so far.`,
+    operationLogHint: (n: number) => `Written locally and never uploaded. ${n} records so far.`,
     operationLogUnknown: "This platform has no log directory to report.",
     openDirectory: "Open directory",
     clearLog: "Clear log",
@@ -493,7 +501,8 @@ export const en = {
       zhCN: "简体中文"
     },
     appearance: "Appearance",
-    appearanceHint: "System follows light/dark mode on macOS / Windows automatically",
+    appearanceHint:
+      '"Follow system" automatically follows the light and dark modes of macOS / Windows',
     system: "System",
     light: "Light",
     dark: "Dark",

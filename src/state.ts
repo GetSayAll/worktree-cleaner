@@ -15,7 +15,7 @@ import type {
 } from "./types";
 import { SEVERITY_RANK } from "./types";
 import { applyLocale, messages, watchSystemLocale } from "./i18n";
-import { pathMatchesRule } from "./format";
+import { formatBytes, pathMatchesRule } from "./format";
 import { executePlan, isDesktop, logPath, readHistory, scanProject } from "./platform";
 import { mockHistory, mockSnapshot, scanTrace } from "./mock/snapshot";
 
@@ -523,6 +523,17 @@ export const blockedPaths = computed<string[]>(() => {
   );
 });
 
+/**
+ * High-risk confirmation thresholds (D13).
+ *
+ * This is the only place these numbers are written down. The confirmation
+ * reasons are localized, so they receive the thresholds as arguments rather
+ * than repeating them: a translation cannot quote a stale "5 items" or
+ * "10 GB" while the code is enforcing something else.
+ */
+export const ACK_COUNT_THRESHOLD = 5;
+export const ACK_SIZE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024;
+
 export const cleanupPlan = computed<CleanupPlan>(() => buildPlan());
 
 function buildPlan(): CleanupPlan {
@@ -606,19 +617,24 @@ function buildPlan(): CleanupPlan {
   const ack_reasons: string[] = [];
   const independentItems = worktree_removals.length + independentMoves.length;
   const forcedItems = worktree_removals.filter((w) => w.force);
+  // Formatted here so the localized copy can quote a limit without knowing the
+  // unit, and so the unit follows the active language.
+  const sizeLimit = formatBytes(ACK_SIZE_THRESHOLD_BYTES);
   if (forcedItems.length > 0) {
     ack_reasons.push(messages.plan.ack.force(forcedItems.length));
   }
-  if (independentItems >= 5) ack_reasons.push(messages.plan.ack.count(independentItems));
+  if (independentItems >= ACK_COUNT_THRESHOLD) {
+    ack_reasons.push(messages.plan.ack.count(independentItems, ACK_COUNT_THRESHOLD));
+  }
   if (total_bytes_unknown > 0) {
     // With unknown sizes in the plan the total is a lower bound, so the size
     // threshold below cannot be evaluated — this reason gates the run instead.
-    ack_reasons.push(messages.plan.ack.unmeasurable(total_bytes_unknown));
+    ack_reasons.push(messages.plan.ack.unmeasurable(total_bytes_unknown, sizeLimit));
   }
-  if (total_bytes > 10 * 1024 * 1024 * 1024) {
+  if (total_bytes > ACK_SIZE_THRESHOLD_BYTES) {
     // The *known* part already exceeds the threshold, which is true regardless of
     // what the unmeasurable items turn out to be.
-    ack_reasons.push(messages.plan.ack.size);
+    ack_reasons.push(messages.plan.ack.size(sizeLimit));
   }
 
   return {

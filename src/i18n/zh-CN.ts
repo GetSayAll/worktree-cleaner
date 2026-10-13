@@ -13,7 +13,9 @@ const blockerPrefix = "被白名单保护规则拦截：";
 export const zhCN = {
   app: {
     name: "Worktree Cleaner",
-    tagline: "工作树清理安全审计",
+    // 暂时留空，等口号定下来。键先留着：文案落地时只需改这一处，别的地方
+    // （侧栏布局、两表一致性测试）都不用动。
+    tagline: "",
     readOnlyNote:
       "扫描阶段只运行只读 Git 命令；删除一律进系统回收站，不会永久删除。",
     versionNote: "v0.1.0",
@@ -127,7 +129,7 @@ export const zhCN = {
     eyebrow: "Worktree Cleaner",
     title: "项目清理审计",
     lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删。扫描默认只读；删除一律进系统回收站。",
-    pathPlaceholder: "/Users/andy/MySrc/your-repo",
+    pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
     chooseFolderUnavailable: "文件夹选择器只在桌面应用里可用，请直接输入路径",
@@ -301,12 +303,17 @@ export const zhCN = {
     ack: {
       force: (n: number) =>
         `包含 ${n} 个需要 --force 的工作树，它们的未跟踪文件也会被删除`,
-      count: (n: number) => `本次将处理 ${n} 项，超过 5 项的确认阈值`,
-      size: "单次释放超过 10 GB",
-      // 计划里存在无法测量的条目时，合计只是下界，上面的 10 GB 阈值无法判定：
+      // 阈值一律由参数传入，不在文案里写死：数字的唯一定义处在 state.ts
+      // （ACK_COUNT_THRESHOLD / ACK_SIZE_THRESHOLD_BYTES），并由调用方传入，
+      // 用户读到的数字和代码实际判断的数字因此不可能对不上。体积上限传的是
+      // 格式化好的字符串，单位跟着当前语言走。
+      count: (n: number, threshold: number) =>
+        `本次将处理 ${n} 项，超过 ${threshold} 项的确认阈值`,
+      size: (limit: string) => `单次释放超过 ${limit}`,
+      // 计划里存在无法测量的条目时，合计只是下界，上面的体积阈值无法判定：
       // 这条理由独立拦一道，而不是猜。
-      unmeasurable: (n: number) =>
-        `包含 ${n} 项无法测量体积，合计只是下界，10 GB 阈值无法判定`
+      unmeasurable: (n: number, limit: string) =>
+        `包含 ${n} 项无法测量体积，合计只是下界，${limit} 阈值无法判定`
     },
     checks: {
       title: "前置条件检查（dry run）",

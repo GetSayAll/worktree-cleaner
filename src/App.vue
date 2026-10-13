@@ -97,7 +97,7 @@ function rescan() {
     <aside class="sidebar">
       <div class="brand">
         <div class="brand__name">{{ messages.app.name }}</div>
-        <div class="brand__sub">{{ messages.app.tagline }}</div>
+        <div v-if="messages.app.tagline" class="brand__sub">{{ messages.app.tagline }}</div>
       </div>
 
       <nav class="nav">

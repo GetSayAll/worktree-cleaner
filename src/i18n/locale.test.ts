@@ -56,6 +56,11 @@ describe("message tables", () => {
   beforeEach(() => applyLocale(SOURCE_LOCALE));
   afterEach(() => vi.unstubAllGlobals());
 
+  // `app.tagline` is blank on purpose — the copy is undecided — and the key is kept
+  // so that landing it later touches nothing else. Every other key still has to
+  // carry text, so an accidental empty string anywhere keeps failing this test.
+  const blankByDesign = new Set(["app.tagline"]);
+
   it("ships every locale as a table with the same shape as the source", () => {
     const sourcePaths = leafPaths(en).sort();
     expect(sourcePaths.length).toBeGreaterThan(100);
@@ -86,6 +91,7 @@ describe("message tables", () => {
         let node: unknown = table;
         for (const part of parts) node = (node as Record<string, unknown>)[part];
         if (typeof node !== "string") continue;
+        if (blankByDesign.has(path)) continue;
         // `enDash`/`units.atLeast` are punctuation and spaces on purpose.
         expect(node.length, `${locale}.${path} is empty`).toBeGreaterThan(0);
       }
