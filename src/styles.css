@@ -84,12 +84,16 @@
 
 * { box-sizing: border-box; }
 
-html, body, #app { height: 100%; }
+/* The window is the frame, and only its content area scrolls. The app is a fixed
+   layout — sidebar beside a scrolling pane — so the page itself has nothing to
+   scroll: a document-level scrollbar would drag the sidebar and the top bar off
+   with it. `overflow: hidden` is what keeps the shell anchored. */
+html, body, #app { height: 100%; overflow: hidden; }
 
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.55;
   color: var(--text);
   background: var(--bg);
@@ -97,14 +101,23 @@ body {
 }
 
 h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
-h1 { font-size: 22px; }
-h2 { font-size: 17px; }
-h3 { font-size: 14px; }
+h1 { font-size: 24px; }
+h2 { font-size: 19px; }
+h3 { font-size: 15px; }
 p { margin: 0; }
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--accent); }
 
-.app { display: grid; grid-template-columns: 246px 1fr; height: 100%; }
+/* `minmax(0, 1fr)` rather than `1fr`: a grid track defaults to `min-height: auto`,
+   which lets a long page push the row taller than the window and brings the
+   document-level scrolling back. Zeroing the minimum is what keeps the shell
+   fixed and hands the scrolling to `.content` alone. */
+.app {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
 
 /* ---------- sidebar ---------- */
 .sidebar {
@@ -114,20 +127,27 @@ a { color: var(--accent); }
   flex-direction: column;
   padding: 16px 12px;
   gap: 20px;
+  /* The nav is the long list here. It scrolls inside the column rather than
+     stretching the column, which would push the whole shell past the window. */
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .brand { padding: 0 8px; }
-.brand__name { font-size: 14px; font-weight: 600; }
-.brand__sub { color: var(--text-3); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+.brand__name { font-size: 16px; font-weight: 600; }
+.brand__sub { color: var(--text-3); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
 
 .nav { display: flex; flex-direction: column; gap: 2px; }
 
+/* The sidebar carries a single word per row and nothing else to look at, so it
+   reads at a size above the body's. A label that has to be hunted for costs more
+   here than it would in a paragraph. */
 .nav__item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 10px 10px;
   border-radius: var(--radius-sm);
   border: 0;
   background: transparent;
@@ -135,6 +155,8 @@ a { color: var(--accent); }
   cursor: pointer;
   text-align: left;
   width: 100%;
+  font-size: 15.5px;
+  line-height: 1.4;
 }
 .nav__item:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
 .nav__item.is-active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
@@ -142,16 +164,19 @@ a { color: var(--accent); }
 
 .nav__count {
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-3);
 }
 .nav__item.is-active .nav__count { color: var(--accent); }
 
 .sidebar__foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
-.sidebar__note { color: var(--text-3); font-size: 12px; padding: 0 8px; line-height: 1.5; }
+.sidebar__note { color: var(--text-3); font-size: 13.5px; padding: 0 8px; line-height: 1.5; }
 
 /* ---------- main ---------- */
-.main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+/* `min-height: 0` for the same reason as the grid track above: a flex item
+   defaults to `min-height: auto` and refuses to shrink below its content, which
+   is exactly what would make the page taller than the window. */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 
 .topbar {
   display: flex;
@@ -165,7 +190,7 @@ a { color: var(--accent); }
 
 .topbar__path {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -176,7 +201,9 @@ a { color: var(--accent); }
 
 .topbar__group { display: flex; align-items: center; gap: 8px; }
 
-.content { flex: 1; overflow-y: auto; padding: 24px; }
+/* The one place that scrolls. `min-height: 0` lets this actually shrink below
+   its content, which is what turns the flex child above into the scroll container. */
+.content { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 24px; }
 .content--narrow { max-width: 820px; margin: 0 auto; width: 100%; }
 .stack { display: flex; flex-direction: column; gap: 16px; }
 .stack--tight { gap: 10px; }
@@ -184,8 +211,8 @@ a { color: var(--accent); }
 .row-wrap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .muted { color: var(--text-2); }
 .faint { color: var(--text-3); }
-.mono { font-family: var(--mono); font-size: 13px; }
-.tiny { font-size: 12px; }
+.mono { font-family: var(--mono); font-size: 14px; }
+.tiny { font-size: 13px; }
 .nowrap { white-space: nowrap; }
 .numeric { font-variant-numeric: tabular-nums; }
 
@@ -228,9 +255,9 @@ a { color: var(--accent); }
 .stat--review { border-left: 3px solid var(--review); }
 .stat--unsafe { border-left: 3px solid var(--unsafe); }
 .stat--accent { border-left: 3px solid var(--accent); }
-.stat__label { color: var(--text-2); font-size: 13px; }
+.stat__label { color: var(--text-2); font-size: 14px; }
 .stat__value { font-size: 28px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-.stat__sub { color: var(--text-3); font-size: 12px; }
+.stat__sub { color: var(--text-3); font-size: 13px; }
 .stat__value--safe { color: var(--safe); }
 .stat__value--review { color: var(--review); }
 .stat__value--unsafe { color: var(--unsafe); }
@@ -242,7 +269,7 @@ a { color: var(--accent); }
   gap: 5px;
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   border: 1px solid transparent;
   white-space: nowrap;
@@ -260,7 +287,7 @@ a { color: var(--accent); }
 
 .chip {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   padding: 1px 6px;
   border-radius: var(--radius-sm);
   background: var(--surface-3);
@@ -290,7 +317,7 @@ a { color: var(--accent); }
   color: var(--text);
   cursor: pointer;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 14px;
 }
 .btn:hover:not(:disabled) { background: var(--surface-3); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -300,13 +327,13 @@ a { color: var(--accent); }
 .btn--danger:hover:not(:disabled) { filter: brightness(1.08); background: var(--unsafe); }
 .btn--ghost { border-color: transparent; background: transparent; color: var(--text-2); }
 .btn--ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
-.btn--lg { height: 40px; padding: 0 18px; font-size: 14px; }
+.btn--lg { height: 42px; padding: 0 18px; font-size: 15px; }
 .btn--link { border: 0; background: none; color: var(--accent); padding: 0; height: auto; }
 
 /* ---------- form ---------- */
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field__label { font-size: 13px; color: var(--text-2); }
-.field__hint { font-size: 12px; color: var(--text-3); }
+.field__label { font-size: 14px; color: var(--text-2); }
+.field__hint { font-size: 13px; color: var(--text-3); }
 
 .input, .select {
   height: 36px;
@@ -317,7 +344,7 @@ a { color: var(--accent); }
   width: 100%;
 }
 .input:focus, .select:focus { outline: 2px solid var(--accent-border); outline-offset: 0; border-color: var(--accent); }
-.input--mono { font-family: var(--mono); font-size: 13px; }
+.input--mono { font-family: var(--mono); font-size: 14px; }
 .input--sm { height: 30px; }
 .textarea {
   min-height: 88px;
@@ -326,7 +353,7 @@ a { color: var(--accent); }
   border: 1px solid var(--border-strong);
   background: var(--surface);
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 14px;
   width: 100%;
   resize: vertical;
 }
@@ -401,7 +428,7 @@ a { color: var(--accent); }
 .table { width: 100%; border-collapse: collapse; }
 .table th {
   text-align: left;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-3);
   padding: 8px 12px;
@@ -430,7 +457,7 @@ a { color: var(--accent); }
   text-align: left;
   color: var(--text);
 }
-.group-head__path { font-family: var(--mono); font-size: 13px; }
+.group-head__path { font-family: var(--mono); font-size: 14px; }
 
 /* ---------- reasons ---------- */
 .reasons { display: flex; flex-direction: column; gap: 6px; }
@@ -442,11 +469,11 @@ a { color: var(--accent); }
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-2);
-  font-size: 13px;
+  font-size: 14px;
 }
 .reason__mark { flex-shrink: 0; margin-top: 3px; }
 .reason__text { color: var(--text); display: block; }
-.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: 12px; margin-top: 2px; display: block; }
+.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: 13px; margin-top: 2px; display: block; }
 .reason--safe { border-color: var(--safe-border); background: var(--safe-bg); }
 .reason--review { border-color: var(--review-border); background: var(--review-bg); }
 .reason--unsafe { border-color: var(--unsafe-border); background: var(--unsafe-bg); }
@@ -460,7 +487,7 @@ a { color: var(--accent); }
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface-2);
-  font-size: 13px;
+  font-size: 14px;
 }
 .banner--warn { border-color: var(--review-border); background: var(--review-bg); color: var(--review); }
 .banner--danger { border-color: var(--unsafe-border); background: var(--unsafe-bg); color: var(--unsafe); }
@@ -469,7 +496,7 @@ a { color: var(--accent); }
 
 .code {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 14px;
   background: var(--surface-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -479,7 +506,7 @@ a { color: var(--accent); }
   color: var(--text);
 }
 
-.kv { display: grid; grid-template-columns: 132px 1fr; gap: 5px 12px; font-size: 13px; }
+.kv { display: grid; grid-template-columns: 148px 1fr; gap: 6px 12px; font-size: 14px; }
 .kv dt { color: var(--text-3); }
 .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
 
@@ -487,7 +514,7 @@ a { color: var(--accent); }
   padding: 40px 20px;
   text-align: center;
   color: var(--text-3);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .divider { height: 1px; background: var(--border); border: 0; margin: 0; }
@@ -495,7 +522,7 @@ a { color: var(--accent); }
 /* ---------- welcome ---------- */
 .welcome { max-width: 760px; margin: 0 auto; padding: 56px 24px 32px; display: flex; flex-direction: column; gap: 24px; }
 .welcome__hero { display: flex; flex-direction: column; gap: 8px; }
-.welcome__title { font-size: 30px; letter-spacing: -0.03em; }
+.welcome__title { font-size: 32px; letter-spacing: -0.03em; }
 .welcome__lede { color: var(--text-2); max-width: 60ch; }
 .dropzone {
   border: 1px dashed var(--border-strong);
@@ -515,8 +542,8 @@ a { color: var(--accent); }
   border-radius: var(--radius);
   padding: 12px 14px;
 }
-.promise__k { font-weight: 600; font-size: 13px; margin-bottom: 3px; }
-.promise__v { color: var(--text-3); font-size: 12px; line-height: 1.5; }
+.promise__k { font-weight: 600; font-size: 14px; margin-bottom: 3px; }
+.promise__v { color: var(--text-3); font-size: 13px; line-height: 1.5; }
 
 .recent-list { display: flex; flex-direction: column; gap: 6px; }
 .recent {
@@ -532,7 +559,7 @@ a { color: var(--accent); }
   cursor: pointer;
 }
 .recent:hover { border-color: var(--accent-border); background: var(--accent-weak); }
-.recent__path { font-family: var(--mono); font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent__path { font-family: var(--mono); font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- scanning ---------- */
 .scan { max-width: 620px; margin: 0 auto; padding: 48px 24px; display: flex; flex-direction: column; gap: 20px; }
@@ -540,15 +567,15 @@ a { color: var(--accent); }
 .stage { display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px; border-radius: var(--radius-sm); }
 .stage.is-active { background: var(--accent-weak); }
 .stage.is-done { color: var(--text-2); }
-.stage__mark { width: 16px; flex-shrink: 0; text-align: center; font-size: 13px; color: var(--text-3); }
+.stage__mark { width: 16px; flex-shrink: 0; text-align: center; font-size: 14px; color: var(--text-3); }
 .stage.is-done .stage__mark { color: var(--safe); }
 .stage.is-active .stage__mark { color: var(--accent); }
 .stage__label { font-weight: 500; }
-.stage__detail { color: var(--text-3); font-size: 12px; font-family: var(--mono); }
+.stage__detail { color: var(--text-3); font-size: 13px; font-family: var(--mono); }
 
 .trace {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-3);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -594,7 +621,7 @@ a { color: var(--accent); }
 .plan-item__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .untracked-list {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-2);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -606,13 +633,13 @@ a { color: var(--accent); }
 .untracked-list div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .gate { display: flex; flex-direction: column; gap: 5px; }
-.gate__item { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+.gate__item { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
 .gate__mark { flex-shrink: 0; width: 14px; text-align: center; }
 .gate__mark--ok { color: var(--safe); }
 .gate__mark--bad { color: var(--unsafe); }
 
 /* ---------- result ---------- */
-.outcome { font-size: 13px; font-weight: 500; }
+.outcome { font-size: 14px; font-weight: 500; }
 .outcome--ok { color: var(--safe); }
 .outcome--skipped { color: var(--review); }
 .outcome--failed { color: var(--unsafe); }
@@ -621,30 +648,33 @@ a { color: var(--accent); }
 .timeline { display: flex; flex-direction: column; }
 .timeline__row { display: flex; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--border); }
 .timeline__row:last-child { border-bottom: 0; }
-.timeline__time { width: 118px; flex-shrink: 0; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.timeline__time { width: 128px; flex-shrink: 0; color: var(--text-3); font-size: 13px; font-variant-numeric: tabular-nums; }
 .timeline__body { flex: 1; min-width: 0; }
 
 /* ---------- settings ---------- */
 .setting-row { display: flex; gap: 16px; align-items: flex-start; padding: 13px 16px; border-bottom: 1px solid var(--border); }
 .setting-row:last-child { border-bottom: 0; }
-.setting-row__label { width: 200px; flex-shrink: 0; }
-.setting-row__name { font-weight: 500; }
-.setting-row__hint { color: var(--text-3); font-size: 12px; line-height: 1.45; }
+.setting-row__label { width: 216px; flex-shrink: 0; }
+.setting-row__name { font-weight: 500; font-size: 14.5px; }
+.setting-row__hint { color: var(--text-3); font-size: 13px; line-height: 1.5; }
 .setting-row__control { flex: 1; min-width: 0; }
 .setting-row__control--narrow { max-width: 320px; }
 
 @media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; }
+  /* `minmax(0, 1fr)` for the same reason as above — a bare `1fr` would reset the
+     track's minimum to `auto` and let a long page scroll the document again. */
+  .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
   .stat-grid, .stat-grid--4, .promise-grid, .detail__grid { grid-template-columns: 1fr; }
 }
 
 /* ---------- scrolling ---------- */
 
-/* Every page still scrolls; only the scrollbar's own strip goes away. On macOS
-   it overlays the content, and on Windows it takes width from a window that is
-   already narrow. The wheel, the trackpad and the keyboard are untouched: this
-   hides an indicator, not the ability to scroll. */
+/* The window does not scroll; `.content` and the sidebar do. What this hides is
+   only the scrollbar's own strip: on macOS it overlays the content, and on Windows
+   it takes width from a window that is already narrow. The wheel, the trackpad and
+   the keyboard are untouched — this removes an indicator, not the ability to
+   scroll. */
 * {
   scrollbar-width: none;
 }
