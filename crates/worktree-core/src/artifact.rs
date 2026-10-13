@@ -537,6 +537,30 @@ pub fn check_artifact(
         }
     }
 
+    // ---- credentials: deleting this would take the keys with it ----
+    //
+    // Checked before `authored_content`, because the files it looks for are usually
+    // *ignored* by Git: `.env` and `id_rsa` are the entries a `.gitignore` exists to
+    // list, so `git status` reports nothing and the authored-content check cannot fire
+    // for exactly the files this is about.
+    //
+    // The check walks the directory, bounded — see `credential_in` for what the bound
+    // is for and what happens past it.
+    if !is_symlink {
+        match credential_in(dir) {
+            Ok(Some(name)) => reasons.push(Reason::blocking(
+                ReasonCode::AfCredentials,
+                "contains what looks like a credential file",
+                format!("{name} is inside; deleting the directory would delete it too"),
+            )),
+            Ok(None) => {}
+            // Failing to look is not evidence of absence (D3).
+            Err(error) => reasons.push(cannot_verify(&format!(
+                "could not list {dir_text} to check for credentials: {error}"
+            ))),
+        }
+    }
+
     // ---- authored content: a generic name holding hand-written files ----
     if spec.generic_name && !is_symlink && git_tracked != Some(true) {
         match runner.run(
@@ -669,6 +693,110 @@ fn cannot_verify(evidence: &str) -> Reason {
         "could not complete the check",
         evidence.to_string(),
     )
+}
+
+/// How many entries the credential check looks at before it gives up.
+///
+/// The bound is what keeps this from becoming a second full walk of a large
+/// `node_modules`. Exceeding it is reported as unverifiable rather than as "nothing
+/// found": failing to look is not evidence of absence (D3).
+const CREDENTIAL_SCAN_LIMIT: usize = 2_000;
+
+/// A credential-looking entry inside `dir`, named relative to `dir`, if there is one.
+///
+/// Walks rather than looking only at the top level: a secret is as likely to sit in
+/// `config/` as in the directory itself, and the integration test found exactly that
+/// when the `.env` was written one directory down. Symlinks are not followed
+/// (`DirEntry::metadata` is `lstat`), so the walk cannot leave the directory, and
+/// `.git` is skipped so a nested repository is not walked for nothing.
+fn credential_in(dir: &Path) -> std::io::Result<Option<String>> {
+    let mut visited = 0usize;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        for entry in std::fs::read_dir(&current)? {
+            let entry = entry?;
+            visited += 1;
+            if visited > CREDENTIAL_SCAN_LIMIT {
+                return Err(std::io::Error::other(format!(
+                    "the credential check stopped after {CREDENTIAL_SCAN_LIMIT} entries"
+                )));
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if looks_like_credential(&name) {
+                let relative = entry
+                    .path()
+                    .strip_prefix(dir)
+                    // Fall back to the absolute path: it only happens if the entry is
+                    // somehow not below the directory it was listed from, and an
+                    // absolute path is still something the user can act on.
+                    .map_or_else(|_| entry.path(), Path::to_path_buf);
+                return Ok(Some(relative.display().to_string()));
+            }
+            if name != ".git" && entry.metadata().is_ok_and(|meta| meta.is_dir()) {
+                stack.push(entry.path());
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Whether a file name is one people keep secrets in.
+///
+/// A table rather than a heuristic. A false positive costs one item the user has to
+/// confirm by hand; a false negative costs the secrets. So the table is generous —
+/// `.env.example` is matched too, because a template that was filled in where it
+/// stood is a real mistake. A public key is the one thing left out: `id_rsa.pub` is
+/// meant to be shared, and the private half beside it is caught by its own name.
+///
+/// Not covered, on purpose: a secret whose name gives nothing away — `config.json`
+/// holding an API key reads as a config file. That one is recorded as an open item
+/// rather than guessed at here.
+fn looks_like_credential(name: &str) -> bool {
+    const EXACT: &[&str] = &[
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        ".htpasswd",
+        ".git-credentials",
+        "credentials",
+        "credentials.json",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+    ];
+    const EXTENSIONS: &[&str] = &[
+        "pem",
+        "key",
+        "p12",
+        "pfx",
+        "jks",
+        "keystore",
+        "kdbx",
+        "mobileprovision",
+        "ovpn",
+    ];
+
+    let lower = name.to_lowercase();
+    if EXACT.contains(&lower.as_str()) {
+        return true;
+    }
+
+    // `.env` and every variant of it: `.env.local`, `.env.production`, `.env.example`.
+    if lower == ".env" || lower.starts_with(".env.") {
+        return true;
+    }
+
+    // `Path::extension` rather than a string suffix. Comparing an extension with
+    // `ends_with` is how a `.JSON` slips past, and this way the answer does not depend
+    // on the lowercasing above having gone right.
+    let extension = Path::new(&lower).extension().and_then(|ext| ext.to_str());
+    if extension.is_some_and(|ext| EXTENSIONS.contains(&ext)) {
+        return true;
+    }
+
+    // Service-account files are named after the account: `service-account-prod.json`.
+    lower.starts_with("service-account") && extension == Some("json")
 }
 
 /// Parses `git check-ignore -v` output (`<source>:<line>:<pattern>\t<path>`) into
@@ -869,6 +997,168 @@ mod tests {
                 let _ = file.set_times(times());
             }
         }
+    }
+
+    #[test]
+    fn recognises_the_names_people_keep_secrets_in() {
+        for name in [
+            ".env",
+            ".env.local",
+            ".env.production",
+            // A template that was filled in where it stood is a real mistake, and the
+            // cost of asking is one confirmation.
+            ".env.example",
+            ".npmrc",
+            ".netrc",
+            ".git-credentials",
+            ".htpasswd",
+            "id_rsa",
+            "id_ed25519",
+            "credentials.json",
+            "server.pem",
+            "private.key",
+            "keystore.p12",
+            "vault.kdbx",
+            "profile.mobileprovision",
+            "service-account-prod.json",
+            // Case is not a hiding place.
+            ".ENV",
+            "Id_Rsa",
+        ] {
+            assert!(looks_like_credential(name), "{name} should be recognised");
+        }
+
+        for name in [
+            "package.json",
+            "index.js",
+            "notes.md",
+            ".gitignore",
+            "README",
+            // The public half of a key pair is meant to be shared.
+            "id_rsa.pub",
+            "environment.json",
+            "services.md",
+        ] {
+            assert!(!looks_like_credential(name), "{name} is not a credential");
+        }
+    }
+
+    #[test]
+    fn a_credential_file_makes_the_directory_unsafe() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let artifact = root.join("node_modules");
+        std::fs::create_dir_all(&artifact).expect("create artifact");
+        std::fs::write(artifact.join("index.js"), "module.exports = 1;\n").expect("write file");
+        std::fs::write(root.join("package.json"), "{}\n").expect("write manifest");
+        // Ignored by Git, which is exactly why this needs a check of its own: the
+        // authored-content reason looks at what Git reports as untracked, and a
+        // `.gitignore` exists precisely to keep `.env` out of that report.
+        std::fs::write(artifact.join(".env"), "API_KEY=live\n").expect("write the secret");
+
+        let runner = runner_with(vec![
+            (
+                vec![
+                    "ls-files".into(),
+                    "--".into(),
+                    artifact.display().to_string(),
+                ],
+                out(""),
+            ),
+            (
+                vec![
+                    "check-ignore".into(),
+                    "-v".into(),
+                    "--".into(),
+                    artifact.display().to_string(),
+                ],
+                ignored(".gitignore:1"),
+            ),
+        ]);
+        let (record, _warnings) = check_artifact(
+            &runner,
+            &root,
+            &artifact,
+            lookup_kind("node_modules").expect("kind"),
+            &opts(),
+        );
+
+        assert_eq!(
+            record.safety.status,
+            SafetyStatus::Unsafe,
+            "{:?}",
+            record.safety.reasons
+        );
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::AfCredentials)
+            .expect("af.credentials");
+        // The evidence names the file, so the user can look before deciding — the
+        // whole point of a reason carrying evidence (D9).
+        assert!(reason.evidence.contains(".env"), "{}", reason.evidence);
+    }
+
+    #[test]
+    fn a_credential_one_directory_down_is_still_found() {
+        // The integration test found this gap: a `.env` written one level inside the
+        // candidate was not seen by a check that only looked at the top level, and a
+        // secret in `config/` is exactly as ordinary as one in the directory itself.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let nested = dir.path().join("left-pad");
+        std::fs::create_dir_all(&nested).expect("create nested");
+        std::fs::write(nested.join(".env"), "API_KEY=live\n").expect("write the secret");
+
+        let found = credential_in(dir.path()).expect("a readable directory");
+        assert_eq!(found.as_deref(), Some("left-pad/.env"));
+    }
+
+    #[test]
+    fn a_directory_without_credentials_is_judged_as_before() {
+        // The check has to stay quiet when there is nothing to find: an ignored
+        // `node_modules` beside a manifest is still the ordinary Safe case.
+        let (_guard, root, artifact) = fixture();
+        std::fs::write(root.join("package.json"), "{}\n").expect("write manifest");
+        backdate_tree(&root, 30);
+        let runner = runner_with(vec![
+            (
+                vec![
+                    "ls-files".into(),
+                    "--".into(),
+                    artifact.display().to_string(),
+                ],
+                out(""),
+            ),
+            (
+                vec![
+                    "check-ignore".into(),
+                    "-v".into(),
+                    "--".into(),
+                    artifact.display().to_string(),
+                ],
+                ignored(".gitignore:12"),
+            ),
+        ]);
+        let (record, _warnings) = check_artifact(
+            &runner,
+            &root,
+            &artifact,
+            lookup_kind("node_modules").expect("kind"),
+            &opts(),
+        );
+
+        assert_eq!(
+            record.safety.status,
+            SafetyStatus::Safe,
+            "{:?}",
+            record.safety.reasons
+        );
+        assert!(!record
+            .safety
+            .reasons
+            .iter()
+            .any(|reason| reason.code == ReasonCode::AfCredentials));
     }
 
     #[test]

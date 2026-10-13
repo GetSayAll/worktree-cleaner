@@ -294,12 +294,13 @@ Decision table:
 |---|---|---|---|
 | `af.git_tracked` | files tracked by git exist in the directory | Unsafe | `N files committed to the repository, not a pure artifact` |
 | `af.nested_git` | a nested `.git` exists in the directory | Unsafe | `the directory contains a standalone repository` |
-| `af.authored_content` | credential files such as `*-keypair.json` exist in the directory | Unsafe | `<file name>` |
+| `af.authored_content` | a directory with a generic name such as `dist/` holds files that are neither tracked nor ignored | Unsafe | `N files inside are neither tracked by Git nor ignored; they look like authored content` |
+| `af.credentials` | a credential-looking file (`.env`, `id_rsa`, `*.pem`, `credentials.json`, …) sits directly inside the directory | Unsafe | `<file name> is inside; deleting the directory would delete it too` |
 | `af.symlink_outside` | the directory is a symlink and points outside the project root | Unsafe | `points to <target path>` |
 | `af.whitelisted` | matches the whitelist | Unsafe | `matches whitelist: <rule>` |
 | `af.recent_activity` | a write occurred within the recent activity days | Review | `last activity: 3 days ago` |
-| `af.cannot_verify` | size computation or feature scan timed out / no permission | Review | `cannot read: <reason>` |
-| `af.empty` | the directory is empty or has no deletable content | Review | `directory is empty` |
+| `af.cannot_verify` | a Git call failed, or the size computation or directory listing did not complete | Review | `could not complete the check` |
+| `af.empty` | the directory contains no files | Safe (positive) | `it contains no files` |
 | `af.git_ignored` | the directory as a whole is ignored by gitignore | Safe (positive) | `ignored by .gitignore` |
 | `af.rebuildable` | matches a known rebuildable artifact type | Safe (positive) | `can be rebuilt via npm install / cargo build` |
 

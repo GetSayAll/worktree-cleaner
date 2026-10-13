@@ -23,6 +23,7 @@ export type ReasonCode =
   | "af.git_tracked"
   | "af.nested_git"
   | "af.authored_content"
+  | "af.credentials"
   | "af.symlink_outside"
   | "af.whitelisted"
   | "af.recent_activity"

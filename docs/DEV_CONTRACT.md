@@ -360,7 +360,7 @@ guarantee is named next to it.
 | P0 | 5 · `cargo clippy -- -D warnings` | Met, and widened into a real gate: `pnpm lint:rust` runs the format check and `cargo clippy --workspace --all-targets`, with `clippy::all`, `clippy::pedantic`, the rustc `unused` group and `unsafe_code` denied in `[workspace.lints]`. `clippy::nursery` stays a warning because those lints are experimental. The ten `pedantic` lints that remain allowed each carry their reason in `Cargo.toml` |
 | P1 | 1 · a tracked `build/` is `Unsafe`, evidence naming the match count | Met — unit, plus a real repository where `dist/` is committed despite an ignore rule |
 | P1 | 2 · `node_modules` is not recognised as a project root | Met — the walk never descends into a directory it has recognised as an artifact, and a real scan reports one record per worktree |
-| P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met for `.git`. **Credential files are not detected** — open item 4 |
+| P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met — `.git` through `af.nested_git`, credentials through `af.credentials`. Credentials needed a code of their own: they are usually Git-*ignored*, which is precisely the case `af.authored_content` cannot see |
 | P1 | 4 · an escaping symlink is `Unsafe` with the target in evidence | Met |
 | P1 | 5 · a size-measurement timeout is reported honestly | **Renegotiated** — the criterion asked for `Review`; the verdict is now left alone and the size is recorded as `null` with a warning (decision 5) |
 | P1 | 6 · every `af.*` reason code has a test case | Met — all 10 codes |
@@ -613,13 +613,14 @@ shell to the real scanner and the real executor.
    (single binary) or as a separate executable.
 3. **Where `snapshot.json` is written**: stdout or a conventional default path, and
    the artifact naming rule for CI.
-4. **Whether an artifact directory holding credential files should be blocked
-   outright.** P1 criterion 3 names a directory containing credential files as
-   `Unsafe`, and nothing detects them today: `.env`, `id_rsa` and friends are
-   usually ignored by Git, so `af.authored_content` does not fire and the directory
-   can come out `Safe` — deleting it would take the keys with it. Whether the fix is
-   a new reason code (a documentation change under section 6) or an extension of
-   `af.authored_content`'s evidence is open.
+4. ~~**Whether an artifact directory holding credential files should be blocked
+   outright.**~~ **Resolved 2026-10-12**: it is blocked outright, by a new
+   `af.credentials` code. The open question was whether to widen
+   `af.authored_content`'s evidence instead, and the answer is no: credentials are
+   usually Git-*ignored*, so the untracked-content check cannot fire for them and the
+   two conditions are genuinely different. What the new check does not cover, and
+   what stays open here: a secret whose name gives nothing away (`config.json` holding
+   an API key) and one nested below the directory rather than sitting in it.
 5. **The one thing the automated checks cannot reach.** Driving the native folder
    picker, the system Trash and `git worktree remove` in the packaged app needs a
    human at the keyboard: the checks in this repository can dock the window and

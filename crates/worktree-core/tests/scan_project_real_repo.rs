@@ -204,6 +204,39 @@ fn a_scan_reads_worktrees_and_their_artifacts_from_a_real_repository() {
 }
 
 #[test]
+fn a_credential_hidden_by_gitignore_is_still_caught() {
+    // The end-to-end version of the unit test: a real repository, a real `.gitignore`
+    // that hides the file from Git, and a scan that has to notice anyway. The unit
+    // test drives the decision with canned Git output; this one is the reason the
+    // decision exists.
+    let repo = build_repo("credentials");
+    // `node_modules/` is in the `.gitignore` the fixture commits, so `git status`
+    // reports nothing about this file.
+    std::fs::write(
+        repo.root.join("node_modules/left-pad/.env"),
+        "API_KEY=live\n",
+    )
+    .expect("write the secret");
+
+    let snapshot = scan_project(&repo.root.display().to_string(), &options()).expect("scan");
+    let artifact = artifact_at(&snapshot, "repo", "node_modules");
+
+    assert_eq!(
+        artifact.safety.status,
+        SafetyStatus::Unsafe,
+        "{:?}",
+        artifact.safety.reasons
+    );
+    let reason = artifact
+        .safety
+        .reasons
+        .iter()
+        .find(|reason| reason.code == ReasonCode::AfCredentials)
+        .expect("af.credentials");
+    assert!(reason.evidence.contains(".env"), "{}", reason.evidence);
+}
+
+#[test]
 fn an_unusable_path_is_rejected_with_a_specific_reason() {
     // An empty path, a missing path, and a non-repository must stay three
     // different answers (D3).

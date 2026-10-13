@@ -66,6 +66,12 @@ pub enum ReasonCode {
     AfNestedGit,
     #[serde(rename = "af.authored_content")]
     AfAuthoredContent,
+    /// The directory holds something that looks like a credential, so deleting it
+    /// would take the secrets with it. Separate from `af.authored_content` because
+    /// credentials are usually *ignored* by Git, which means that reason cannot fire
+    /// for exactly the files this one exists to catch.
+    #[serde(rename = "af.credentials")]
+    AfCredentials,
     #[serde(rename = "af.symlink_outside")]
     AfSymlinkOutside,
     #[serde(rename = "af.whitelisted")]
@@ -85,7 +91,7 @@ pub enum ReasonCode {
 impl ReasonCode {
     /// All reason codes. Used by the contract-drift test (the serialised value must
     /// match [`Self::as_str`]).
-    pub const ALL: [ReasonCode; 26] = [
+    pub const ALL: [ReasonCode; 27] = [
         ReasonCode::WtMain,
         ReasonCode::WtLocked,
         ReasonCode::WtDirty,
@@ -105,6 +111,7 @@ impl ReasonCode {
         ReasonCode::AfGitTracked,
         ReasonCode::AfNestedGit,
         ReasonCode::AfAuthoredContent,
+        ReasonCode::AfCredentials,
         ReasonCode::AfSymlinkOutside,
         ReasonCode::AfWhitelisted,
         ReasonCode::AfRecentActivity,
@@ -136,6 +143,7 @@ impl ReasonCode {
             ReasonCode::AfGitTracked => "af.git_tracked",
             ReasonCode::AfNestedGit => "af.nested_git",
             ReasonCode::AfAuthoredContent => "af.authored_content",
+            ReasonCode::AfCredentials => "af.credentials",
             ReasonCode::AfSymlinkOutside => "af.symlink_outside",
             ReasonCode::AfWhitelisted => "af.whitelisted",
             ReasonCode::AfRecentActivity => "af.recent_activity",
@@ -373,7 +381,7 @@ mod tests {
                 "reason code must carry a wt. / af. prefix: {s}"
             );
         }
-        assert_eq!(ReasonCode::ALL.len(), 26);
+        assert_eq!(ReasonCode::ALL.len(), 27);
     }
 
     #[test]
