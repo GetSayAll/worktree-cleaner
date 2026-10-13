@@ -1,6 +1,10 @@
 # Proposals
 
-**Status: awaiting review. Nothing in this file is implemented.**
+**Status: reviewed and settled on 2026-10-12.** Every item is now either implemented
+or rejected; the outcome per item is in the table at the end of this file, and the
+reasoning is in `docs/DEV_CONTRACT.md` §7. The body of each proposal is kept exactly
+as it was written, because it is the record of what was found and why — the code it
+describes has moved on since.
 
 Each item is approved or rejected on its own. On approval, the code change and the
 documentation change it implies land in the same commit, as section 6 of
@@ -564,26 +568,26 @@ work.
 
 ---
 
-## 4. Approval checklist
+## 4. Outcome
 
-Reply with the IDs you approve; anything not approved stays unimplemented. P-1.5 is
-the optional half of P-1 and can be dropped on its own.
+Settled on 2026-10-12.
 
-| ID | Proposal | Decision |
+| ID | Proposal | Outcome |
 |---|---|---|
-| P-1 | Case-fold the protected-location comparison; add the canonical spellings | approve / reject / defer |
-| P-1.5 | …including the optional `/System/Volumes/Data` fold | approve / reject / defer |
-| P-2 | Refuse names Win32 reads as a different name | approve / reject / defer |
-| P-3 | Match the home directory by identity as well | approve / reject / defer |
-| P-4 | `--` before paths; write down the residual window | approve / reject / defer |
-| P-5 | Commit and finish the desktop wiring | approve / reject / defer |
-| P-6 | Define released space; label the simulation | approve / reject / defer |
-| P-7 | Field-for-field contract test | approve / reject / defer |
-| P-8 | Lint policy, pinned toolchain, formatter | approve / reject / defer |
-| P-9 | `AGENTS.md` routing table | approve / reject / defer |
-| P-10 | Pin the check order; keep the corpus from shrinking | approve / reject / defer |
+| P-1 | Case-fold the protected-location comparison; add the canonical spellings | **Implemented** — `guard_key` in `path.rs`, both spellings of every symlinked location in the list, the home-root shape folded, the case variants and `/private/var/db` added to the corpus |
+| P-1.5 | …including the optional `/System/Volumes/Data` fold | **Rejected** — nothing produces that spelling (`realpath` keeps `/Users/andy` as it is), and a hand-written one is already refused by the `/System` entry |
+| P-2 | Refuse names Win32 reads as a different name | **Implemented** — `win32_ambiguous_name`, a pure predicate applied on Windows only, with its name table tested everywhere |
+| P-3 | Match the home directory by identity as well | **Implemented for Unix** (`device`/`inode`); Windows waits for the D16 verification, because a stable file id needs an API `std` does not expose — the spelling and structural guards there are unchanged, not weakened |
+| P-4 | `--` before paths; write down the residual window | **Implemented** — the separator is in the executor and in the plan text, and the window is written down in product plan §6.5 |
+| P-5 | Commit and finish the desktop wiring | **Already landed** before this review |
+| P-6 | Define released space; label the simulation | **Implemented** — the rule is in DEV_CONTRACT §3 and the pages say when there is no desktop. Note the preview no longer simulates at all: it refuses (see the P-5 resolution) |
+| P-7 | Field-for-field contract test | **Implemented** — `src/architecture.test.ts` compares ten contract structs and the reason-code list across the two languages |
+| P-8 | Lint policy, pinned toolchain, formatter | **Implemented, one half left open** — `[workspace.lints]`, `rustfmt.toml`, `rust-toolchain.toml` and `pnpm lint:rust` are in place; the triage that would raise `pedantic` and `nursery` to denials is not, and the current count is recorded in `AGENTS.md` |
+| P-9 | `AGENTS.md` routing table | **Implemented** |
+| P-10 | Pin the check order; keep the corpus from shrinking | **Implemented** — a precedence test that applies two rules at once, and a corpus floor at the current entry count |
 
-**Suggested order**, if the whole list is approved: P-5 first, because it is in
-flight and everything else about the desktop form assumes it; then P-1 and P-8, one
-to close a hole and one to keep holes from reopening; then P-6, P-4 and P-7; then
-P-3, P-2 and P-10; P-9 whenever.
+**Suggested order (as written).** P-5 first, because it was in flight and everything
+else about the desktop form assumed it; then P-1 and P-8, one to close a hole and one
+to keep holes from reopening; then P-6, P-4 and P-7; then P-3, P-2 and P-10; P-9
+whenever. It is kept because the implementation followed it, and because the reasoning
+is worth more than the order: a hole first, then the thing that keeps it closed.

@@ -108,7 +108,7 @@ fn plan_removing(path: &str) -> CleanupPlan {
             branch: Some("removable/x".to_string()),
             // Display only: the executor re-derives the command from its own
             // re-check instead of parsing this string.
-            command: format!("git worktree remove {path}"),
+            command: format!("git worktree remove -- {path}"),
             force: false,
             untracked_files: Vec::new(),
             size_bytes: None,

@@ -13,8 +13,10 @@ use worktree_core::{validate_path_for_deletion, DeletionContext, PathRejection};
 
 const CORPUS: &str = include_str!("fuzz_corpus/dangerous_paths.txt");
 
-/// Lower bound on the number of corpus entries (P0 acceptance criterion: ≥ 60).
-const MIN_CORPUS_ENTRIES: usize = 60;
+/// The P0 acceptance criterion is "≥ 60", and this is deliberately higher: the corpus
+/// is a file, so without a floor at its current size it could shrink and nothing would
+/// complain. Raise this when entries are added; never lower it to make a deletion pass.
+const MIN_CORPUS_ENTRIES: usize = 86;
 
 /// The unit test that covers the "ancestor symlink" category. A symlink cannot be
 /// expressed as a static corpus line, so the corpus test names the test that covers it

@@ -24,6 +24,10 @@ export const zhCN = {
     pickRepository: "选择一个仓库开始扫描",
     desktopOnly: "这个操作需要桌面应用；浏览器预览访问不到文件系统。"
   },
+  preview: {
+    notice:
+      "浏览器预览 —— 这个版本访问不到文件系统，因此清理操作不可用，页面上的数字都来自示例数据。"
+  },
   nav: {
     project: "项目",
     scan: "扫描",

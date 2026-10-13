@@ -28,6 +28,12 @@ export const en = {
     desktopOnly:
       "This action needs the desktop app; the browser preview cannot reach the file system."
   },
+  preview: {
+    // Said on the pages that offer an action, because a button that looks available
+    // and does nothing is the failure this build was rewritten to remove.
+    notice:
+      "Browser preview — this build cannot reach the file system, so the cleanup actions are disabled and the numbers on these pages come from sample data."
+  },
   nav: {
     project: "Project",
     scan: "Scan",

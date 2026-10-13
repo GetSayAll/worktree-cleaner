@@ -361,6 +361,42 @@ describe("an unmeasurable size travels as unknown", () => {
 });
 
 describe("group selection and blocked execution", () => {
+  it("counts only what was really removed", async () => {
+    // The executor's answer decides the figures, not the plan. A skipped item removed
+    // nothing, a prune frees nothing, and an unmeasurable size is counted rather than
+    // summed — reporting "0 B freed" for it would be a measurement that never happened.
+    const { state } = await freshStateWithExecutor({
+      entries: [
+        { action: "trash-move", target: mainCoverage, result: "ok", detail: "moved", size_bytes: 100 },
+        {
+          action: "trash-move",
+          target: `${mockRoot}/went-stale`,
+          result: "skipped",
+          detail: "changed since the plan was generated",
+          size_bytes: 200
+        },
+        { action: "trash-move", target: venv, result: "ok", detail: "moved", size_bytes: null },
+        { action: "prune", target: mockRoot, result: "ok", detail: "pruned", size_bytes: null }
+      ],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.settings.whitelist_paths = [];
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [mainCoverage];
+    await state.executeCleanup();
+    unmockPlatform();
+
+    const summary = state.resultSummary.value;
+    // 100 from the one measured move: the skipped item's 200 was not freed.
+    expect(summary.freed).toBe(100);
+    // Two things were moved to the Trash, one of them with an unknown size.
+    expect(summary.trashed).toBe(2);
+    expect(summary.failed).toBe(1);
+    expect(summary.freed_unknown).toBe(1);
+  });
+
   it("refuses Unsafe and bundled items in a group toggle", async () => {
     const state = await freshState();
     state.snapshot.value = mockSnapshot;
@@ -371,6 +407,43 @@ describe("group selection and blocked execution", () => {
     expect(state.isSelectedArtifact(trackedBuild)).toBe(false);
     expect(state.isSelectedArtifact(`${codex}/target`)).toBe(false);
     expect(state.isSelectedArtifact(venv)).toBe(true);
+  });
+
+  it("carries the path as given, never what a symlink points at", async () => {
+    const state = await freshState();
+    // This artifact is a symlink to a shared package store. Moving the store instead
+    // of the link would take every project that shares it, so the plan has to name the
+    // link — and the target stays evidence to show, not a path to act on.
+    const link = `${mockRoot}/apps/desktop/node_modules`;
+    const source = mockSnapshot.artifacts.find((a) => a.path === link);
+    expect(source?.is_symlink, "the fixture is a symlink").toBe(true);
+    expect(source?.symlink_target).toBeTruthy();
+
+    state.snapshot.value = {
+      ...mockSnapshot,
+      artifacts: [
+        ...mockSnapshot.artifacts.filter((a) => a.path !== link),
+        {
+          ...source!,
+          // Deletable, so it reaches the plan at all.
+          safety: assess([
+            {
+              code: "af.empty",
+              severity: "Safe",
+              text: "the directory is empty",
+              evidence: "it contains no files"
+            }
+          ])
+        }
+      ]
+    };
+    state.settings.whitelist_paths = [];
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [link];
+
+    const item = state.cleanupPlan.value.trash_moves.find((move) => move.path === link);
+    expect(item, "the link is in the plan as given").toBeDefined();
+    expect(item?.path).not.toBe(source?.symlink_target);
   });
 
   it("skips a whitelist-blocked item instead of executing it", async () => {

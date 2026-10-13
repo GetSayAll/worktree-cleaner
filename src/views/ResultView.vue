@@ -4,7 +4,9 @@ import { executeError, goTo, lastResult, logError, projectPath, resultSummary, s
 import StatCard from "../components/StatCard.vue";
 import { formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
-import { openTrash } from "../platform";
+import { openTrash, isDesktop } from "../platform";
+
+const desktop = isDesktop();
 
 const root = computed(() => snapshot.value?.root ?? "");
 
@@ -79,6 +81,7 @@ const logFailure = computed(() => {
       </div>
     </div>
 
+    <p v-if="!desktop" class="notice">{{ messages.preview.notice }}</p>
     <p v-if="executeError" class="notice notice--unsafe">{{ executeError }}</p>
     <p v-if="systemError" class="notice notice--unsafe">{{ systemError }}</p>
     <p v-if="logFailure" class="notice notice--unsafe">

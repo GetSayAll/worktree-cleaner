@@ -58,3 +58,79 @@ describe("source tree rules", () => {
     expect(Number(found?.[1])).toBe(SNAPSHOT_SCHEMA_VERSION);
   });
 });
+
+// The contract says `src/types.ts` matches the Rust structs field for field, and that
+// a change on either side lands in the same commit (DEV_CONTRACT section 3). Nothing
+// enforced it: the two could drift and only a runtime failure in the desktop shell
+// would say so. The schema version above is the same mechanism applied to one number.
+//
+// A regex over Rust source is a weaker parse than the compiler — a field written in a
+// shape the pattern does not recognise would be missed. That is the mechanism this
+// file already uses, and its failure mode is a false pass rather than a false alarm,
+// which is why the field counts are also checked against a floor.
+
+const coreDir = fileURLToPath(new URL("../crates/worktree-core/src/", import.meta.url));
+
+function rustFields(source: string, struct: string): string[] | null {
+  const block = source.match(new RegExp(`pub struct ${struct}\\s*\\{([\\s\\S]*?)\\n\\}`));
+  if (!block) return null;
+  return [...block[1].matchAll(/^[ \t]*pub (\w+):/gm)].map((match) => match[1]);
+}
+
+function tsFields(source: string, interfaceName: string): string[] | null {
+  const block = source.match(
+    new RegExp(`export interface ${interfaceName}\\s*\\{([\\s\\S]*?)\\n\\}`)
+  );
+  if (!block) return null;
+  return [...block[1].matchAll(/^ {2}(\w+)\??:/gm)].map((match) => match[1]);
+}
+
+describe("the Rust-to-TypeScript field contract", () => {
+  const types = readFileSync(join(srcDir, "types.ts"), "utf8");
+  const core = {
+    "lib.rs": readFileSync(join(coreDir, "lib.rs"), "utf8"),
+    "cleanup.rs": readFileSync(join(coreDir, "cleanup.rs"), "utf8"),
+    "reason.rs": readFileSync(join(coreDir, "reason.rs"), "utf8")
+  };
+
+  const structs: Array<[string, keyof typeof core]> = [
+    ["ProjectSnapshot", "lib.rs"],
+    ["WorktreeRecord", "lib.rs"],
+    ["ArtifactRecord", "lib.rs"],
+    ["CleanupPlan", "lib.rs"],
+    ["ResultEntry", "lib.rs"],
+    ["HistoryEntry", "lib.rs"],
+    ["ScanOptions", "lib.rs"],
+    ["ExecutionOutcome", "cleanup.rs"],
+    ["Reason", "reason.rs"],
+    ["SafetyAssessment", "reason.rs"]
+  ];
+
+  for (const [name, file] of structs) {
+    it(`keeps ${name} field for field`, () => {
+      const rust = rustFields(core[file], name);
+      const ts = tsFields(types, name);
+      expect(rust, `${name} not found in ${file}`).not.toBeNull();
+      expect(ts, `${name} not found in src/types.ts`).not.toBeNull();
+      // A pattern that stopped matching would otherwise compare two empty lists and
+      // pass; every contract struct has at least two fields.
+      expect(rust!.length, `${name} parsed as empty`).toBeGreaterThan(1);
+      expect(ts!.length, `${name} parsed as empty`).toBeGreaterThan(1);
+      expect([...ts!].sort()).toEqual([...rust!].sort());
+    });
+  }
+
+  it("keeps the reason-code list in step", () => {
+    // Rust writes each code twice — once in `ALL`, once in `as_str` — and the string
+    // form is the one the front end sees, so it is the one to compare.
+    const rustCodes = [...core["reason.rs"].matchAll(/=> "((?:wt|af)\.[a-z_]+)"/g)].map(
+      (match) => match[1]
+    );
+    const block = types.match(/export type ReasonCode =([\s\S]*?);/);
+    expect(block, "ReasonCode not found in src/types.ts").not.toBeNull();
+    const tsCodes = [...block![1].matchAll(/"([a-z_]+\.[a-z_]+)"/g)].map((match) => match[1]);
+
+    expect(rustCodes.length).toBeGreaterThan(20);
+    expect([...tsCodes].sort()).toEqual([...rustCodes].sort());
+  });
+});

@@ -220,6 +220,10 @@ pub fn execute_plan(
         if record.untracked_files > 0 {
             args.push("--force".to_string());
         }
+        // `--` ends the options, so a path that begins with `-` is read as a path.
+        // These paths are absolute, which makes that unlikely rather than impossible;
+        // the separator costs nothing and removes the question.
+        args.push("--".to_string());
         args.push(record.path.clone());
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         match run_git(&runner, Path::new(&snapshot.root), &arg_refs) {
@@ -670,7 +674,7 @@ mod tests {
                 kind: PlanItemKind::Worktree,
                 path: path.to_string(),
                 branch: Some("main".to_string()),
-                command: format!("git worktree remove \"{path}\""),
+                command: format!("git worktree remove -- \"{path}\""),
                 force: false,
                 untracked_files: Vec::new(),
                 size_bytes: Some(1024),

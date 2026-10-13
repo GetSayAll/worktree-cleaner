@@ -13,6 +13,9 @@ import {
   settings,
   snapshot
 } from "../state";
+import { isDesktop } from "../platform";
+
+const desktop = isDesktop();
 import StatCard from "../components/StatCard.vue";
 import { basename, displayPath, formatBytes, formatCount, isAbsolutePath, normalizePathKey } from "../format";
 import { messages } from "../i18n";
@@ -285,13 +288,15 @@ async function copyPlan() {
       <button class="btn" @click="goTo('artifacts')">{{ messages.plan.backToAdjust }}</button>
       <button
         class="btn btn--danger btn--lg"
-        :disabled="!canExecute || executing"
+        data-action="run-cleanup"
+        :disabled="!canExecute || executing || !desktop"
         @click="executeCleanup"
       >
         {{ executing ? messages.plan.running : messages.plan.runCleanup }}
       </button>
     </div>
 
+    <p v-if="!desktop" class="notice">{{ messages.preview.notice }}</p>
     <p v-if="executeError" class="notice notice--unsafe">{{ executeError }}</p>
   </div>
 </template>

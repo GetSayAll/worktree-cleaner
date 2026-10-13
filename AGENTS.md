@@ -10,9 +10,11 @@ Content that is deliberately kept out of the open-source distribution — local
 working notes, private configuration, internal scratch material — may be written
 in Chinese. `.workbuddy/` is gitignored and is the only such case today.
 
-User-visible application strings live in the message table under `src/i18n/` and
-are read through `src/i18n/index.ts`. Never scatter display literals across
-templates; add them to the table so other locales can be added later.
+User-visible application strings live in the message tables under `src/i18n/`:
+`en.ts` is the source locale and every other table is a translation of it, with
+**exactly the same keys**. Read them through `src/i18n/index.ts` at render time —
+never capture a string in a module-level constant, because the table is rebound
+when the language changes. `locale.test.ts` fails if a table's keys differ.
 
 ## Project rules
 
@@ -28,6 +30,44 @@ templates; add them to the table so other locales can be added later.
 - Every deletion decision must be backed by a verifiable reason.
 - macOS and Windows behaviour are verified separately.
 
+## Where a change belongs
+
+| A change to… | Belongs in… | Governed by |
+|---|---|---|
+| a reason code's meaning | `crates/worktree-core/src/reason.rs` and the decision table in `docs/PRODUCT_PLAN.md` §5 | DEV_CONTRACT §6 — the documentation change lands in the same commit |
+| a deletion guard | `crates/worktree-core/src/path.rs` | D10, product plan §6.4 |
+| the worktree verdict | `crates/worktree-core/src/worktree.rs` | D2, D3 |
+| the artifact verdict, or the recognised directory names | `crates/worktree-core/src/artifact.rs` | D7, D8 |
+| executing a plan | `crates/worktree-core/src/cleanup.rs` | D5, D6, D11, D14, D18 |
+| the audit log | `crates/worktree-core/src/log.rs` | D15 |
+| a field of a contract type | `crates/worktree-core/src/lib.rs` **and** `src/types.ts` | §3 — `src/architecture.test.ts` fails if they disagree |
+| an IPC command | `src-tauri/src/lib.rs`, plus `capabilities/default.json` for its permissions, plus `src/platform.ts` | §2 — the dependency direction is `src/` → IPC → `src-tauri/` → `worktree-core`, never back |
+| a user-visible string | `src/i18n/en.ts` **and** every other table under `src/i18n/` | D23 — `locale.test.ts` fails if the key sets differ |
+| what the UI does with scan or execution results | `src/state.ts`, through `src/platform.ts` | §2 — the front end never re-makes a decision (D9) |
+
+## The gate
+
+`pnpm lint:rust` runs, in order:
+
+1. `cargo fmt --all -- --check`
+2. `cargo clippy --workspace --all-targets`
+
+What that fails on is declared in `[workspace.lints]` in the root `Cargo.toml`:
+
+- `clippy::all` — **denied**. A new default-level lint fails the build.
+- the rustc `unused` group — **denied**. A leftover variable or import fails the
+  build rather than being scrolled past.
+- `unsafe_code` — **denied**. Nothing here needs it: deletion goes through the
+  Trash and Git, and the platform calls the `trash` crate makes are its business.
+
+`clippy::pedantic` and `clippy::nursery` are enabled as **warnings**, and that is
+the current state rather than the target. They report around 200 findings today,
+mostly `module_name_repetitions` (53), `uninlined_format_args` (16) and
+`must_use_candidate` (24 between the two forms). The number is written down so it
+cannot grow unnoticed. **A green gate does not mean pedantic-clean**: raising
+those two to `deny` needs the triage first, and a gate switched on while it is
+still red gets switched off again.
+
 ## Frozen design
 
 - Product design and decision tables: `docs/PRODUCT_PLAN.md`.
@@ -35,5 +75,9 @@ templates; add them to the table so other locales can be added later.
   Implementation must follow that file.
 - Changes touching D1–D23, field contracts, or reason-code semantics require the
   documentation change to land in the same commit.
-- UI structure and information architecture follow the frozen prototype under
-  `src/`. Once production data is wired in, `src/mock/` leaves the production path.
+- UI structure and information architecture follow the frozen design under `src/`.
+  The desktop shell reads real scan results over Tauri IPC and writes the audit
+  log to disk. `src/mock/` is what the **browser preview** reads, and every page
+  that shows it says so; a desktop build never touches it.
+- Open items and proposals: `docs/DEV_CONTRACT.md` §7. A proposal is implemented
+  only once it is approved there.

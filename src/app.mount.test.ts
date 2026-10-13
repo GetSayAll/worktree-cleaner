@@ -2,6 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { createApp, nextTick } from "vue";
 import App from "./App.vue";
+import { mockSnapshot } from "./mock/snapshot";
+import * as state from "./state";
 
 // The other tests exercise modules in isolation; this one mounts the real app.
 //
@@ -88,6 +90,25 @@ describe("the app shell", () => {
 
     expect(start?.disabled).toBe(false);
 
+    app.unmount();
+    host.remove();
+  });
+
+  it("does not offer a cleanup action it cannot carry out", async () => {
+    const { app, host } = mountApp();
+    state.snapshot.value = mockSnapshot;
+    state.view.value = "plan";
+    await nextTick();
+
+    const button = host.querySelector<HTMLButtonElement>('[data-action="run-cleanup"]');
+    expect(button, "the run button is missing").not.toBeNull();
+    // A preview cannot reach the file system. Offering the button and failing on press
+    // would be the same "a click that does nothing" the picker was rewritten to fix.
+    expect(button?.disabled).toBe(true);
+    expect(host.querySelector(".notice")?.textContent?.trim()).toBeTruthy();
+
+    state.view.value = "welcome";
+    state.snapshot.value = null;
     app.unmount();
     host.remove();
   });

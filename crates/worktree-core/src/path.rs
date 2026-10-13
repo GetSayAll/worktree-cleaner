@@ -24,6 +24,13 @@
 //! filesystem resolution): the order differs from the list above but the set of checks
 //! is the same. The resolved result likewise runs through checks 6 and 7 again, and
 //! the whitelist (check 8) is matched against both the literal and the resolved path.
+//!
+//! Every comparison that decides protection goes through [`guard_key`], which folds
+//! case (and, on Windows, separators and the verbatim prefix). Without it the list is
+//! only as good as the spelling the user happened to type: on a filesystem that
+//! ignores case, `/SYSTEM/Library/CoreServices` reached the same directory as
+//! `/System/Library/CoreServices` and was accepted. Folding can only add refusals,
+//! which is the direction D10 allows.
 
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
@@ -36,6 +43,13 @@ use std::path::{Component, Path, PathBuf};
 /// "component count ≤ 2" rule in check 6, so they are not listed here as subtree
 /// prefixes — otherwise legitimate project paths such as `/Volumes/External/repo` would
 /// be killed by mistake.
+///
+/// Every entry whose immediate parent is a symlink is listed under **both** its
+/// spellings. `/etc` and `/var` are symlinks into `/private`, so `/var/db` is also
+/// `/private/var/db`; the list carried only the short form, and a candidate written
+/// the canonical way matched neither the literal comparison nor the resolved one —
+/// two spellings of one directory, two answers, and the canonical one was accepted.
+/// An entry that is a no-op on another platform costs nothing.
 #[cfg(unix)]
 const DENIED_PREFIXES: &[&str] = &[
     "/System",
@@ -44,6 +58,7 @@ const DENIED_PREFIXES: &[&str] = &[
     "/etc",
     "/private/etc",
     "/var/db",
+    "/private/var/db",
     "/Library/Extensions",
     "/dev",
     "/proc",
@@ -58,6 +73,8 @@ pub enum PathRejection {
     NotAbsolute(String),
     #[error("path contains NUL or control characters: {0}")]
     ControlCharacter(String),
+    #[error("path contains a name the platform reads as a different name: {0}")]
+    AmbiguousName(String),
     #[error("path contains a .. component: {0}")]
     ParentTraversal(String),
     #[error("refusing to delete a top-level root: {0}")]
@@ -140,6 +157,22 @@ pub fn validate_path_for_deletion(
         return Err(PathRejection::ControlCharacter(escape(&literal)));
     }
 
+    // ---- 5 (continued): names Win32 would open as something else ----
+    //
+    // NTFS keeps a name that Win32 would not accept when it arrives through `\\?\` or
+    // from WSL, and a directory listing returns it as stored — so a scan can surface
+    // one, and the delete call would open through Win32 and act on a different name.
+    // No other platform has these rules, so nothing runs elsewhere.
+    #[cfg(windows)]
+    for component in candidate.components() {
+        if let Component::Normal(name) = component {
+            let name = name.to_string_lossy();
+            if let Some(reason) = win32_ambiguous_name(&name) {
+                return Err(PathRejection::AmbiguousName(format!("{name} ({reason})")));
+            }
+        }
+    }
+
     // ---- 4: `..` as a full path component ----
     for component in candidate.components() {
         if matches!(component, Component::ParentDir) {
@@ -153,8 +186,12 @@ pub fn validate_path_for_deletion(
     // the empty-variable-collapse guard also fires when the parent is itself a symlink.
     let (parent_literal, parent_resolved) = expected_parent_forms(ctx);
 
+    // Looked up once and passed down: the resolved form is checked again below, and
+    // asking the environment and the filesystem twice would be two chances to disagree.
+    let home = Home::detect();
+
     // ---- 6 / 7 (literal): top-level root, system location, empty-variable collapse ----
-    reject_roots(&normalized)?;
+    reject_roots(&normalized, home.as_ref())?;
     if is_empty_variable_collapse(&normalized, &parent_literal, &parent_resolved) {
         return Err(PathRejection::EmptyVariableCollapse(display(&normalized)));
     }
@@ -165,7 +202,7 @@ pub fn validate_path_for_deletion(
 
     // ---- 6 (resolved): run the same checks on the real path, tighten only ----
     if resolved != normalized {
-        if let Err(rejection) = reject_roots(&resolved) {
+        if let Err(rejection) = reject_roots(&resolved, home.as_ref()) {
             return Err(match (rejection, resolution.crossed_symlink) {
                 (PathRejection::ProtectedLocation(hit), true)
                 | (PathRejection::TopLevelRoot(hit), true) => {
@@ -225,8 +262,13 @@ pub fn whitelist_hit(candidate: &Path, rules: &[PathBuf]) -> Option<PathBuf> {
             .map(|resolution| resolution.resolved)
             .unwrap_or_else(|_| rule_literal.clone());
         for rule_form in [&rule_literal, &rule_resolved] {
+            let rule_key = guard_key(rule_form);
             for candidate_form in [&normalized, &resolved] {
-                if candidate_form == rule_form || candidate_form.starts_with(rule_form) {
+                // Compared through the guard key for the same reason the protected
+                // list is: a rule typed `~/Dev` and a path written `~/dev` name one
+                // directory, and a rule that stops matching when the case changes is
+                // a rule that stops protecting.
+                if key_under(&guard_key(candidate_form), &rule_key) {
                     return Some(rule.clone());
                 }
             }
@@ -271,8 +313,57 @@ fn home_dir() -> PathBuf {
     PathBuf::new()
 }
 
+/// The user's home directory, for the protection check.
+///
+/// Carried as a value rather than read inside the check, so the identity half can be
+/// driven by a test: it needs a directory that really exists, and the process
+/// environment is not a fixture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Home {
+    path: PathBuf,
+    /// What the directory *is*, as opposed to how it is spelled.
+    identity: Option<FileIdentity>,
+}
+
+impl Home {
+    /// The home directory this process should protect, from the environment.
+    fn detect() -> Option<Self> {
+        let path = env_home_dir()?;
+        let identity = file_identity(&path);
+        Some(Self { path, identity })
+    }
+}
+
+/// A file's identity on its volume, as the platform reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    volume: u64,
+    file: u64,
+}
+
+/// The identity of what `path` leads to — a symlink is followed, because what matters
+/// is the directory the deletion would reach.
+#[cfg(unix)]
+fn file_identity(path: &Path) -> Option<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(path).ok()?;
+    Some(FileIdentity {
+        volume: metadata.dev(),
+        file: metadata.ino(),
+    })
+}
+
+/// Windows: a stable (volume serial, file id) pair needs `GetFileInformationByHandle`,
+/// and the `MetadataExt` fields that expose it are unstable. Until the Windows path is
+/// verified on a real machine (D16) this answers nothing, which leaves the spelling and
+/// structural guards exactly as strong as they were — it does not weaken them.
+#[cfg(not(unix))]
+fn file_identity(_path: &Path) -> Option<FileIdentity> {
+    None
+}
+
 /// Top-level root + system location checks.
-fn reject_roots(path: &Path) -> Result<(), PathRejection> {
+fn reject_roots(path: &Path, home: Option<&Home>) -> Result<(), PathRejection> {
     // A component count ≤ 2 means the "/xxx" level: no top-level directory itself may
     // be deleted. This single rule also covers / itself, /etc, /Applications,
     // /Library, /Volumes, /Users, /tmp, /opt, etc., without relying on a
@@ -281,7 +372,7 @@ fn reject_roots(path: &Path) -> Result<(), PathRejection> {
         return Err(PathRejection::TopLevelRoot(display(path)));
     }
 
-    if let Some(hit) = protected_location(path) {
+    if let Some(hit) = protected_location(path, home) {
         return Err(PathRejection::ProtectedLocation(hit));
     }
 
@@ -289,37 +380,37 @@ fn reject_roots(path: &Path) -> Result<(), PathRejection> {
 }
 
 /// Returns the matched rule text when a protected location is hit, otherwise `None`.
-fn protected_location(path: &Path) -> Option<String> {
+///
+/// Every comparison here goes through [`guard_key`]: the list is written in one
+/// spelling, and a path can reach the same directory in another.
+fn protected_location(path: &Path, home: Option<&Home>) -> Option<String> {
+    let key = guard_key(path);
+
     #[cfg(unix)]
     {
         for prefix in DENIED_PREFIXES {
-            let prefix_path = Path::new(prefix);
-            if path == prefix_path || path.starts_with(prefix_path) {
+            if key_under(&key, &guard_key(Path::new(prefix))) {
                 return Some((*prefix).to_string());
             }
         }
 
         // /usr is forbidden as a whole, but /usr/local is where users and package
         // managers install software.
-        let usr = Path::new("/usr");
-        let usr_local = Path::new("/usr/local");
-        if path == usr || (path.starts_with(usr) && !path.starts_with(usr_local)) {
+        let usr = guard_key(Path::new("/usr"));
+        let usr_local = guard_key(Path::new("/usr/local"));
+        if key == usr || (key_under(&key, &usr) && !key_under(&key, &usr_local)) {
             return Some("/usr".to_string());
         }
-        if path == usr_local {
+        if key == usr_local {
             return Some("/usr/local".to_string());
         }
     }
 
     #[cfg(windows)]
     {
-        // Compare on normalised strings rather than `Component`s: `std::fs::canonicalize`
-        // yields a verbatim path (`\\?\C:\...`) whose `Prefix` never equals the `Prefix`
-        // of `%WINDIR%` / `%ProgramFiles%`, so a junction into `C:\Windows` would
-        // otherwise pass. `windows_path_key` folds both forms into one comparable key.
-        let key = windows_path_key(&display(path));
-
-        // A bare drive root (`C:\`) is a top-level root.
+        // The key already folds `\\?\` and separators, so a junction into `C:\Windows`
+        // compares equal to `%WINDIR%` even though their `Component::Prefix` values
+        // differ — which is why this compares strings rather than `Path`s.
         if key.len() == 2 && key.ends_with(':') {
             return Some(display(path));
         }
@@ -327,7 +418,7 @@ fn protected_location(path: &Path) -> Option<String> {
         for name in ["WINDIR", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"] {
             if let Some(root) = std::env::var_os(name) {
                 let root_display = root.to_string_lossy().into_owned();
-                if windows_key_under(&key, &windows_path_key(&root_display)) {
+                if key_under(&key, &windows_path_key(&root_display)) {
                     return Some(root_display);
                 }
             }
@@ -336,9 +427,19 @@ fn protected_location(path: &Path) -> Option<String> {
 
     // The user's home directory itself may not be deleted; contents under it are not
     // restricted by this rule.
-    if let Some(home) = env_home_dir() {
-        if path == home {
-            return Some(display(&home));
+    //
+    // Matched by identity as well as by spelling. A second route to the same directory
+    // — a link, or a parent reached through one — is invisible to a string comparison
+    // and visible to this one, and the symlink checks do not cover it because the link
+    // sits above the scan root, which is the user's own choice of root.
+    if let Some(home) = home {
+        if key == guard_key(&home.path) {
+            return Some(display(&home.path));
+        }
+        if let (Some(candidate), Some(known)) = (file_identity(path), home.identity) {
+            if candidate == known {
+                return Some(display(&home.path));
+            }
         }
     }
 
@@ -410,7 +511,52 @@ fn is_home_root_shape(path: &Path) -> bool {
     if segments.next().is_some() {
         return false;
     }
-    first.eq_ignore_ascii_case("Users") || first == "home"
+    // Both roots are folded: `/Users` was already, while `/HOME/andy` was not
+    // recognised at all — the same directory, reachable under a spelling the
+    // structural fallback did not cover.
+    first.eq_ignore_ascii_case("Users") || first.eq_ignore_ascii_case("home")
+}
+
+/// The comparison key for a path, used by every check that decides protection.
+///
+/// `Path::starts_with` compares components byte for byte and never asks the
+/// filesystem, while `realpath` does not correct the case of a name it passes
+/// through. On a filesystem that ignores case — macOS by default, Windows always —
+/// `/SYSTEM` and `/System` are the same directory, so a candidate spelled the first
+/// way used to walk past the protected-location list. Folding case before comparing
+/// is what makes the guard independent of how the path was written.
+///
+/// Folding can only ever **add** refusals, which is the direction D10 requires, so it
+/// is applied on every unix as well rather than only where the filesystem ignores
+/// case: a name that folds onto a protected prefix is a name no legitimate project
+/// uses, and the two platforms then behave the same way.
+///
+/// What is *reported* is unaffected — a rejection still quotes the path as it was
+/// given (see `ValidatedPath::target` and the rejection's evidence).
+fn guard_key(path: &Path) -> String {
+    // Windows additionally folds separators and the verbatim prefix; both forms of
+    // `\\?\C:\...` have to compare equal.
+    #[cfg(windows)]
+    let key = windows_path_key(&display(path));
+    #[cfg(not(windows))]
+    let key = display(path).to_lowercase();
+    key
+}
+
+/// Whether `path_key` names `root_key` itself or sits underneath it.
+///
+/// The comparison respects component boundaries: `/var/dbx` is **not** under
+/// `/var/db`. A plain string prefix would say it was, which is a looser answer than
+/// the component comparison this replaces — the opposite of the direction D10 allows.
+/// Both separators are accepted because the key's separator depends on the platform.
+fn key_under(path_key: &str, root_key: &str) -> bool {
+    if root_key.is_empty() {
+        return false;
+    }
+    match path_key.strip_prefix(root_key) {
+        Some(rest) => rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\'),
+        None => false,
+    }
 }
 
 /// Canonical, platform-independent comparison key for a Windows path string.
@@ -431,14 +577,49 @@ fn windows_path_key(raw: &str) -> String {
     key.trim_end_matches('\\').to_lowercase()
 }
 
-/// Whether `path_key` is `root_key` itself or sits under it, respecting component
-/// boundaries (so `c:\windows` is not treated as being under `c:\win`).
-#[cfg(windows)]
-fn windows_key_under(path_key: &str, root_key: &str) -> bool {
-    !root_key.is_empty()
-        && path_key
-            .strip_prefix(root_key)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with('\\'))
+/// Why Win32 would read a single component as a *different* name, or `None`.
+///
+/// Four rules make the name on disk differ from the name Win32 opens: a trailing `.`
+/// or space is stripped, `NUL` / `CON` / `PRN` / `AUX` / `COM1`…`LPT9` name devices in
+/// any directory, and what follows a `:` is an alternate data stream. Only Win32 has
+/// them; the predicate is a pure function of `&str` so its table can be tested
+/// anywhere, and it is *applied* only on Windows.
+#[cfg(any(windows, test))]
+fn win32_ambiguous_name(component: &str) -> Option<&'static str> {
+    if component.ends_with('.') || component.ends_with(' ') {
+        return Some("a trailing dot or space, which Win32 strips");
+    }
+    if component.contains(':') {
+        return Some("a colon, which Win32 reads as an alternate data stream");
+    }
+    // The device rules match the stem — everything before the first dot, right-trimmed
+    // — so `NUL.txt` is as reserved as `NUL`.
+    let stem = component.split('.').next().unwrap_or(component).trim_end();
+    if is_reserved_device_name(stem) {
+        return Some("a device name, reserved in every directory");
+    }
+    None
+}
+
+/// Whether `stem` is one of the names Win32 treats as a device.
+///
+/// The digits are `1`–`9`: `COM0` and `LPT0` are ordinary names, and `COM10` is not a
+/// device either, so a prefix match on `COM` alone would refuse both.
+#[cfg(any(windows, test))]
+fn is_reserved_device_name(stem: &str) -> bool {
+    const FIXED: &[&str] = &["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"];
+    if FIXED.iter().any(|name| stem.eq_ignore_ascii_case(name)) {
+        return true;
+    }
+    let upper = stem.to_ascii_uppercase();
+    for prefix in ["COM", "LPT"] {
+        if let Some(digit) = upper.strip_prefix(prefix) {
+            if digit.len() == 1 && matches!(digit.as_bytes()[0], b'1'..=b'9') {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// The literal (lexically normalised) and resolved forms of the expected parent.
@@ -454,12 +635,17 @@ fn expected_parent_forms(ctx: &DeletionContext) -> (PathBuf, PathBuf) {
 }
 
 /// Whether the candidate equals either form of the expected parent (check 7).
+///
+/// Compared through the guard key: `~/Dev` and `~/dev` are one directory, and a
+/// collapse guard that misses one spelling of the parent is a guard that lets an
+/// empty variable through on the machine where it matters.
 fn is_empty_variable_collapse(
     candidate: &Path,
     parent_literal: &Path,
     parent_resolved: &Path,
 ) -> bool {
-    candidate == parent_literal || candidate == parent_resolved
+    let key = guard_key(candidate);
+    key == guard_key(parent_literal) || key == guard_key(parent_resolved)
 }
 
 /// Lexical normalisation: drop `.`, collapse `..`, and never touch the filesystem.
@@ -642,6 +828,275 @@ mod tests {
             Path::new("/Users/andy/MySrc/proj/node_modules")
         );
         assert!(!validated.is_symlink);
+    }
+
+    /// A mixed-case spelling of `path`, the way a paste or a completion produces one.
+    #[cfg(unix)]
+    fn alternate_case(path: &str) -> String {
+        path.chars()
+            .enumerate()
+            .map(|(index, ch)| {
+                if index % 2 == 0 {
+                    ch.to_ascii_uppercase()
+                } else {
+                    ch
+                }
+            })
+            .collect()
+    }
+
+    /// The protected list under three spellings.
+    ///
+    /// This is also the mutation check the proposal asks for: remove the folding from
+    /// `guard_key` and every upper- or mixed-case row below stops being refused, so the
+    /// test fails rather than silently passing.
+    #[test]
+    #[cfg(unix)]
+    fn refuses_a_protected_location_whatever_case_it_is_written_in() {
+        for prefix in DENIED_PREFIXES {
+            // A depth-2 child: every entry is a *prefix* rule, so this is what a real
+            // candidate looks like.
+            let child = format!("{prefix}/child");
+            for spelling in [
+                child.to_uppercase(),
+                child.to_lowercase(),
+                alternate_case(&child),
+            ] {
+                assert_rejected(&spelling, &ctx());
+            }
+        }
+
+        // The same, for the `/usr` rule, which is written separately from the list
+        // because `/usr/local` is carved out of it.
+        assert_rejected("/USR/bin/tool", &ctx());
+        assert_rejected("/UsR/BiN/tool", &ctx());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn refuses_the_canonical_spelling_of_a_symlinked_protected_location() {
+        // `/var` and `/etc` are symlinks into `/private`, so each of these names one
+        // directory under two spellings. The list carried only the short form, and a
+        // candidate written the canonical way matched neither the literal comparison
+        // nor the resolved one — it was accepted.
+        assert_rejected("/private/var/db/x", &ctx());
+        assert_rejected("/private/etc/x", &ctx());
+        // The short form keeps being refused.
+        assert_rejected("/var/db/x", &ctx());
+        assert_rejected("/etc/x", &ctx());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn folding_case_does_not_turn_ordinary_paths_into_protected_ones() {
+        // Each of these differs from a protected prefix by at least one whole
+        // component, which is what `key_under` has to keep true: a plain string prefix
+        // would treat `/var/db-backup` as being under `/var/db`, and a guard that
+        // refuses a user's backup directory is a guard that gets turned off.
+        for path in [
+            "/Users/andy/MySrc/proj/node_modules",
+            "/Volumes/External/repo/dist",
+            "/usr/local/src/proj/target",
+            "/var/db-backup/proj",
+            "/Systematic/proj",
+            "/development/proj",
+            "/etcetera/proj",
+        ] {
+            validate_path_for_deletion(Path::new(path), &ctx())
+                .unwrap_or_else(|error| panic!("should be accepted: {path} ({error})"));
+        }
+    }
+
+    #[test]
+    fn the_home_root_shape_is_recognised_in_either_spelling() {
+        // `Users` was folded and `home` was compared exactly, so `/HOME/andy` — the
+        // same shape on the platforms where the root is spelled that way — was not
+        // recognised at all.
+        for path in [
+            "/Users/example",
+            "/USERS/example",
+            "/home/example",
+            "/HOME/example",
+        ] {
+            assert_rejected(path, &ctx());
+        }
+        // A child of a home root is not protected by this rule.
+        validate_path_for_deletion(Path::new("/Users/example/proj"), &ctx())
+            .expect("a project under a home root is ordinary");
+    }
+
+    #[test]
+    fn whitelist_rules_match_whatever_case_either_side_uses() {
+        let rules = vec![PathBuf::from("/Users/andy/Dev")];
+        for candidate in [
+            "/Users/andy/Dev/proj",
+            "/Users/andy/dev/proj",
+            "/USERS/ANDY/DEV/proj",
+        ] {
+            assert!(
+                whitelist_hit(Path::new(candidate), &rules).is_some(),
+                "a rule protects one directory, not one spelling of it: {candidate}"
+            );
+        }
+        // A sibling that only shares a string prefix is not protected.
+        assert!(whitelist_hit(Path::new("/Users/andy/Development/proj"), &rules).is_none());
+    }
+
+    #[test]
+    fn the_collapse_guard_compares_through_the_guard_key() {
+        // The parent written with a different case is still the parent; missing it
+        // would let an empty variable through on a filesystem that ignores case.
+        let context = DeletionContext::new("/expected/parent");
+        assert!(matches!(
+            validate_path_for_deletion(Path::new("/EXPECTED/PARENT"), &context),
+            Err(PathRejection::EmptyVariableCollapse(_))
+        ));
+    }
+
+    #[test]
+    fn the_guard_key_folds_case_and_respects_component_boundaries() {
+        assert_eq!(guard_key(Path::new("/System/Library")), "/system/library");
+        assert!(key_under("/var/db/x", "/var/db"));
+        assert!(!key_under("/var/db-backup", "/var/db"));
+        assert!(!key_under("/anywhere", ""));
+        // Both separators are accepted: the key's separator depends on the platform.
+        assert!(key_under(r"c:\windows\system32", r"c:\windows"));
+        assert!(!key_under(r"c:\windowsapps", r"c:\windows"));
+    }
+
+    #[test]
+    fn refuses_the_home_directory_reached_by_a_different_route() {
+        // The environment's home is protected by spelling; a second route to the same
+        // directory is not a second spelling. The identity half is what catches it, and
+        // it needs a directory that exists — hence a fixture rather than `HOME`.
+        let temp = TempDir::new("home-identity");
+        let real_home = temp.path().join("real-home");
+        std::fs::create_dir_all(&real_home).expect("create the fake home");
+        let sibling = temp.path().join("sibling");
+        std::fs::create_dir_all(&sibling).expect("create the sibling");
+
+        let home = Home {
+            path: real_home.clone(),
+            identity: file_identity(&real_home),
+        };
+        assert!(
+            home.identity.is_some(),
+            "the fixture is a real directory, so its identity is known"
+        );
+
+        // The canonical spelling, matched as before.
+        assert!(protected_location(&real_home, Some(&home)).is_some());
+
+        // The same directory through a link: a different string, the same file.
+        let link = temp.path().join("link-to-home");
+        std::os::unix::fs::symlink(&real_home, &link).expect("symlink to the fake home");
+        assert!(
+            protected_location(&link, Some(&home)).is_some(),
+            "a link to the home directory is the home directory"
+        );
+
+        // A sibling of it is not, and neither is a child of the home directory: the
+        // rule protects the directory itself, not everything near or under it.
+        assert!(protected_location(&sibling, Some(&home)).is_none());
+        assert!(protected_location(&real_home.join("projects"), Some(&home)).is_none());
+    }
+
+    #[test]
+    fn the_checks_run_in_the_order_the_contract_states() {
+        // D10 says the path must pass *the eight checks in order*. The set was tested;
+        // the order was not — two checks could swap and every other test would still
+        // pass, even though the order decides which rejection the user is shown. Each
+        // case below applies at least two rules, so it pins the one that wins.
+        let protected = DeletionContext::new("/expected/parent");
+        let whitelisted = DeletionContext::new("/elsewhere")
+            .with_whitelist(vec![PathBuf::from("/protected/area")]);
+        let collapsing = DeletionContext::new("/expected/parent")
+            .with_whitelist(vec![PathBuf::from("/expected/parent")]);
+
+        // A control character (check 5) beats a `..` component (check 4).
+        assert!(matches!(
+            validate_path_for_deletion(Path::new("/a\u{7}/../b"), &protected),
+            Err(PathRejection::ControlCharacter(_))
+        ));
+        // `..` beats the protected list.
+        assert!(matches!(
+            validate_path_for_deletion(Path::new("/System/../bin/tool"), &protected),
+            Err(PathRejection::ParentTraversal(_))
+        ));
+        // Within check 6, being a top-level root is decided before the protected list.
+        assert!(matches!(
+            validate_path_for_deletion(Path::new("/System"), &protected),
+            Err(PathRejection::TopLevelRoot(_))
+        ));
+        // A protected location beats an empty-variable collapse.
+        assert!(matches!(
+            validate_path_for_deletion(Path::new("/System/Library"), &protected),
+            Err(PathRejection::ProtectedLocation(_))
+        ));
+        // A collapse beats the whitelist, which is the last check of all.
+        assert!(matches!(
+            validate_path_for_deletion(Path::new("/expected/parent"), &collapsing),
+            Err(PathRejection::EmptyVariableCollapse(_))
+        ));
+        // And what the whitelist still catches, once nothing earlier applies.
+        assert!(matches!(
+            validate_path_for_deletion(Path::new("/protected/area/proj"), &whitelisted),
+            Err(PathRejection::Whitelisted(_))
+        ));
+    }
+
+    #[test]
+    fn recognises_the_names_win32_would_read_as_something_else() {
+        for name in [
+            // Devices, in any directory, matched on the stem.
+            "NUL",
+            "nul",
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL.txt",
+            "con.log",
+            "COM1",
+            "COM9",
+            "LPT1",
+            "LPT9",
+            "COM1.dat",
+            // Stripped by Win32, so the name on disk is not the name it opens.
+            "trailing.",
+            "trailing ",
+            // An alternate data stream.
+            "stream:name",
+        ] {
+            assert!(
+                win32_ambiguous_name(name).is_some(),
+                "{name} should be read as a different name by Win32"
+            );
+        }
+
+        for name in [
+            // The rules match whole names, not prefixes: these are ordinary files.
+            "concepts",
+            "nul-test",
+            "console",
+            "COM0",
+            "LPT0",
+            "COM10",
+            "a.b",
+            "archive.tar.gz",
+        ] {
+            assert!(
+                win32_ambiguous_name(name).is_none(),
+                "{name} is an ordinary name and must not be refused"
+            );
+        }
+
+        // `Report.` is legal on macOS and is named here on purpose: the *predicate*
+        // answers what Win32 would do with the name — it strips the dot — while the
+        // guard that uses it runs only on Windows. A macOS path may keep the dot.
+        assert!(win32_ambiguous_name("Report.").is_some());
+        #[cfg(not(windows))]
+        validate_path_for_deletion(Path::new("/tmp/Report."), &ctx())
+            .expect("the Win32 rule must not reach a platform that does not have it");
     }
 
     #[test]

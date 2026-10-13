@@ -1,0 +1,9 @@
+# Stated rather than assumed: 100 is rustfmt's own default, so this file changes no
+# formatting. It is here so the intent survives a future rustfmt that picks a
+# different default, and so a reader does not have to know what that default is.
+max_width = 100
+
+# The workspace is edition 2021 (see the root Cargo.toml). rustfmt reads the edition
+# from the manifest, but stating it here keeps `cargo fmt` on a single file consistent
+# with the workspace.
+edition = "2021"

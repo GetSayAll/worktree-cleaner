@@ -73,7 +73,7 @@ Before a scan, only "Welcome" in the sidebar is available; data pages appear onl
 ### 3. Overview
 
 - Three large cards: safe to clean (count + releasable space), needs confirmation (count), must not be deleted (count).
-- Main number: **estimated releasable space** (the sum of checked Safe + Review items).
+- Main number: **estimated releasable space** (the sum of checked Safe + Review items). It is an estimate and is presented as one: items whose size could not be measured contribute nothing to it and are counted separately, so any total that includes one is shown as a lower bound (`≥`).
 - Two summary lists: the 5 largest worktrees and the 5 largest build artifacts; each row includes a level badge and a one-line primary reason, and clicking jumps to the corresponding page.
 - Scan warning area (if any).
 - Primary button: "Generate cleanup plan" — disabled with an explanation when nothing is checked.
@@ -139,7 +139,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 ### 7. Execution result
 
 - Per-item results: success / skipped / failed, each with its reason.
-- Summary: space released, number of directories moved to the Trash, worktree metadata cleanup result.
+- Summary: space released, number of directories moved to the Trash, worktree metadata cleanup result. **Space released counts only items whose result was `Ok`, and only their measured bytes**: an artifact that left together with its worktree was not a separate move, a skipped or failed item freed nothing, and an item whose size was never measurable is counted as unknown rather than as `0 B`. The volume's free space is not read before and after, so nothing here claims to be exact.
 - Failed items: provide copyable reason text and the corresponding command, for manual handling.
 - Action buttons: "Open Trash", "View log", "Rescan".
 
@@ -356,8 +356,11 @@ Any deletion action must pass the following in order:
 2. If the path itself is a symlink, resolve the target and re-verify the target.
 3. If any **ancestor** of the path is a symlink, resolve it and re-verify (used only to tighten, never to loosen).
 4. Reject a `..` appearing as a complete path component.
-5. Reject paths containing control characters.
-6. After normalization, reject system and top-level roots: `/`, `/bin`, `/sbin`, `/usr` (except `/usr/local`), `/System`, `/etc`, `/var/db`, `/Applications`, `/Library`, `/Volumes`, `/Users`, and the user's home directory itself; on Windows, the corresponding `C:\`, `%WINDIR%`, `%ProgramFiles%`, and the user directory itself.
+5. Reject paths containing control characters, and — on Windows — a path component that platform would read as a different name: one ending in a dot or a space (Win32 strips it), one containing a colon (an alternate data stream), or a device name such as `NUL`, `CON`, `COM1` or `LPT1` (reserved in every directory). NTFS keeps such names when they arrive through `\\?\` or from WSL, so a directory listing can hand one to the delete call while Win32 opens something else.
+6. After normalization, reject system and top-level roots: `/`, `/bin`, `/sbin`, `/usr` (except `/usr/local`), `/System`, `/etc`, `/var/db`, `/Applications`, `/Library`, `/Volumes`, `/Users`, and the user's home directory itself; on Windows, the corresponding `C:\`, `%WINDIR%`, `%ProgramFiles%`, and the user directory itself. Two properties of this check are part of it, both added after they were found to be missing:
+
+   - **The comparison ignores case on platforms whose filesystems do**, and every entry whose parent is a symlink is listed under both spellings (`/var/db` and `/private/var/db`). `realpath` does not correct the case of a name it passes through, so `/SYSTEM/Library/CoreServices` reached the same directory as `/System/Library/CoreServices` and was accepted; one spelling of one directory had two answers, and the canonical one was wrong. Folding can only add refusals.
+   - **The home directory is matched by identity as well as by spelling** (on Unix, by device and inode), so a link to it is refused as the home directory. A second route to the same directory is invisible to a string comparison, and the symlink checks do not cover it: the link sits above the scan root, which is the user's own choice of root.
 7. Reject an empty path that would make the parent directory become a variable after deletion (if the concatenated path equals the expected parent directory, reject).
 8. Whitelist check.
 
@@ -368,6 +371,11 @@ Item 6 also guards against accidents such as "a variable being empty during conc
 - The plan records each target's identity (path + size + modification time, optionally inode).
 - Re-check the identity before execution; if it doesn't match, skip the item and require a rescan.
 - For artifacts at the "Safe" level, re-run the activity check once before execution; if it has become active, suspend the item and hand it back to the user for confirmation.
+
+**What this guarantees, and what it does not.** The re-check closes the gap between planning and execution for the facts the plan was built from — the path, the size, the modification time, the level, and the activity window. It does not, and cannot, close the window between the re-check and the system call itself. In that window two things are outside our control, and the contract states them rather than implying otherwise:
+
+- **A leaf swapped for a symlink is moved as the link.** Both backends resolve the parent and act on the final name, so the link is what leaves; the directory it points at is untouched. This is a property of the backend we call, and moving a link is the intended behaviour for an artifact that is itself one.
+- **A parent directory replaced in that window is not detected.** The validated path names a location, not an object, and a rename of the parent between validation and the move is invisible to us. What limits the damage is that the target must still be a `Safe` item at a path the user selected, and that directories go to the Trash rather than being destroyed.
 
 ### 6.6 Logging and traceability
 

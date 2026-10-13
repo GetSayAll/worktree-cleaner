@@ -78,6 +78,22 @@ baz/
 /proc/self/environ
 /sys/kernel/mm
 
+# --- the same protected locations, spelled the way the filesystem also answers ---
+# macOS ignores case by default and `realpath` does not correct the case of a name it
+# passes through, so `/SYSTEM` reaches the same directory as `/System`. A protected
+# list written in one spelling is only as good as the spelling the user happened to
+# type: every entry below was accepted before the comparison went through a guard key.
+/SYSTEM/Library/CoreServices
+/BIN/sh
+/SBIN/mount
+/LIBRARY/EXTENSIONS/foo.kext
+/DEV/null
+/USR/bin/git
+# `/var` and `/etc` are symlinks into `/private`, so each of these directories has two
+# canonical spellings and the list has to carry both; only the short form was listed.
+/private/var/db
+/private/var/db/whatever
+
 # --- collapse to a top-level root after normalisation ---
 //
 ///

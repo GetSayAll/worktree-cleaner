@@ -520,7 +520,9 @@ function buildPlan(): CleanupPlan {
         branch: w.branch,
         command: w.is_prunable
           ? "git worktree prune"
-          : `git worktree remove${needsForce ? " --force" : ""} "${w.path}"`,
+          // `--` before the path, as the executor does: what is shown has to be what
+          // runs.
+          : `git worktree remove${needsForce ? " --force" : ""} -- "${w.path}"`,
         force: needsForce,
         untracked_files: w.untracked_file_list,
         size_bytes: w.size_bytes
@@ -637,7 +639,7 @@ export async function executeCleanup() {
       // `null` disables the audit log, which the user is then told about.
       log_path: await logPath()
     });
-    await     applyOutcome(outcome);
+    await applyOutcome(outcome, plan);
   } catch (error) {
     executeError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -646,7 +648,7 @@ export async function executeCleanup() {
 }
 
 /** Turns the executor's answer into what the result page shows. */
-async function applyOutcome(outcome: ExecutionOutcome) {
+async function applyOutcome(outcome: ExecutionOutcome, plan: CleanupPlan) {
   // A whitelist-blocked item never reaches the executor — it was filtered out of
   // both channels before the plan was built — so it is added back here as its own
   // skipped row. Leaving it out would make the plan page's count disagree with
@@ -660,7 +662,7 @@ async function applyOutcome(outcome: ExecutionOutcome) {
   }));
 
   lastResult.value = [...outcome.entries, ...blocked];
-  resultSummary.value = summarise(lastResult.value);
+  resultSummary.value = summarise(lastResult.value, plan);
   logError.value = outcome.log_error;
   acknowledged.value = false;
   confirmText.value = "";
@@ -674,10 +676,19 @@ async function applyOutcome(outcome: ExecutionOutcome) {
  * Counts a run for the four cards.
  *
  * Only actions that really removed something contribute bytes: a `prune` entry
- * cleans metadata and frees nothing, and a skipped one removed nothing at all.
- * A `null` size counts as unmeasurable rather than as zero (section 3).
+ * cleans metadata and frees nothing, and a skipped one removed nothing at all. A
+ * `null` size counts as unmeasurable rather than as zero (section 3).
+ *
+ * An artifact that left together with its worktree is not a separate move. The
+ * executor reports it as 0 bytes, which is indistinguishable from a genuinely empty
+ * directory — so the plan, which knows which is which, decides.
  */
-function summarise(entries: ResultEntry[]) {
+function summarise(entries: ResultEntry[], plan: CleanupPlan) {
+  const bundled = new Set(
+    plan.trash_moves
+      .filter((move) => move.bundled_with_worktree !== null)
+      .map((move) => move.path)
+  );
   let freed = 0;
   let freedUnknown = 0;
   let trashed = 0;
@@ -694,9 +705,7 @@ function summarise(entries: ResultEntry[]) {
         removed += 1;
         break;
       case "trash-move":
-        // The executor reports a bundled artifact as 0 bytes: it left together
-        // with its worktree and was not a separate deletion.
-        if ((entry.size_bytes ?? 0) > 0) trashed += 1;
+        if (!bundled.has(entry.target)) trashed += 1;
         break;
       case "prune":
         continue;

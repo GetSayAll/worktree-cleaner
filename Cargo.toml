@@ -12,3 +12,28 @@ repository = "https://github.com/GetSayAll/worktree-cleaner"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+
+# The gate, stated once for the whole workspace (`pnpm lint:rust`).
+#
+# `all` is denied, so a new default-level lint fails the build rather than scrolling
+# past. `unsafe_code` is denied because nothing here needs it: the deletion path goes
+# through the Trash and Git, and the platform calls the `trash` crate makes are its
+# business, not ours.
+#
+# `pedantic` and `nursery` are warnings, not denials, and that is a temporary state:
+# they are enabled so the count is visible and does not grow unnoticed, and the
+# current tally is recorded in AGENTS.md. Raising them to `deny` is the second half of
+# this change and needs the triage first — a gate switched on while it is still red
+# gets switched off again.
+#
+# `unused` is denied (it is a warning by default) so a leftover variable or import
+# fails the gate rather than being scrolled past, which is the behaviour the proposal's
+# acceptance check asks for.
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused = "deny"
+
+[workspace.lints.clippy]
+all = "deny"
+pedantic = "warn"
+nursery = "warn"

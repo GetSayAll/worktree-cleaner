@@ -68,7 +68,7 @@ bug. D17–D23 are form-factor and repository-wide constraints.
 | D7 | An artifact directory name is only a candidate hint. The verdict must rest on: whether Git tracks it, whether it holds authored content, its activity, and whether it is a symlink escaping the project | "It is called build, so delete it" destroys source code | Counter-example test: a `build/` directory containing tracked files must be Unsafe |
 | D8 | An artifact directory must never be treated as a project root and walked into | Treating `node_modules` as a project root deletes package-internal `dist/`, leaving a tree that looks installed but is corrupt and needs a network restore | Counter-example test: a `node_modules` containing `package.json` must not be recognised as a project root |
 | D9 | Every decision carries four elements: `code` + `severity` + `text` + `evidence` | "A verifiable reason" is the core promise of this product | Struct fields are not optional; every reason in the UI can be expanded to show its evidence |
-| D10 | Before deletion, the path must pass the eight checks in order, and verification may only tighten — a resolved path never grants permission the literal path lacked | Guards against symlink escape and empty-variable collapse | The whole fuzz corpus is rejected; the ancestor-symlink case is rejected |
+| D10 | Before deletion, the path must pass the eight checks **in order**, and verification may only tighten — a resolved path never grants permission the literal path lacked. Protection is decided on a case-folded comparison key, so a protected location is refused in **any** spelling of it (macOS ignores case, and `realpath` does not correct it), and on Windows a component Win32 would read as a different name is refused outright | Guards against symlink escape, spelling tricks, and empty-variable collapse | The whole fuzz corpus is rejected — including the case variants and both canonical spellings of every symlinked protected location; the ancestor-symlink case is rejected; and the precedence of the checks is pinned by a test that applies two rules at once and asserts which one is reported |
 | D11 | Between plan generation and execution, the target identity (path + size + mtime) and its activity are re-checked | Guards against "safe when planned, changed when executed" | Modify the target after planning and assert the item is skipped |
 | D12 | Default selection: `Safe` is selected, `Review` is not, `Unsafe` checkboxes are disabled | Defaults must be conservative | Both the UI and the execution layer have tests for this |
 | D13 | High-risk confirmation: 5 or more items, or any `--force`, or more than 10 GB freed in one run requires an explicit manual acknowledgement | Large actions need a human pause | The plan object exposes `ack_reasons`; the execute button stays disabled until acknowledged |
@@ -125,16 +125,23 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   **additive only**: a semantic change requires a new code, and retired codes are
   marked deprecated but never reused.
 - `src/types.ts` matches the Rust structs field for field. A change on either side
-  must be mirrored on the other side within the same commit, backed by a test (the
-  Rust side asserts a serialise/deserialise round trip on a sample).
+  must be mirrored on the other side within the same commit, and
+  `src/architecture.test.ts` now enforces it mechanically: it reads the field names
+  out of both sources and fails when they disagree, for `ProjectSnapshot`,
+  `WorktreeRecord`, `ArtifactRecord`, `CleanupPlan`, `ResultEntry`, `HistoryEntry`,
+  `ScanOptions`, `ExecutionOutcome`, `Reason` and `SafetyAssessment`, and compares
+  the `wt.*` / `af.*` code lists the same way. The Rust side additionally asserts a
+  serialise/deserialise round trip on a sample.
 - Optional numbers use `Option<u64>` (front end: `number | null`):
   **"cannot be measured" must be distinguishable from "0"**, and the UI shows
   `unknown` and `0 B` respectively.
 - Every reason must carry a non-empty `text` and a non-empty `evidence`. The
   constructors assert this in test builds.
 - Internal naming is free, but field names that appear externally, reason codes,
-  and command text (such as `git worktree remove --force "<path>"`) are part of the
-  contract and must not change casually.
+  and command text (such as `git worktree remove --force -- "<path>"`) are part of
+  the contract and must not change casually. A path reaches Git after a `--`
+  separator, and the command shown in the plan is the one the executor builds: the
+  executor re-derives it from its own re-check rather than parsing that string.
 - Language: identifiers, comments, documentation, commit messages, file names, and
   user-visible strings are all English (D23). The only exception is UI locale data
   under `src/i18n/`: table keys and file names stay English, the English table is
@@ -145,6 +152,13 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   `src/i18n/index.ts`, which is the single swap point for adding a locale. Domain
   text produced by the scanner (a reason's `text` and `evidence`) is data rather
   than UI chrome and stays with the record.
+- **"Released space" counts only items whose result is `Ok`.** An artifact that left
+  together with its worktree was not a separate move, a skipped or failed item freed
+  nothing, and an item whose size was never measurable contributes to
+  `freed_unknown` rather than to `freed` — a figure that cannot be stood behind is
+  worse than a smaller figure. Every total on screen is an estimate and is presented
+  as one; the volume's free space is not read before and after, so no figure claims
+  to be exact.
 - The locale registry is reactive: `index.ts` exports a reactive `messages`
   object plus `applyLocale(choice)`, which resolves `system` through
   `navigator.languages`, replaces the top-level keys, and updates
@@ -170,11 +184,24 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   - `node_modules` mistaken for a project root;
   - a path that collapses into its parent because a variable was empty;
   - an **ancestor** of the path being a symlink that points somewhere dangerous;
-  - artifact size measurement timing out, which must produce Review and display
-    `unknown` rather than 0;
+  - artifact size measurement timing out, which must display `unknown` rather than 0
+    and must **leave the verdict where it was** — the verdict never depended on the
+    size (see decision 5 in section 7);
   - the target being replaced, or becoming active, after the plan was generated.
+- A protected location must be refused in **every spelling that reaches it**: any
+  case (`/SYSTEM/Library/CoreServices`), and both the symlink spelling and the
+  canonical spelling of a location whose parent is a symlink (`/var/db` and
+  `/private/var/db`). The order of the eight checks is pinned as well — a case that
+  applies two rules at once asserts which rejection is reported, because the order
+  decides what the user is told.
 - Front end: any UI change must leave `vue-tsc --noEmit` at zero errors and the
   build passing.
+- Rust: `pnpm lint:rust` must pass. It runs `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets`, and what that fails on is declared in
+  `[workspace.lints]` in the root `Cargo.toml`: `clippy::all`, the rustc `unused`
+  group, and `unsafe_code` are **denied**. `clippy::pedantic` and `clippy::nursery`
+  are enabled as warnings, with the current count recorded in `AGENTS.md`; a green
+  gate therefore does **not** mean pedantic-clean.
 - Platform: macOS verifies the Trash path on a real machine before every release;
   Windows verifies the Recycle Bin path separately. Both results are recorded
   separately.
@@ -326,9 +353,9 @@ guarantee is named next to it.
 |---|---|---|
 | P0 | 1 · `cargo test` green | Met — 141 unit tests plus four integration files (8 + 5 + 3 + 4) |
 | P0 | 2 · every `wt.*` reason code has a test case | Met — all 16 `wt.*` codes have a positive and a negative case, and every reason asserts non-empty `text` and `evidence` |
-| P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 78 entries, plus a generated property test over 20,000 random paths |
+| P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 86 entries. The floor is set to the current count rather than left at 60, so the corpus cannot shrink unnoticed; a generated property test covers 20,000 random paths on top |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
-| P0 | 5 · `cargo clippy -- -D warnings` | Met |
+| P0 | 5 · `cargo clippy -- -D warnings` | Met, and widened into a real gate: `pnpm lint:rust` runs the format check and `cargo clippy --workspace --all-targets`, with `clippy::all`, the rustc `unused` group and `unsafe_code` denied in `[workspace.lints]`. `clippy::pedantic` and `clippy::nursery` are warnings — around 200 findings today — and are recorded in `AGENTS.md`, so a green gate is not the same as pedantic-clean |
 | P1 | 1 · a tracked `build/` is `Unsafe`, evidence naming the match count | Met — unit, plus a real repository where `dist/` is committed despite an ignore rule |
 | P1 | 2 · `node_modules` is not recognised as a project root | Met — the walk never descends into a directory it has recognised as an artifact, and a real scan reports one record per worktree |
 | P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met for `.git`. **Credential files are not detected** — open item 4 |
@@ -526,24 +553,52 @@ arbitrary later.
     "Settings" breaks on a Chinese machine, and this repository runs on one. A
     selector is the only thing about a button that a translation cannot change.
 
-**Proposed (awaiting approval)**
+**Proposals (reviewed, and settled)**
 
-`docs/proposals.md` records ten proposals — one of them with an optional half —
-**none of them implemented**. They came from a review of the deletion guards in
-`path.rs` and of the working tree as it stood on 2026-10-12. In one line each: the
-protected-location comparison is spelling-sensitive in two ways (case, and a
-canonical spelling missing from the list); the four Win32 rules that make a name on
-disk different from the name Win32 opens are not covered; the home directory is
-matched only by spelling; paths reach Git without a `--` separator and the
-check-to-act window is not written down; the desktop wiring has since landed, so
-the proposal that the Execute button still ran the front-end simulation is closed;
-"released space" has no definition and a simulation is not labelled as one; the
-Rust-to-TypeScript field contract is asserted by nothing; there is no Rust lint
-policy, pinned toolchain or formatter; `AGENTS.md` has no routing table; and the
-order of D10's checks and the size of the fuzz corpus are untested.
+`docs/proposals.md` records ten proposals and one optional half. Each is now either
+implemented or rejected, and that file carries the outcome per item. They came from a
+review of the deletion guards in `path.rs` and of the working tree as it stood on
+2026-10-12.
 
-Approving an item means its documentation change and its code change land in the
-same commit.
+Implemented on 2026-10-12:
+
+- **P-1 · the protected-location comparison.** Every comparison that decides
+  protection now goes through a case-folded guard key, the list carries both
+  spellings of each symlinked location, and the home-root shape is folded on both
+  names. `/SYSTEM/Library/CoreServices` and `/private/var/db/x` were accepted before
+  this; both are corpus entries now.
+- **P-2 · names Win32 reads differently.** A component ending in a dot or a space,
+  containing a colon, or naming a device is refused — on Windows only, since no other
+  platform has the rules. The predicate is a pure function of `&str`, so its table is
+  tested everywhere.
+- **P-3 · the home directory by identity.** On Unix it is matched by `(device, inode)`
+  as well as by spelling, so a link to it is refused as the home directory. Windows
+  identity waits for the D16 verification: a stable file id needs an API `std` does
+  not expose, and the spelling and structural guards there are unchanged rather than
+  weakened.
+- **P-4 · deletion-call hygiene.** Paths reach Git after `--`, and the residual window
+  between validation and the Trash move is written down in product plan §6.5.
+- **P-6 · released space.** Defined in section 3 of this document, and the pages that
+  offer an action say on screen when there is no desktop to carry it out.
+- **P-7 · the field contract.** `src/architecture.test.ts` compares the contract
+  structs and the reason codes across the two languages; removing a field or adding a
+  code on one side alone now fails.
+- **P-8 · the Rust gate.** `[workspace.lints]`, `rustfmt.toml`, `rust-toolchain.toml`
+  and `pnpm lint:rust`. The triage that would let `pedantic` and `nursery` become
+  denials is the remaining half, and the current count is recorded in `AGENTS.md`.
+- **P-9 · a routing table.** `AGENTS.md` says where a change belongs.
+- **P-10 · check order and corpus size.** The precedence of D10's checks is pinned by
+  a test that applies two rules at once, and the corpus floor is its current count.
+
+Rejected:
+
+- **P-1.5 · folding the `/System/Volumes/Data` prefix.** Nothing produces that
+  spelling — `realpath('/Users/andy')` is `/Users/andy`, measured on this machine —
+  and a path written that way by hand is already refused by the `/System` entry. The
+  proposal offered to drop it for the smaller diff.
+
+**P-5** had already landed before this review, in the commit that wired the desktop
+shell to the real scanner and the real executor.
 
 **Open**
 

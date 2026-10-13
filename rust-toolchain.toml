@@ -1,0 +1,13 @@
+# The toolchain a fresh clone needs to build and to run the gate.
+#
+# `stable` rather than a pinned version: the repository's checks are the guarantee, and
+# a pinned toolchain that a contributor does not have is a download away from stopping
+# work for no benefit. Pin a version here (and update it deliberately) if the gate ever
+# starts depending on a lint that only exists in one release.
+#
+# Both components are listed because `pnpm lint:rust` runs both: `rustfmt` for the
+# format check and `clippy` for the lints. Without them `cargo fmt --check` and
+# `cargo clippy` fail with "component not installed" rather than a finding.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
