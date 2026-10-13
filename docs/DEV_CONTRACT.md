@@ -17,7 +17,7 @@ The following content was frozen by these commits and counts as "design agreed":
 | Data contract | `src/types.ts` | Frozen (field-for-field with the Rust structs) |
 | UI prototype | `src/App.vue`, `src/views/`, `src/components/`, `src/state.ts`, `src/format.ts`, `src/styles.css`, `src/mock/snapshot.ts` | Frozen (interaction and information structure) |
 | Prototype build | `scripts/build-preview.mjs` | Frozen |
-| Not yet covered | `crates/` (partially), `src-tauri/` | `worktree-core` is in progress; `src-tauri` is still the initial skeleton |
+| Not yet covered | `crates/` (partially), `src-tauri/` | `worktree-core` is in progress; `src-tauri` is a running shell (window, icons, one command) |
 
 Frozen means **the UI structure and the decision semantics are not to be changed
 casually**. The freedom left at the implementation level is described in section 6.
@@ -188,6 +188,12 @@ unit tests, and a fuzz target.
    and carries `cannot_verify`;
 5. `cargo clippy -- -D warnings` passes.
 
+**Status (2026-10-12): met.** 98 tests pass (89 unit, 5 path-corpus integration, 4
+against a real repository); `cargo clippy --all-targets -- -D warnings` and
+`cargo fmt --check` are clean. The worktree decision table lives in
+`crates/worktree-core/src/worktree.rs`, its Git transport in `git.rs`, and the
+real-repository checks in `tests/worktree_check_real_repo.rs`.
+
 ### P1 · Artifact scan and boundary detection
 
 **Deliverables**: artifact type list, ecosystem attribution, size and file-count
@@ -295,16 +301,16 @@ and the optional Tauri desktop shell (Form C).
 
 ### Current coverage status
 
-Last updated 2026-10-11. "Met" means a passing automated check exists and would
+Last updated 2026-10-12. "Met" means a passing automated check exists and would
 fail if the behaviour regressed. "Blocked" means the criterion belongs to a
 deliverable that does not exist yet.
 
 | Stage | Criterion | Status |
 |---|---|---|
-| P0 | 1 · `cargo test` green | Met — 43 unit + 5 integration |
-| P0 | 2 · every `wt.*` reason code has a test case | **Blocked** — the worktree checks (the third P0 deliverable) are not implemented, so only `wt.clean`, `wt.unmerged`, `wt.recent_activity`, `wt.main` and `wt.dirty` are exercised as behaviour. The remaining 11 `wt.*` codes and all 10 `af.*` codes are covered only as contract: their wire format, uniqueness, and rejection of empty text or evidence |
+| P0 | 1 · `cargo test` green | Met — 89 unit + 5 integration + 4 against a real repository |
+| P0 | 2 · every `wt.*` reason code has a test case | Met — all 16 `wt.*` codes have a positive and a negative case in `worktree.rs`, and every reason asserts non-empty `text` and `evidence`. The 10 `af.*` codes remain a P1 criterion |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 78 entries, plus a generated property test over 20,000 random paths |
-| P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | **Blocked** — needs the injectable Git runner that lands with the worktree checks |
+| P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
 | P0 | 5 · `cargo clippy -- -D warnings` | Met |
 | P1 | artifact scan criteria | Blocked — P1 not started |
 | P2 | CLI and snapshot contract criteria | Blocked — P2 not started |
@@ -363,6 +369,25 @@ message):
    No locale switch ships yet; adding one means changing only that binding.
 6. **Commit history (done)**: the five local commits made before D23 were rewritten
    in English with their content unchanged. Every commit from now on is English.
+
+**Decided (2026-10-12)**
+
+1. **`size_bytes` became optional, `schema_version` 1 → 2.** Applying the existing
+   section 3 rule ("cannot be measured" must be distinguishable from "0"),
+   `WorktreeRecord.size_bytes` and `WorktreeRemovalItem.size_bytes` widened from
+   `u64` to `Option<u64>` (front end: `number | null`), and the snapshot schema
+   version was bumped. A consumer that reads the old version must reject the new
+   one rather than read `null` as `0`.
+2. **Appearance modes.** The UI follows the system light/dark preference by default
+   and can be pinned to `light` or `dark` in Settings. The pin is written as
+   `data-theme` on `<html>`; `system` removes the attribute. Because plain CSS
+   cannot share a block between a media query and an attribute selector, the dark
+   palette is declared twice, and `src/theme.test.ts` asserts the two copies stay
+   identical. `scripts/verify-theme.mjs` checks all six combinations of OS
+   preference and choice in a real browser.
+3. **The Tauri crate is built through the CLI.** A bare `cargo build` links without
+   the `custom-protocol` feature, so the window loads `build.devUrl` and shows a
+   blank page when no dev server runs. Use `pnpm tauri build` / `pnpm tauri dev`.
 
 **Open**
 

@@ -203,7 +203,7 @@ pub struct WorktreeRecord {
     pub stash_count: u32,
     pub last_updated_at: Option<String>,
     pub agent: Option<String>,
-    pub size_bytes: u64,
+    pub size_bytes: Option<u64>,   // None = cannot measure (no permission / timeout)
     pub safety: SafetyAssessment,
 }
 
@@ -489,7 +489,7 @@ The core functionality cannot be accomplished in a pure browser, so there is no 
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "root": "/Users/andy/MySrc/remote-mic-app",
   "scanned_at": "2026-10-11T09:12:00Z",
   "default_branch": "main",
