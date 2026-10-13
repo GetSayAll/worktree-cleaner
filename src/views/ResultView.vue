@@ -1,34 +1,51 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { goTo, lastResult, projectPath, resultSummary, snapshot, startScan } from "../state";
+import { computed } from "vue";
+import { executeError, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
 import { formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
+import { openTrash as openSystemTrash } from "../platform";
 
 const root = computed(() => snapshot.value?.root ?? "");
-const trashNotice = ref(false);
 
-const ACTION_LABEL: Record<string, string> = {
-  "worktree-remove": messages.common.action.worktreeRemove,
-  "trash-move": messages.common.action.trashMove,
-  prune: messages.common.action.prune
-};
+// Looked up while rendering: the language can change with this page open.
+function actionLabel(action: string): string {
+  return (
+    {
+      "worktree-remove": messages.common.action.worktreeRemove,
+      "trash-move": messages.common.action.trashMove,
+      prune: messages.common.action.prune
+    }[action] ?? action
+  );
+}
 
-const OUTCOME_LABEL: Record<string, string> = {
-  ok: messages.common.outcome.ok,
-  skipped: messages.common.outcome.skipped,
-  failed: messages.common.outcome.failed
-};
+function outcomeLabel(result: string): string {
+  return (
+    {
+      ok: messages.common.outcome.ok,
+      skipped: messages.common.outcome.skipped,
+      failed: messages.common.outcome.failed
+    }[result] ?? result
+  );
+}
 
 const okCount = computed(() => lastResult.value.filter((item) => item.result === "ok").length);
 
-// The prototype has no system integration, so this only surfaces a notice. It must
-// not reset the session: an earlier version called resetToWelcome and wiped the
-// results the user is looking at.
-function openTrash() {
-  trashNotice.value = true;
-  window.setTimeout(() => (trashNotice.value = false), 2400);
-}
+/**
+ * Splits the core's `log_error` into the path it could not write and what went
+ * wrong.
+ *
+ * The core formats it as `"<path> (<error>)"`, and the two halves need different
+ * words around them: the path says where, the error says why.
+ */
+const logFailure = computed(() => {
+  const raw = logError.value;
+  if (!raw) return null;
+  const cut = raw.indexOf(" (");
+  if (cut === -1) return { path: raw, error: "" };
+  const error = raw.endsWith(")") ? raw.slice(cut + 2, -1) : raw.slice(cut + 2);
+  return { path: raw.slice(0, cut), error };
+});
 </script>
 
 <template>
@@ -39,12 +56,17 @@ function openTrash() {
         <p class="faint tiny mono">{{ projectPath }}</p>
       </div>
       <div class="row-wrap">
-        <button class="btn" :title="messages.result.prototypeTitle" @click="openTrash">{{ messages.result.openTrash }}</button>
-        <button class="btn" :title="messages.result.prototypeTitle" @click="goTo('history')">{{ messages.result.openLog }}</button>
+        <button class="btn" @click="openSystemTrash">{{ messages.result.openTrash }}</button>
+        <button class="btn" @click="goTo('history')">{{ messages.result.openLog }}</button>
         <button class="btn btn--primary" @click="startScan(projectPath)">{{ messages.common.rescan }}</button>
-        <span v-if="trashNotice" class="faint tiny">{{ messages.result.trashNotice }}</span>
       </div>
     </div>
+
+    <p v-if="executeError" class="notice notice--unsafe">{{ executeError }}</p>
+    <p v-if="logFailure" class="notice notice--unsafe">
+      <strong>{{ messages.result.logFailedTitle }}</strong>
+      {{ messages.result.logFailedBody(logFailure.path, logFailure.error) }}
+    </p>
 
     <div class="stat-grid stat-grid--4">
       <StatCard
@@ -78,11 +100,11 @@ function openTrash() {
           </thead>
           <tbody>
             <tr v-for="(item, index) in lastResult" :key="`${item.target}-${index}`">
-              <td class="nowrap tiny">{{ ACTION_LABEL[item.action] || item.action }}</td>
+              <td class="nowrap tiny">{{ actionLabel(item.action) }}</td>
               <td class="mono">{{ displayPath(item.target, root) }}</td>
               <td class="tiny faint">{{ item.detail }}</td>
               <td class="cell-outcome">
-                <span class="outcome" :class="`outcome--${item.result}`">{{ OUTCOME_LABEL[item.result] }}</span>
+                <span class="outcome" :class="`outcome--${item.result}`">{{ outcomeLabel(item.result) }}</span>
               </td>
               <td class="cell-size numeric">{{ formatBytes(item.size_bytes) }}</td>
             </tr>
@@ -94,7 +116,7 @@ function openTrash() {
       </div>
       <div class="card__foot">
         <span class="faint tiny">
-          {{ " " + messages.result.footer + " " }}
+          {{ " " + messages.result.trashNotice + " " + messages.result.footer + " " }}
         </span>
       </div>
     </div>

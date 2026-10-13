@@ -18,7 +18,8 @@ import {
   type ViewKey
 } from "./state";
 import { homePath } from "./format";
-import { messages } from "./i18n";
+import { messages, type Messages } from "./i18n";
+import { isDesktop } from "./platform";
 import WelcomeView from "./views/WelcomeView.vue";
 import ScanningView from "./views/ScanningView.vue";
 import OverviewView from "./views/OverviewView.vue";
@@ -43,15 +44,17 @@ const VIEWS = {
 
 const currentView = computed(() => VIEWS[view.value]);
 
-const NAV: Array<{ key: ViewKey; label: string }> = [
-  { key: "welcome", label: messages.nav.project },
-  { key: "overview", label: messages.nav.overview },
-  { key: "worktrees", label: messages.nav.worktrees },
-  { key: "artifacts", label: messages.nav.artifacts },
-  { key: "plan", label: messages.nav.plan },
-  { key: "result", label: messages.nav.result },
-  { key: "history", label: messages.nav.history },
-  { key: "settings", label: messages.nav.settings }
+// Keys, not labels: the language can change while the app is running, so the
+// text has to be looked up during rendering rather than captured here.
+const NAV: Array<{ key: ViewKey; label: keyof Messages["nav"] }> = [
+  { key: "welcome", label: "project" },
+  { key: "overview", label: "overview" },
+  { key: "worktrees", label: "worktrees" },
+  { key: "artifacts", label: "artifacts" },
+  { key: "plan", label: "plan" },
+  { key: "result", label: "result" },
+  { key: "history", label: "history" },
+  { key: "settings", label: "settings" }
 ];
 
 const totals = computed(() => ({
@@ -61,6 +64,8 @@ const totals = computed(() => ({
 }));
 
 const hasSnapshot = computed(() => snapshot.value !== null);
+
+const desktop = isDesktop();
 
 function navCount(key: ViewKey): string {
   switch (key) {
@@ -98,18 +103,20 @@ function rescan() {
         <button
           v-for="item in NAV"
           :key="item.key"
+          :data-view="item.key"
           class="nav__item"
           :class="view === item.key ? 'is-active' : ''"
           :disabled="!canOpen(item.key)"
           @click="goTo(item.key)"
         >
-          <span>{{ item.label }}</span>
+          <span>{{ messages.nav[item.label] }}</span>
           <span class="nav__count">{{ navCount(item.key) }}</span>
         </button>
       </nav>
 
       <div class="sidebar__foot">
         <p class="sidebar__note">{{ messages.app.readOnlyNote }}</p>
+        <p v-if="!desktop" class="sidebar__note">{{ messages.app.previewNote }}</p>
         <p class="sidebar__note">{{ messages.app.versionNote }}</p>
       </div>
     </aside>

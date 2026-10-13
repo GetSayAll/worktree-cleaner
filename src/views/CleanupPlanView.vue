@@ -5,6 +5,8 @@ import {
   cleanupPlan,
   confirmText,
   executeCleanup,
+  executeError,
+  executing,
   goTo,
   projectPath,
   selectedWorktrees,
@@ -281,7 +283,15 @@ async function copyPlan() {
       <span class="faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
       <span style="flex: 1"></span>
       <button class="btn" @click="goTo('artifacts')">{{ messages.plan.backToAdjust }}</button>
-      <button class="btn btn--danger btn--lg" :disabled="!canExecute" @click="executeCleanup">{{ messages.plan.runCleanup }}</button>
+      <button
+        class="btn btn--danger btn--lg"
+        :disabled="!canExecute || executing"
+        @click="executeCleanup"
+      >
+        {{ executing ? messages.plan.running : messages.plan.runCleanup }}
+      </button>
     </div>
+
+    <p v-if="executeError" class="notice notice--unsafe">{{ executeError }}</p>
   </div>
 </template>

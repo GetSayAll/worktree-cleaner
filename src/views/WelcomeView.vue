@@ -1,44 +1,73 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { startScan } from "../state";
-import { mockRoot } from "../mock/snapshot";
-import { formatBytes, homePath } from "../format";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { recentProjects, scanError, startScan } from "../state";
+import { homePath } from "../format";
 import { messages } from "../i18n";
+import { isDesktop, onPathsDropped, pickDirectory } from "../platform";
 
 const path = ref("");
 const dragActive = ref(false);
+const pickerUnavailable = ref(false);
+const desktop = isDesktop();
 
-const recents = [
-  { path: mockRoot, scanned: "Today 09:12", safe: 8, review: 6, unsafe: 4, freed: 4.2 * 1024 ** 3 },
-  {
-    path: "/Users/andy/MySrc/private-marketing-toolkit",
-    scanned: "3 days ago",
-    safe: 3,
-    review: 1,
-    unsafe: 2,
-    freed: 1.1 * 1024 ** 3
-  },
-  { path: "/Users/andy/MySrc/worktree-cleaner", scanned: "11 days ago", safe: 2, review: 0, unsafe: 1, freed: 612 * 1024 ** 2 }
-];
+let stopDropListener: (() => void) | null = null;
 
+onMounted(async () => {
+  // The desktop shell hands over real paths, which is more useful than the
+  // browser's File objects (a directory drop gives no usable path there).
+  stopDropListener = await onPathsDropped((paths) => {
+    const first = paths[0];
+    if (first) path.value = first;
+  });
+});
+
+onUnmounted(() => stopDropListener?.());
+// `dragActive` drives nothing but the highlight, so a dropped path arriving
+// without a `dragleave` cannot leave the panel stuck in the active look.
 const dropStyle = computed(() =>
   dragActive.value ? { borderColor: "var(--accent)", background: "var(--accent-weak)" } : undefined
 );
 
 function submit() {
   if (!path.value.trim()) return;
-  startScan(path.value);
+  void startScan(path.value);
 }
 
-function fillDemoPath() {
-  path.value = mockRoot;
+async function chooseFolder() {
+  const picked = await pickDirectory(messages.welcome.chooseFolderTitle);
+  if (picked !== null) {
+    pickerUnavailable.value = false;
+    path.value = picked;
+    return;
+  }
+  // `null` means the user cancelled *or* there was no picker to open. Only the
+  // second case needs saying out loud, and the field stays the way in.
+  pickerUnavailable.value = true;
 }
 
+/**
+ * The drop event the browser gives us.
+ *
+ * Tauri intercepts the real one (see `onPathsDropped`), so this only has to keep
+ * the panel from navigating away; the value arrives through the listener above.
+ */
 function onDrop(event: DragEvent) {
   dragActive.value = false;
-  const dropped = event.dataTransfer?.files?.[0] as unknown as { path?: string } | undefined;
-  const text = dropped?.path ?? event.dataTransfer?.getData("text/plain") ?? "";
-  if (text) path.value = text.trim();
+  const text = event.dataTransfer?.getData("text/plain") ?? "";
+  if (text.trim()) path.value = text.trim();
+}
+
+function scannedAt(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const minutes = Math.floor((Date.now() - then) / 60000);
+  if (minutes < 1) return messages.time.justNow;
+  if (minutes < 60) return messages.time.hoursAgo(Math.max(1, Math.round(minutes / 60)));
+  const days = Math.round(minutes / 1440);
+  if (days <= 1) return messages.time.oneDayAgo;
+  if (days < 30) return messages.time.daysAgo(days);
+  if (days < 365) return messages.time.monthsAgo(Math.round(days / 30));
+  return messages.time.yearsAgo(Math.round(days / 365));
 }
 </script>
 
@@ -64,11 +93,30 @@ function onDrop(event: DragEvent) {
           :placeholder="messages.welcome.pathPlaceholder"
           @keyup.enter="submit"
         />
-        <button class="btn" :title="messages.welcome.chooseFolderTitle" @click="fillDemoPath">{{ messages.welcome.chooseFolder }}</button>
-        <button class="btn btn--primary" :disabled="!path.trim()" @click="submit">{{ messages.welcome.startScan }}</button>
+        <button
+          class="btn"
+          data-action="choose-folder"
+          :title="desktop ? messages.welcome.chooseFolderTitle : messages.welcome.chooseFolderUnavailable"
+          @click="chooseFolder"
+        >
+          {{ messages.welcome.chooseFolder }}
+        </button>
+        <button
+          class="btn btn--primary"
+          data-action="start-scan"
+          :disabled="!path.trim()"
+          @click="submit"
+        >
+          {{ messages.welcome.startScan }}
+        </button>
       </div>
+      <p v-if="pickerUnavailable" class="field__hint field__hint--warn">
+        {{ messages.welcome.chooseFolderUnavailable }}
+      </p>
       <p class="field__hint">{{ messages.welcome.dropHint }}</p>
     </div>
+
+    <p v-if="scanError" class="notice notice--unsafe">{{ messages.welcome.scanFailed(scanError) }}</p>
 
     <div class="promise-grid">
       <div class="promise">
@@ -91,16 +139,22 @@ function onDrop(event: DragEvent) {
         <span class="faint tiny">{{ messages.welcome.recentHint }}</span>
       </div>
       <div class="card__body">
-        <div class="recent-list">
-          <button v-for="item in recents" :key="item.path" class="recent" @click="startScan(item.path)">
+        <p v-if="recentProjects.length === 0" class="faint">{{ messages.welcome.recentEmpty }}</p>
+        <div v-else class="recent-list">
+          <button
+            v-for="item in recentProjects"
+            :key="item.path"
+            class="recent"
+            @click="startScan(item.path)"
+          >
             <span class="recent__path">{{ homePath(item.path) }}</span>
-            <span class="faint tiny nowrap">{{ messages.welcome.lastScan(item.scanned) }}</span>
-            <span class="row-wrap nowrap">
-              <span class="tiny" style="color: var(--safe)">{{ item.safe }}</span>
-              <span class="tiny" style="color: var(--review)">{{ item.review }}</span>
-              <span class="tiny" style="color: var(--unsafe)">{{ item.unsafe }}</span>
+            <span class="faint tiny nowrap">
+              {{
+                item.scanned_at
+                  ? messages.welcome.lastScan(scannedAt(item.scanned_at))
+                  : messages.welcome.neverScanned
+              }}
             </span>
-            <span class="faint tiny nowrap">{{ messages.welcome.canFree(formatBytes(item.freed)) }}</span>
           </button>
         </div>
       </div>

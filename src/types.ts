@@ -1,4 +1,5 @@
 import { messages } from "./i18n";
+import type { LocaleChoice } from "./i18n";
 
 export type SafetyStatus = "Safe" | "Review" | "Unsafe";
 
@@ -150,6 +151,36 @@ export interface ResultEntry {
   size_bytes: number | null;
 }
 
+/**
+ * The scan knobs the core expects.
+ *
+ * Durations are milliseconds on the wire so the front end never has to know how
+ * Rust encodes a `Duration`. Mirrors `ScanOptions` in
+ * crates/worktree-core/src/lib.rs field for field.
+ */
+export interface ScanOptions {
+  max_depth: number;
+  per_dir_timeout_ms: number;
+  scan_budget_ms: number;
+  recent_activity_days: number;
+  untracked_as_unsafe: boolean;
+  whitelist: string[];
+  git_timeout_ms: number;
+}
+
+/**
+ * What one execution run produced.
+ *
+ * Mirrors `ExecutionOutcome` in crates/worktree-core/src/cleanup.rs. `log_error`
+ * being set does not mean the run failed: the actions happened, and only the
+ * audit trail has a hole in it.
+ */
+export interface ExecutionOutcome {
+  entries: ResultEntry[];
+  history: HistoryEntry[];
+  log_error: string | null;
+}
+
 export interface Settings {
   active_days: number;
   min_artifact_mb: number;
@@ -162,10 +193,26 @@ export interface Settings {
   protected_branches: string[];
   recent_projects: string[];
   theme: "system" | "light" | "dark";
+  /** One language, or follow the system. Persisted with the rest of the settings. */
+  locale: LocaleChoice;
   require_project_name: boolean;
 }
 
-export const STATUS_LABEL: Record<SafetyStatus, string> = messages.status.label;
+/**
+ * The full label for a status.
+ *
+ * A function rather than a `Record`, because the message table is rebound when
+ * the language changes: a map built at import time would keep handing out the
+ * language that was active when the module was first evaluated.
+ */
+export function statusLabel(status: SafetyStatus): string {
+  return messages.status.label[status];
+}
+
+/** The one-word form of a status, used where the full label would not fit. */
+export function statusShort(status: SafetyStatus): string {
+  return messages.status.short[status];
+}
 
 export const SEVERITY_RANK: Record<SafetyStatus, number> = {
   Safe: 0,

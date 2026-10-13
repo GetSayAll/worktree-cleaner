@@ -45,9 +45,10 @@ describe("source tree rules", () => {
   });
 
   it("agrees with the Rust core on the snapshot schema version", () => {
-    // The constant is defined twice on purpose — Rust owns the format, TypeScript
-    // owns the prototype's mock — and a consumer that reads a version it does not
-    // understand must reject the snapshot rather than guess (D20).
+    // The constant is defined twice on purpose — Rust owns the format, and
+    // TypeScript owns the browser preview's sample snapshot — and a consumer that
+    // reads a version it does not understand must reject the snapshot rather than
+    // guess (D20).
     const rust = readFileSync(
       fileURLToPath(new URL("../crates/worktree-core/src/lib.rs", import.meta.url)),
       "utf8"

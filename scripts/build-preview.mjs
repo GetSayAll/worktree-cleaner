@@ -1,5 +1,6 @@
 // Inline the Vite build output into a zero-dependency single file at dist/preview.html.
-// Purpose: the UI prototype needs to open by double-click without a server or a Node environment.
+// Purpose: the browser preview needs to open by double-click without a server or a Node
+// environment. It renders the same pages as the desktop app and labels its data as sample.
 // Usage: node scripts/build-preview.mjs (prerequisite: vite build --base ./ has already run)
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -25,8 +26,10 @@ const css = readFileSync(join(dist, "assets", cssName), "utf8").replaceAll("</st
 //    produces a file with syntax errors.
 // 2) The inline script must go before </body>. Classic scripts do not auto-defer like modules,
 //    so placing it in <head> runs it before #app is parsed, the Vue mount target does not exist,
-//    and no error is thrown. We also avoid type="module" here, because under file:// module
-//    scripts are blocked by CORS from loading external chunks.
+//    and no error is thrown. We also stay away from type="module": under file:// such a script
+//    cannot load a second chunk, and it would refuse to run at all if the bundle contained
+//    `import.meta` — which Vite emits for any lazily imported module. `vite.config.ts` keeps
+//    the build to a single chunk for the same reason.
 const out = html
   .replace(/<script type="module"[^>]*><\/script>\s*/, "")
   .replace(/<link rel="stylesheet"[^>]*>/, () => `<style>\n${css}\n</style>`)

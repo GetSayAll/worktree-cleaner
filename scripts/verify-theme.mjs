@@ -71,6 +71,15 @@ class Cdp {
   #pending = new Map();
   sessionId = null;
 
+  /**
+   * Console output and uncaught errors seen since the page started.
+   *
+   * A page that fails to mount leaves no other trace: the DOM is empty, the HTTP
+   * status is fine, and "never finished loading" says nothing about why. This is
+   * what makes that failure reportable.
+   */
+  diagnostics = [];
+
   constructor(ws) {
     this.#ws = ws;
     ws.addEventListener("message", (event) => {
@@ -83,8 +92,7 @@ class Cdp {
         else entry.resolve(msg.result);
         return;
       }
-      // Events are unused today; the message loop keeps them for the day a case
-      // needs to await one.
+      this.#collect(msg);
     });
     ws.addEventListener("close", () => {
       // Chrome died mid-run (crash, kill, tab close). Every in-flight call must
@@ -94,6 +102,25 @@ class Cdp {
       }
       this.#pending.clear();
     });
+  }
+
+  #collect(msg) {
+    if (msg.method === "Runtime.consoleAPICalled") {
+      const text = msg.params.args
+        .map((arg) => arg.value ?? arg.description ?? arg.type)
+        .join(" ");
+      this.diagnostics.push(`console.${msg.params.type}: ${text}`);
+    } else if (msg.method === "Runtime.exceptionThrown") {
+      const details = msg.params.exceptionDetails;
+      this.diagnostics.push(`uncaught: ${details.text} ${details.exception?.description ?? ""}`);
+    } else if (msg.method === "Log.entryAdded" && msg.params.entry.level === "error") {
+      this.diagnostics.push(`page error: ${msg.params.entry.text} ${msg.params.entry.url ?? ""}`);
+    }
+  }
+
+  /** Everything collected so far, or a note that nothing was. */
+  report() {
+    return this.diagnostics.length > 0 ? `\n${this.diagnostics.join("\n")}` : " (nothing was logged)";
   }
 
   send(method, params = {}) {
@@ -189,22 +216,33 @@ async function settle(cdp) {
     await sleep(100);
   }
   // A page that never mounts would make every later assertion meaningless; fail
-  // here with the reason instead of reporting confusing palette mismatches.
-  if (!ready) throw new Error("the page never finished loading (.nav__item never appeared)");
+  // here with the reason — including whatever the page said on the way down —
+  // instead of reporting confusing palette mismatches.
+  if (!ready) {
+    const state = await cdp.evaluate(
+      `JSON.stringify({ ready: document.readyState, navItems: document.querySelectorAll(".nav__item").length, appLength: (document.getElementById("app")?.innerHTML ?? "").length })`
+    );
+    throw new Error(`the page never finished loading (.nav__item never appeared): ${state}${cdp.report()}`);
+  }
   await cdp.evaluate(
     `new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null))))`,
     { awaitPromise: true }
   );
 }
 
-async function clickButton(cdp, label) {
+/**
+ * Click the one element matching `selector`.
+ *
+ * By selector rather than by label: the UI follows the system language, so a
+ * button's text depends on the machine the check runs on, and "Settings" is not
+ * "设置".
+ */
+async function clickButton(cdp, selector) {
   const clicked = await cdp.evaluate(`
     (() => {
-      const matches = [...document.querySelectorAll("button")].filter(
-        (el) => el.textContent.trim() === ${JSON.stringify(label)}
-      );
-      if (matches.length !== 1) return "expected exactly one \\"" + ${JSON.stringify(label)} + "\\" button, found " + matches.length;
-      matches[0].click();
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return "no element matches " + ${JSON.stringify(selector)};
+      el.click();
       return null;
     })()
   `);
@@ -261,6 +299,14 @@ async function main() {
     page.sessionId = attached.sessionId;
     await page.send("Page.enable");
     await page.send("Runtime.enable");
+    await page.send("Log.enable");
+    // Every case starts from a clean slate. The settings page persists the theme
+    // and the language, so a choice made by one case would otherwise still be in
+    // effect in the next one — and the "system" case would be measuring the
+    // previous case's choice instead of the OS preference.
+    await page.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: "try { localStorage.clear(); } catch (error) {}"
+    });
 
     const results = [];
     for (const [scheme, choice, expectedAttr, palette] of CASES) {
@@ -271,8 +317,8 @@ async function main() {
       await settle(page);
 
       if (choice !== "system") {
-        await clickButton(page, "Settings");
-        await clickButton(page, choice === "light" ? "Light" : "Dark");
+        await clickButton(page, '[data-view="settings"]');
+        await clickButton(page, `[data-theme-choice="${choice}"]`);
       }
 
       const state = await readState(page);

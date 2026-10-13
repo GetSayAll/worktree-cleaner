@@ -19,11 +19,14 @@ export const en = {
     tagline: "Safe cleanup audit",
     readOnlyNote:
       "The scan phase runs only read-only Git commands; deletions always go to the system Trash and are never permanent.",
-    versionNote: "v0.1.0 · UI prototype",
+    versionNote: "v0.1.0",
     sampleData: "Sample data",
+    previewNote: "Browser preview",
     switchProject: "Switch project",
     noProject: "No project selected",
-    pickRepository: "Pick a repository to start scanning"
+    pickRepository: "Pick a repository to start scanning",
+    desktopOnly:
+      "This action needs the desktop app; the browser preview cannot reach the file system."
   },
   nav: {
     project: "Project",
@@ -93,6 +96,8 @@ export const en = {
     title: "Scanning",
     elapsed: (clock: string) => `Elapsed ${clock}`,
     cancel: "Cancel",
+    liveNote:
+      "The desktop app scans in one pass and reports the whole result when it is done, so there is no per-stage progress to show. The stages below are what the scan checks, not a progress bar.",
     budgetNote:
       'Each directory probe has a timeout and the whole scan has a total budget; if the budget runs out it honestly reports "scan incomplete" and marks the affected items as "Needs review" instead of filling them in silently.',
     stages: {
@@ -120,10 +125,12 @@ export const en = {
     lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted. Scanning is read-only by default; deletions always go to the system Trash.",
     pathPlaceholder: "/Users/andy/MySrc/your-repo",
     chooseFolder: "Choose folder",
-    chooseFolderTitle:
-      "In the prototype, fills in a sample path; the shipped version uses a system folder picker",
+    chooseFolderTitle: "Open the system folder picker",
+    chooseFolderUnavailable:
+      "The folder picker lives in the desktop app; type the path instead",
     startScan: "Start scan",
-    dropHint: "You can also drag a project folder into this area. The scan phase writes no files.",
+    dropHint: "You can also drop a project folder onto this window. The scan phase writes no files.",
+    scanFailed: (message: string) => `The scan did not run: ${message}`,
     promises: {
       readOnlyTitle: "Read-only scan",
       readOnlyBody:
@@ -138,7 +145,8 @@ export const en = {
     recentTitle: "Recent projects",
     recentHint: "Click to scan",
     lastScan: (when: string) => `Last scan ${when}`,
-    canFree: (bytes: string) => `Can free ${bytes}`
+    neverScanned: "not scanned yet",
+    recentEmpty: "No projects yet; pick one to start"
   },
   overview: {
     title: "Overview",
@@ -337,14 +345,18 @@ export const en = {
     excludedNote: (n: number) =>
       `${n} must-not-delete items were auto-excluded; return to the list to see why`,
     backToAdjust: "Back to adjust",
-    runCleanup: "Run cleanup"
+    runCleanup: "Run cleanup",
+    running: "Running…"
   },
   result: {
     title: "Result",
     openTrash: "Open Trash",
-    trashNotice: "The prototype does not open the system Trash; nothing was changed.",
+    trashNotice:
+      "Directories were moved to the system Trash and are recoverable from there; worktrees were removed with git.",
     openLog: "Open log",
-    prototypeTitle: "Prototype does not call into the system",
+    logFailedTitle: "The operation log could not be written",
+    logFailedBody: (path: string, error: string) =>
+      `The items above were processed anyway, but ${path} could not be written (${error}), so the audit trail has a hole in it.`,
     stats: {
       spaceFreed: "Space freed",
       spaceFreedSub: "includes Trash moves and worktrees",
@@ -383,11 +395,12 @@ export const en = {
   history: {
     title: "History",
     lede: "Logs are stored locally and never uploaded. See Settings for the location.",
-    exportLog: "Export log",
+    copyLog: "Copy log",
     filterAll: (n: number) => `All ${n}`,
     filterWorktreeRemove: "Remove Worktree",
     filterTrashMove: "Move to Trash",
     empty: "No records",
+    readFailed: (message: string) => `The log could not be read: ${message}`,
     reason: {
       confirmed: "Executed after user confirmation",
       rebuildable: "Matched a rebuildable artifact type",
@@ -435,13 +448,20 @@ export const en = {
     strongProtection: "Strong protection",
     strongProtectionHint:
       "When enabled, the project directory name must be typed by hand before cleanup",
-    logsTitle: "Logs and appearance",
+    logsTitle: "Logs, language and appearance",
     operationLog: "Operation log",
     operationLogHint: (n: number) => `Written locally and never online. ${n} records so far.`,
-    prototypeTitle: "Prototype does not call into the system",
+    operationLogUnknown: "This platform has no log directory to report.",
     openDirectory: "Open directory",
     clearLog: "Clear log",
-    clearLogTitle: "Clearing is not available in the prototype",
+    clearLogTitle: "Empty the log file; the file itself stays",
+    language: "Language",
+    languageHint: "Follows the system by default and can be pinned to one language",
+    locale: {
+      system: "Follow system",
+      en: "English",
+      zhCN: "简体中文"
+    },
     appearance: "Appearance",
     appearanceHint: "System follows light/dark mode on macOS / Windows automatically",
     system: "System",

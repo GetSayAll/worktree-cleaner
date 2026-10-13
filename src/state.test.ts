@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { mockRoot, mockSnapshot } from "./mock/snapshot";
 import { assess } from "./types";
+import type { ExecutionOutcome } from "./types";
 import { basename, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
 import { messages } from "./i18n";
 import { primaryReason } from "./state";
@@ -11,6 +12,39 @@ import { primaryReason } from "./state";
 async function freshState(): Promise<typeof import("./state")> {
   vi.resetModules();
   return await import("./state");
+}
+
+/**
+ * The same fresh module, with the desktop boundary stubbed.
+ *
+ * Executing for real needs the Tauri backend (the core's `execute_plan` does the
+ * work, and the Rust integration tests cover that side). What these tests are
+ * about is what the front end does *with* the executor's answer, so the answer is
+ * handed in directly: `plan` is recorded, and the outcome comes back verbatim.
+ */
+async function freshStateWithExecutor(
+  outcome: ExecutionOutcome
+): Promise<{ state: typeof import("./state"); plans: unknown[] }> {
+  vi.resetModules();
+  const plans: unknown[] = [];
+  vi.doMock("./platform", () => ({
+    isDesktop: () => true,
+    scanProject: vi.fn(),
+    executePlan: async (plan: unknown) => {
+      plans.push(plan);
+      return outcome;
+    },
+    logPath: async () => null,
+    readHistory: async () => outcome.history
+  }));
+  const state = await import("./state");
+  return { state, plans };
+}
+
+/** Undoes `freshStateWithExecutor` so the next test sees the real boundary. */
+function unmockPlatform() {
+  vi.doUnmock("./platform");
+  vi.resetModules();
 }
 
 const codex = `${mockRoot}--codex-fix-ble`;
@@ -286,12 +320,35 @@ describe("an unmeasurable size travels as unknown", () => {
   });
 
   it("stays null through execution instead of collapsing to zero", async () => {
-    const state = await freshState();
+    const { state } = await freshStateWithExecutor({
+      entries: [
+        {
+          action: "trash-move",
+          target: mainCoverage,
+          result: "ok",
+          detail: "moved to the system Trash; recoverable from Trash",
+          size_bytes: null
+        }
+      ],
+      history: [
+        {
+          at: new Date().toISOString(),
+          action: "trash-move",
+          target: mainCoverage,
+          reason: "regenerable",
+          result: "ok",
+          size_bytes: null,
+          detail: "moved to the system Trash; recoverable from Trash"
+        }
+      ],
+      log_error: null
+    });
     state.snapshot.value = mockSnapshot;
     state.settings.whitelist_paths = [];
     state.selectedWorktrees.value = [];
     state.selectedArtifacts.value = [mainCoverage];
-    state.executeCleanup();
+    await state.executeCleanup();
+    unmockPlatform();
 
     const entry = state.lastResult.value.find((item) => item.target === mainCoverage);
     expect(entry?.size_bytes).toBeNull();
@@ -317,12 +374,24 @@ describe("group selection and blocked execution", () => {
   });
 
   it("skips a whitelist-blocked item instead of executing it", async () => {
-    const state = await freshState();
+    // A blocked item never reaches the executor: it is filtered out of both
+    // channels before the plan is built, and the result page adds it back as its
+    // own skipped row. The executor's answer below is therefore empty.
+    const { state, plans } = await freshStateWithExecutor({
+      entries: [],
+      history: [],
+      log_error: null
+    });
     state.snapshot.value = mockSnapshot;
     state.settings.whitelist_paths = [venv];
     state.selectedWorktrees.value = [];
     state.selectedArtifacts.value = [venv];
-    state.executeCleanup();
+    await state.executeCleanup();
+    unmockPlatform();
+
+    const plan = plans[0] as { trash_moves: unknown[]; blockers: string[] };
+    expect(plan.trash_moves, "a protected path is not in the executable channel").toEqual([]);
+    expect(plan.blockers).toHaveLength(1);
 
     expect(state.lastResult.value).toHaveLength(1);
     expect(state.lastResult.value[0]?.result).toBe("skipped");

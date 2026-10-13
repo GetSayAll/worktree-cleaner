@@ -20,6 +20,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use serde::{Deserialize, Serialize};
+
 use crate::artifact::{check_artifact, lookup_kind, ArtifactScanOptions};
 use crate::git::{GitError, GitRunner, ProcessGitRunner};
 use crate::log;
@@ -65,6 +67,11 @@ impl Default for ExecuteOptions {
 }
 
 /// What one execution run produced.
+///
+/// Serialised straight to the desktop shell: the UI shows `entries` item by
+/// item, keeps `history` for the audit view, and must be told about `log_error`
+/// because the actions happened whether or not the log could be written.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionOutcome {
     /// Per-item results, in execution order.
     pub entries: Vec<ResultEntry>,

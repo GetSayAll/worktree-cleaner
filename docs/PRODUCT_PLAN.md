@@ -404,7 +404,7 @@ Item 6 also guards against accidents such as "a variable being empty during conc
 
 The definitions of the delivery forms and the responsibilities of each form are in Section 10; the executable acceptance criteria for each phase are in Section 5 of `docs/DEV_CONTRACT.md`.
 
-The UI prototype covers only look and interaction, not the Rust implementation; in the Form A phase the data source is switched from `src/mock/` to a snapshot JSON dragged in by the user, and in the Form B phase it is switched to HTTP requests.
+These pages were built as a prototype covering only look and interaction, and that description no longer holds: the desktop shell runs the real scanner and the real executor over Tauri IPC, and `src/mock/` survives only for the browser preview, where every page using it is labelled as sample data. The Form A phase still switches the data source to a snapshot JSON dragged in by the user, and the Form B phase to HTTP requests.
 
 The same pages are reused as the Form C desktop shell. There the data source is the Tauri IPC command backed by `worktree-core::scan_project`, and `src/mock/` serves only the browser preview, where it is always labelled as sample data.
 

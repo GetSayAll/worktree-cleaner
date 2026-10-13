@@ -318,19 +318,40 @@ and the optional Tauri desktop shell (Form C).
 
 Last updated 2026-10-12. "Met" means a passing automated check exists and would
 fail if the behaviour regressed. "Blocked" means the criterion belongs to a
-deliverable that does not exist yet.
+deliverable that does not exist yet. Three rows are marked **renegotiated**: the
+criterion as written cannot hold in the design that shipped, and the replacement
+guarantee is named next to it.
 
 | Stage | Criterion | Status |
 |---|---|---|
-| P0 | 1 · `cargo test` green | Met — 101 unit + 5 integration + 4 against a real repository |
-| P0 | 2 · every `wt.*` reason code has a test case | Met — all 16 `wt.*` codes have a positive and a negative case in `worktree.rs`, and every reason asserts non-empty `text` and `evidence`. The 10 `af.*` codes remain a P1 criterion |
+| P0 | 1 · `cargo test` green | Met — 141 unit tests plus four integration files (8 + 5 + 3 + 4) |
+| P0 | 2 · every `wt.*` reason code has a test case | Met — all 16 `wt.*` codes have a positive and a negative case, and every reason asserts non-empty `text` and `evidence` |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 78 entries, plus a generated property test over 20,000 random paths |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
 | P0 | 5 · `cargo clippy -- -D warnings` | Met |
-| P1 | artifact scan criteria | Blocked — P1 not started |
+| P1 | 1 · a tracked `build/` is `Unsafe`, evidence naming the match count | Met — unit, plus a real repository where `dist/` is committed despite an ignore rule |
+| P1 | 2 · `node_modules` is not recognised as a project root | Met — the walk never descends into a directory it has recognised as an artifact, and a real scan reports one record per worktree |
+| P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met for `.git`. **Credential files are not detected** — open item 4 |
+| P1 | 4 · an escaping symlink is `Unsafe` with the target in evidence | Met |
+| P1 | 5 · a size-measurement timeout is reported honestly | **Renegotiated** — the criterion asked for `Review`; the verdict is now left alone and the size is recorded as `null` with a warning (decision 5) |
+| P1 | 6 · every `af.*` reason code has a test case | Met — all 10 codes |
 | P2 | CLI and snapshot contract criteria | Blocked — P2 not started |
-| P3 | report page criteria | Partly met — the prototype opens offline over `file://` with no console errors and no non-English text; the appearance modes are verified in a real browser (`pnpm test:theme`, 6/6 combinations of OS preference and in-app choice); `vue-tsc --noEmit` is at zero errors and the build passes. It still reads the mock rather than a snapshot file, so the item-for-item JSON comparison (criterion 2) and the version-gate message (criterion 4) remain open |
-| P4 | execution criteria | Blocked — P4 not started |
+| P3 | 1 · offline over `file://`, a full review can be completed (D22) | Met for the sample data. Dropping in a snapshot file waits on P2, which has no output to drop |
+| P3 | 2 · the page matches the JSON item for item | Blocked — nothing to compare against until P2 |
+| P3 | 3 · no delete button, no deletion call, no write path (D17) | **Renegotiated** — the preview and the desktop shell share one component set, so deletion calls exist in the bundle and only the desktop can reach them. The guarantee is behavioural: in a preview every entry point refuses, asserted by `app.mount.test.ts` (decision 6) |
+| P3 | 4 · a higher `schema_version` produces an upgrade message | Blocked — the gate belongs with P2's reader |
+| P3 | 5 · the exported plan is accepted by the CLI directly | Blocked — no CLI yet |
+| P3 | 6 · `src/mock/` is not referenced by production code | **Renegotiated** — the preview is part of the shipped bundle, so `mock/` stays by design and its pages are labelled as sample data; `vue-tsc --noEmit` is at zero errors and the build passes (decision 7) |
+| P4 | 1 · macOS: the item is found in the Trash afterwards (D5) | Met — an integration test moves a real directory through the real Trash and takes it back out |
+| P4 | 2 · no leftovers after `git worktree remove`, with `prune` as a follow-up (D6) | Met |
+| P4 | 3 · untracked files force confirmation, then `--force` | Met — `--force` is re-derived from the re-check and never parsed out of the plan, and the plan page shows the file list line by line before it lets the run start |
+| P4 | 4 · a whitelist hit blocks the item | Met |
+| P4 | 5 · a target whose identity or activity changed is skipped with a stated reason (D11) | Met |
+| P4 | 6 · a failure on one item does not affect the others (D14) | Met |
+| P4 | 7 · the log has time / action / target / reason / result / size, with no network call (D15) | Met |
+| P4 | 8 · Windows: the Recycle Bin path verified separately (D16) | Blocked — no Windows machine has run it; open item 1 |
+| P5 | daemon and browser-UI criteria | Blocked — P5 not started |
+| P6 | wrap-up criteria | Partly met — settings persist on the device, the history page reads the real log, the language picker ships, and the prototype wording is gone. Plan export copies JSON to the clipboard rather than writing a file |
 
 The rule for every row: a criterion counts as met only when a test in the
 repository fails if the behaviour regresses.
@@ -448,6 +469,82 @@ message):
    surface a notice (choose folder, open Trash, open log directory) now perform the
    real action through the Tauri dialog and opener plugins.
 
+**Decided (2026-10-12, while building the above)**
+
+These came out of the implementation. Each one either narrows a criterion to what
+the shipped design can guarantee, or writes down a choice that would look
+arbitrary later.
+
+5. **A size-measurement timeout does not lower a verdict.** P1 criterion 5 asked
+   for `Review` when the walk times out. That conflated two different things: the
+   verdict is derived from Git facts and the activity window, and neither depends
+   on the size. Downgrading an item because a directory was too slow to measure
+   would be a false signal, and it would park a genuinely safe item behind a
+   threshold the user cannot act on. A timeout now records `size_bytes: null` plus
+   a warning, the verdict is untouched, and every total that includes the item is
+   presented as a lower bound. `per_dir_timeout` already meant "the size becomes
+   unknown"; this is what that means for the level.
+6. **The preview and the desktop shell share one component set, so D17's "no
+   deletion call" is now a behavioural guarantee.** P3 criterion 3 was static: the
+   bundle contained no delete button and no deletion call, asserted by scanning the
+   build output. Since the same pages serve the desktop shell, the bundle does
+   contain deletion calls, and only a desktop build can reach them. What replaces
+   the static check is that in a browser every entry point refuses — `isDesktop()`
+   is false, so `invoke` raises before anything else happens — and
+   `app.mount.test.ts` mounts the real app in a browser-like environment to assert
+   both that the pages render and that a click which cannot work says why instead
+   of doing nothing. Scanning the build output is kept for D17's other half:
+   nothing in the front end writes files.
+7. **`src/mock/` stays, and is labelled where it is used.** P3 criterion 6 asked
+   for the sample snapshot to leave production code. The browser preview is part of
+   what ships — it is how the pages can be reviewed without a repository — so the
+   snapshot stays in the bundle. Instead of being unreferenced it is disclosed: the
+   sidebar says the build is a preview, and the pages fall back to the snapshot only
+   when there is no desktop to ask. A desktop build never reads it.
+8. **One chunk, always.** The single-file preview is a classic script that opens
+   over `file://`, so it can neither fetch a second chunk nor contain `import.meta`
+   — which Vite emits for a lazily imported module, and which is a syntax error in
+   a classic script. `vite.config.ts` therefore sets `inlineDynamicImports`, and
+   `src/platform.ts` imports the Tauri packages statically: their module bodies only
+   define functions, so importing them in a browser is harmless, and every entry
+   point checks `isDesktop()` before touching the host.
+9. **On macOS the Trash is reached through `NSFileManager`, not the Finder.** The
+   `trash` crate's default routes the request through `osascript` to the Finder,
+   which needs Automation access, prompts the first time, and fails outright when it
+   is refused — which is exactly what the integration test observed. The executor
+   selects the crate's `NSFileManager` method instead: the same recoverable Trash,
+   without the extra permission and without the prompt.
+10. **Settings, the language choice and the recent-project list persist on the
+    device.** `localStorage` only, guarded so the module still loads outside a
+    browser, and validated on read (`isLocaleChoice`) so a hand-edited entry cannot
+    put the app into a state it does not support. The browser check clears storage
+    between its cases, because a theme picked in one case would otherwise still be
+    in effect in the next and the "follow system" case would measure the wrong thing.
+11. **Interactive elements carry stable hooks for the automated checks.**
+    `data-view`, `data-action`, `data-locale` and `data-theme-choice` exist because
+    the UI follows the system language: a check that clicks a button labelled
+    "Settings" breaks on a Chinese machine, and this repository runs on one. A
+    selector is the only thing about a button that a translation cannot change.
+
+**Proposed (awaiting approval)**
+
+`docs/proposals.md` records ten proposals — one of them with an optional half —
+**none of them implemented**. They came from a review of the deletion guards in
+`path.rs` and of the working tree as it stood on 2026-10-12. In one line each: the
+protected-location comparison is spelling-sensitive in two ways (case, and a
+canonical spelling missing from the list); the four Win32 rules that make a name on
+disk different from the name Win32 opens are not covered; the home directory is
+matched only by spelling; paths reach Git without a `--` separator and the
+check-to-act window is not written down; the desktop wiring has since landed, so
+the proposal that the Execute button still ran the front-end simulation is closed;
+"released space" has no definition and a simulation is not labelled as one; the
+Rust-to-TypeScript field contract is asserted by nothing; there is no Rust lint
+policy, pinned toolchain or formatter; `AGENTS.md` has no routing table; and the
+order of D10's checks and the size of the fuzz corpus are untested.
+
+Approving an item means its documentation change and its code change land in the
+same commit.
+
 **Open**
 
 1. **How to verify the Windows Recycle Bin path**: D16 requires separate verification
@@ -457,3 +554,17 @@ message):
    (single binary) or as a separate executable.
 3. **Where `snapshot.json` is written**: stdout or a conventional default path, and
    the artifact naming rule for CI.
+4. **Whether an artifact directory holding credential files should be blocked
+   outright.** P1 criterion 3 names a directory containing credential files as
+   `Unsafe`, and nothing detects them today: `.env`, `id_rsa` and friends are
+   usually ignored by Git, so `af.authored_content` does not fire and the directory
+   can come out `Safe` — deleting it would take the keys with it. Whether the fix is
+   a new reason code (a documentation change under section 6) or an extension of
+   `af.authored_content`'s evidence is open.
+5. **The one thing the automated checks cannot reach.** Driving the native folder
+   picker, the system Trash and `git worktree remove` in the packaged app needs a
+   human at the keyboard: the checks in this repository can dock the window and
+   screenshot it, but not click a button in another process. The Rust integration
+   tests cover the executor and `pnpm test:theme` covers rendering, so what is left
+   is one manual pass on a real machine — opening the app, choosing a repository,
+   and confirming the picker appears.

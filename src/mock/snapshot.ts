@@ -3,11 +3,9 @@ import type {
   HistoryEntry,
   ProjectSnapshot,
   Reason,
-  Settings,
   WorktreeRecord
 } from "../types";
 import { assess, SNAPSHOT_SCHEMA_VERSION } from "../types";
-import { messages } from "../i18n";
 
 const DAY = 86400_000;
 
@@ -524,28 +522,6 @@ export const mockHistory: HistoryEntry[] = [
     size_bytes: 6_200_000,
     detail: "git ls-files found 23 committed files; aborted. Confirm manually before retrying"
   }
-];
-
-export const defaultSettings: Settings = {
-  active_days: 7,
-  min_artifact_mb: 10,
-  untracked_is_unsafe: false,
-  max_depth: 6,
-  per_dir_timeout_sec: 30,
-  scan_budget_sec: 600,
-  extra_scan_paths: ["~/MySrc", "~/dev", "~/Projects"],
-  whitelist_paths: [`${mockRoot}--review-locked`],
-  protected_branches: ["main", "release/*"],
-  recent_projects: [mockRoot, "/Users/andy/MySrc/private-marketing-toolkit", "/Users/andy/MySrc/worktree-cleaner"],
-  theme: "system",
-  require_project_name: false
-};
-
-export const scanStages = [
-  { key: "worktrees", label: messages.scan.stages.worktrees.label, detail: messages.scan.stages.worktrees.detail },
-  { key: "status", label: messages.scan.stages.status.label, detail: messages.scan.stages.status.detail },
-  { key: "artifacts", label: messages.scan.stages.artifacts.label, detail: messages.scan.stages.artifacts.detail },
-  { key: "verify", label: messages.scan.stages.verify.label, detail: messages.scan.stages.verify.detail }
 ];
 
 export const scanTrace = [

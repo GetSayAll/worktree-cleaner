@@ -9,6 +9,10 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
+    // Third-party declarations are not this project's to fix, and `happy-dom`
+    // (the DOM environment for the mount test) ships one that disagrees with the
+    // installed Node type definitions. Our own sources are still checked in full.
+    "skipLibCheck": true,
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["vite/client", "vitest/globals"]
   },

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { history } from "../state";
+import { history, historyError } from "../state";
 import { formatBytes, formatTimestamp, homePath } from "../format";
 import { messages } from "../i18n";
 
@@ -9,17 +9,26 @@ type FilterKey = "all" | "worktree-remove" | "trash-move";
 const filter = ref<FilterKey>("all");
 const copied = ref(false);
 
-const ACTION_LABEL: Record<string, string> = {
-  "worktree-remove": messages.common.action.worktreeRemove,
-  "trash-move": messages.common.action.trashMove,
-  prune: messages.common.action.prune
-};
+// Looked up while rendering: the language can change with this page open.
+function actionLabel(action: string): string {
+  return (
+    {
+      "worktree-remove": messages.common.action.worktreeRemove,
+      "trash-move": messages.common.action.trashMove,
+      prune: messages.common.action.prune
+    }[action] ?? action
+  );
+}
 
-const OUTCOME_LABEL: Record<string, string> = {
-  ok: messages.common.outcome.ok,
-  skipped: messages.common.outcome.skipped,
-  failed: messages.common.outcome.failed
-};
+function outcomeLabel(result: string): string {
+  return (
+    {
+      ok: messages.common.outcome.ok,
+      skipped: messages.common.outcome.skipped,
+      failed: messages.common.outcome.failed
+    }[result] ?? result
+  );
+}
 
 const filtered = computed(() => {
   const rows = filter.value === "all" ? history.value : history.value.filter((row) => row.action === filter.value);
@@ -44,8 +53,10 @@ async function copyAll() {
         <h1>{{ messages.history.title }}</h1>
         <p class="faint tiny">{{ messages.history.lede }}</p>
       </div>
-      <button class="btn" @click="copyAll">{{ copied ? messages.common.copied : messages.history.exportLog }}</button>
+      <button class="btn" @click="copyAll">{{ copied ? messages.common.copied : messages.history.copyLog }}</button>
     </div>
+
+    <p v-if="historyError" class="notice notice--unsafe">{{ messages.history.readFailed(historyError) }}</p>
 
     <div class="row-wrap">
       <div class="segmented">
@@ -64,9 +75,9 @@ async function copyAll() {
             <div class="timeline__time">{{ formatTimestamp(row.at) }}</div>
             <div class="timeline__body">
               <div class="row-wrap">
-                <span class="chip">{{ ACTION_LABEL[row.action] || row.action }}</span>
+                <span class="chip">{{ actionLabel(row.action) }}</span>
                 <span class="mono">{{ homePath(row.target) }}</span>
-                <span class="outcome" :class="`outcome--${row.result}`">{{ OUTCOME_LABEL[row.result] }}</span>
+                <span class="outcome" :class="`outcome--${row.result}`">{{ outcomeLabel(row.result) }}</span>
                 <span class="faint tiny numeric">{{ formatBytes(row.size_bytes) }}</span>
               </div>
               <div class="tiny faint">{{ row.reason }}</div>

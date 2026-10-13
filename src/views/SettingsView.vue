@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { history, projectPath, settings } from "../state";
+import { computed, onMounted, ref } from "vue";
+import { history, projectPath, refreshHistory, settings } from "../state";
 import { homePath } from "../format";
-import { messages } from "../i18n";
+import { LOCALES, messages } from "../i18n";
+import type { LocaleChoice } from "../i18n";
+import {
+  clearLog as clearLogFile,
+  isDesktop,
+  logPath as resolveLogPath,
+  revealInFileManager
+} from "../platform";
+
+const desktop = isDesktop();
 
 const extraPathsText = computed({
   get: () => settings.extra_scan_paths.join("\n"),
@@ -34,7 +43,60 @@ const protectedBranchesText = computed({
   }
 });
 
-const logPath = "~/Library/Logs/Worktree Cleaner/operations.log";
+/** The language row: "follow system" plus every table the app ships. */
+const localeChoices: LocaleChoice[] = ["system", ...LOCALES];
+
+function localeLabel(choice: LocaleChoice): string {
+  if (choice === "system") return messages.settings.locale.system;
+  return choice === "en" ? messages.settings.locale.en : messages.settings.locale.zhCN;
+}
+
+/**
+ * The appearance row.
+ *
+ * `data-theme-choice` and `data-locale` are stable hooks for the browser check:
+ * it has to click these buttons whatever language the page happens to be in, and
+ * a selector is the only thing that survives a translation.
+ */
+const themeChoices = ["system", "light", "dark"] as const;
+
+function themeLabel(choice: (typeof themeChoices)[number]): string {
+  return messages.settings[choice];
+}
+
+// The log path is asked for, not assumed: hardcoding one platform's layout is how
+// the settings page ends up pointing at a file the app never writes.
+const logFile = ref<string | null>(null);
+const logNotice = ref<string | null>(null);
+
+onMounted(async () => {
+  logFile.value = await resolveLogPath();
+  await refreshHistory();
+});
+
+const logDisplay = computed(() => {
+  if (logFile.value) return logFile.value;
+  return desktop ? messages.common.none : messages.app.desktopOnly;
+});
+
+async function openLogDirectory() {
+  if (!logFile.value) return;
+  await revealInFileManager(logFile.value);
+}
+
+async function onClearLog() {
+  if (!logFile.value) return;
+  // Emptying the audit trail is not undoable, so it asks first.
+  const confirmed = window.confirm(messages.settings.clearLogTitle);
+  if (!confirmed) return;
+  try {
+    await clearLogFile();
+    await refreshHistory();
+    logNotice.value = null;
+  } catch (error) {
+    logNotice.value = error instanceof Error ? error.message : String(error);
+  }
+}
 </script>
 
 <template>
@@ -183,9 +245,32 @@ const logPath = "~/Library/Logs/Worktree Cleaner/operations.log";
           <div class="setting-row__hint">{{ messages.settings.operationLogHint(history.length) }}</div>
         </div>
         <div class="setting-row__control row-wrap">
-          <input class="input input--mono input--sm" :value="logPath" readonly style="max-width: 360px" />
-          <button class="btn" :title="messages.settings.prototypeTitle">{{ messages.settings.openDirectory }}</button>
-          <button class="btn" disabled :title="messages.settings.clearLogTitle">{{ messages.settings.clearLog }}</button>
+          <input class="input input--mono input--sm" :value="logDisplay" readonly style="max-width: 360px" />
+          <button class="btn" :disabled="!logFile" @click="openLogDirectory">
+            {{ messages.settings.openDirectory }}
+          </button>
+          <button class="btn" :disabled="!logFile" :title="messages.settings.clearLogTitle" @click="onClearLog">
+            {{ messages.settings.clearLog }}
+          </button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-row__label">
+          <div class="setting-row__name">{{ messages.settings.language }}</div>
+          <div class="setting-row__hint">{{ messages.settings.languageHint }}</div>
+        </div>
+        <div class="setting-row__control">
+          <div class="segmented">
+            <button
+              v-for="choice in localeChoices"
+              :key="choice"
+              :data-locale="choice"
+              :class="settings.locale === choice ? 'is-active' : ''"
+              @click="settings.locale = choice"
+            >
+              {{ localeLabel(choice) }}
+            </button>
+          </div>
         </div>
       </div>
       <div class="setting-row">
@@ -195,14 +280,21 @@ const logPath = "~/Library/Logs/Worktree Cleaner/operations.log";
         </div>
         <div class="setting-row__control">
           <div class="segmented">
-            <button :class="settings.theme === 'system' ? 'is-active' : ''" @click="settings.theme = 'system'">{{ messages.settings.system }}</button>
-            <button :class="settings.theme === 'light' ? 'is-active' : ''" @click="settings.theme = 'light'">{{ messages.settings.light }}</button>
-            <button :class="settings.theme === 'dark' ? 'is-active' : ''" @click="settings.theme = 'dark'">{{ messages.settings.dark }}</button>
+            <button
+              v-for="choice in themeChoices"
+              :key="choice"
+              :data-theme-choice="choice"
+              :class="settings.theme === choice ? 'is-active' : ''"
+              @click="settings.theme = choice"
+            >
+              {{ themeLabel(choice) }}
+            </button>
           </div>
         </div>
       </div>
+      <p v-if="logNotice" class="notice notice--unsafe">{{ logNotice }}</p>
     </div>
 
-    <p class="faint tiny">{{ " " + messages.settings.pathAbbrevBefore }} <span class="mono">{{ homePath(logPath) }}</span>{{ messages.settings.pathAbbrevAfter + " " }}</p>
+    <p class="faint tiny">{{ " " + messages.settings.pathAbbrevBefore }} <span class="mono">{{ homePath(logDisplay) }}</span>{{ messages.settings.pathAbbrevAfter + " " }}</p>
   </div>
 </template>
