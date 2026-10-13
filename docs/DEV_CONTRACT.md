@@ -44,6 +44,12 @@ is deliberately kept out of the open-source distribution may be written in
 Chinese; the local notes under `.workbuddy/` are gitignored and are the only such
 case today.
 
+**Language rule extension (2026-10-13)**: UI chrome may additionally ship as
+locale tables under `src/i18n/`. `en.ts` remains the source locale and the
+default; every further locale is a translated table whose keys must match `en.ts`
+exactly (asserted by a test). Scanner-produced reason `text` and `evidence` are
+data, not UI chrome, and stay English. See D23 and section 3.
+
 ---
 
 ## 1. Immutable design decisions
@@ -75,7 +81,7 @@ bug. D17–D23 are form-factor and repository-wide constraints.
 | D20 | `snapshot.json` must carry `schema_version` and is the only contract between the CLI and the web page. On a higher version the page must say the viewer needs an upgrade; it must never guess at fields | Once published, an interface cannot assume both ends upgrade together | Round-trip test on the contract; feed a higher version and assert a clear error |
 | D21 | No form may weaken the existing constraints: D5 (Trash only) and D6 (`git worktree remove` only) hold in every form | Changing the form is not a reason to relax safety | One verification record per form, each covering D5 and D6 |
 | D22 | The report web page must open with no network and no server (assets inlined) and must not introduce a runtime backend dependency | The availability of a read-only form should not depend on the environment | Open it offline over `file://` and complete a full review |
-| D23 | **English for everything that ships as open source.** Code, comments, identifiers, documentation, commit messages, file names, and user-visible strings in the repository are English, and English is the default and the source locale. Content deliberately kept out of the open-source distribution may be written in Chinese | This is an international open-source project; a mixed-language repository is not reviewable by the community it targets | A scan of tracked files finds no non-English natural language; every commit message reads in English |
+| D23 | **English for everything that ships as open source.** Code, comments, identifiers, documentation, commit messages, file names, and user-visible strings in the repository are English, and English is the default and the source locale. The one exception is UI locale data under `src/i18n/`: the English source table plus one translated table per additional locale, keys identical to the source table, file names and keys in English. Content deliberately kept out of the open-source distribution may be written in Chinese | This is an international open-source project; a mixed-language repository is not reviewable by the community it targets | A scan of tracked files finds no non-English natural language outside `src/i18n/`; every commit message reads in English; a test fails when any locale table's keys differ from `en.ts` |
 
 ---
 
@@ -130,13 +136,22 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   and command text (such as `git worktree remove --force "<path>"`) are part of the
   contract and must not change casually.
 - Language: identifiers, comments, documentation, commit messages, file names, and
-  user-visible strings are all English (D23). Commit messages are written as
-  `type(scope): short imperative summary`, followed by a body explaining what
-  changed and why.
+  user-visible strings are all English (D23). The only exception is UI locale data
+  under `src/i18n/`: table keys and file names stay English, the English table is
+  the source, and a new locale is a translated copy of it. Commit messages are
+  written as `type(scope): short imperative summary`, followed by a body explaining
+  what changed and why.
 - User-visible strings live in `src/i18n/en.ts` and are read through
   `src/i18n/index.ts`, which is the single swap point for adding a locale. Domain
   text produced by the scanner (a reason's `text` and `evidence`) is data rather
   than UI chrome and stays with the record.
+- The locale registry is reactive: `index.ts` exports a reactive `messages`
+  object plus `applyLocale(choice)`, which resolves `system` through
+  `navigator.languages`, replaces the top-level keys, and updates
+  `document.documentElement.lang`. The Settings choice (`system` / `en` /
+  `zh-CN`) is persisted and re-detected on the `languagechange` event while
+  `system` is selected. Anything that captured copy at load time (nav labels,
+  status labels, demo data) must be rebuilt or read at render time instead.
 - File names are English, lowercase, and use `kebab-case` for docs and scripts.
   Rust and TypeScript files follow their ecosystem conventions (`snake_case` for
   Rust modules, `PascalCase.vue` for components).
@@ -345,7 +360,7 @@ message):
 - turning `cannot_verify` / `uncertain` into `Safe`;
 - removing the `evidence` field from a reason;
 - letting the scanning stage write anything other than the log;
-- committing non-English content (D23).
+- committing non-English content outside the locale tables under `src/i18n/` (D23).
 
 ---
 
@@ -404,6 +419,35 @@ message):
    the painted pixels; the run uses a throwaway profile and fails loudly if the
    page never mounts or a CDP call times out.
 
+**Decided (2026-10-13)**
+
+1. **The UI ships a locale switch, and a second locale ships with it.** English
+   stays the default and the source locale (D23); `zh-CN` is the first translated
+   table. The app follows the system language on first run (`navigator.languages`,
+   a `zh` prefix resolves to `zh-CN`) and can be pinned to `en` or `zh-CN` in
+   Settings. The choice is persisted, and the `languagechange` event re-detects it
+   while `system` is selected. `src/i18n/index.ts` holds the reactive registry
+   (`messages` + `applyLocale`), and a test fails when a locale table's keys differ
+   from `en.ts`. This closes the "locale switch" open item.
+2. **Reason text stays English data (closes the reason-localisation open item).**
+   A reason's `text` and `evidence` are scanner output — data, not UI chrome — so
+   they are not translated in this change; only UI chrome is localised. Mapping the
+   stable `code` to a localised template, with `evidence` kept as data, stays a
+   follow-up: it changes this section and section 3, not D9, because the four
+   elements (`code` + `severity` + `text` + `evidence`) remain.
+3. **The desktop shell runs the real scanner and the real executor.** `scan_project`
+   is implemented in `worktree-core`: worktree checks (which already existed) plus
+   artifact scanning and boundary detection, assembled into one `ProjectSnapshot`.
+   Execution moves items through the system Trash and `git worktree remove` /
+   `prune`, re-verifies identity and activity first (D11), runs serially with
+   isolated failures (D14), and appends to the local operation log (D15). The
+   `src/mock/` snapshot stays for the browser preview only, is always labelled as
+   sample data there, and is no longer the desktop shell's data source.
+4. **The prototype wording is gone.** The `prototype` / `UI prototype` copy and the
+   version note's prototype suffix are removed, and the buttons that used to only
+   surface a notice (choose folder, open Trash, open log directory) now perform the
+   real action through the Tauri dialog and opener plugins.
+
 **Open**
 
 1. **How to verify the Windows Recycle Bin path**: D16 requires separate verification
@@ -413,9 +457,3 @@ message):
    (single binary) or as a separate executable.
 3. **Where `snapshot.json` is written**: stdout or a conventional default path, and
    the artifact naming rule for CI.
-4. **How reason text becomes localisable**: a reason currently carries final English
-   `text` produced by the scanner. For other locales the UI would need to map the
-   stable `code` to a localised template and treat `evidence` as data. Decide before
-   a second locale is added.
-5. **Locale switch**: whether to ship a language picker in the settings page once a
-   second locale exists.

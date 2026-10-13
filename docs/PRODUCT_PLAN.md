@@ -156,6 +156,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 - **Decision thresholds**: activity days (default 7), artifact display size threshold (default 10 MB), whether "untracked files" count as unsafe (counts by default).
 - **Deletion method**: Trash (default and not changeable, with the note "this tool does not provide permanent deletion").
 - Appearance: follow system / light / dark.
+- Language: follow system / English / 中文. English is the source locale; the interface follows the system language by default and can be switched manually.
 
 ---
 
@@ -405,11 +406,13 @@ The definitions of the delivery forms and the responsibilities of each form are 
 
 The UI prototype covers only look and interaction, not the Rust implementation; in the Form A phase the data source is switched from `src/mock/` to a snapshot JSON dragged in by the user, and in the Form B phase it is switched to HTTP requests.
 
+The same pages are reused as the Form C desktop shell. There the data source is the Tauri IPC command backed by `worktree-core::scan_project`, and `src/mock/` serves only the browser preview, where it is always labelled as sample data.
+
 ---
 
 ## 9. UI prototype file inventory
 
-The prototype has been implemented per this plan as directly runnable Vue 3 pages; all data comes from `src/mock/snapshot.ts`, depends on no Tauri IPC, and touches neither `crates/` nor `src-tauri/`.
+The prototype has been implemented per this plan as directly runnable Vue 3 pages; in a plain browser all data comes from `src/mock/snapshot.ts`, while the Form C desktop shell reads real scan results over Tauri IPC and writes the operation log to disk.
 
 ```
 src/
