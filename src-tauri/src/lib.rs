@@ -4,6 +4,15 @@
 //! `worktree-core`, and the shell's job is to translate the wire shape the UI
 //! speaks into the core's own types — no decisions are made on this side, and
 //! nothing is decided twice.
+//!
+//! **Every command that does real work is `async`, and its work runs on
+//! `spawn_blocking`.** A command without the `async` keyword runs on the main
+//! thread, and the main thread is the one that draws the window: a scan of a real
+//! repository takes over a second — measured at 1.16 s for a single-worktree
+//! project on this machine — and an execution spawns Git and moves directories, so
+//! either one freezes the UI for its whole duration. The work itself is blocking by
+//! nature (it starts processes and walks the filesystem), so it belongs on the
+//! blocking pool rather than on an async worker.
 
 use std::path::PathBuf;
 
@@ -19,8 +28,12 @@ use worktree_core::{
 /// `options` carries milliseconds rather than Rust durations, so the front end
 /// never has to know how `Duration` encodes.
 #[tauri::command]
-fn scan_project(path: String, options: ScanOptions) -> Result<ProjectSnapshot, String> {
-    core_scan(&path, &options).map_err(|error| error.to_string())
+async fn scan_project(path: String, options: ScanOptions) -> Result<ProjectSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        core_scan(&path, &options).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("the scan task did not finish: {error}"))?
 }
 
 /// Everything the executor needs, in one request.
@@ -45,31 +58,39 @@ struct ExecuteRequest {
 
 /// Runs a confirmed plan.
 #[tauri::command]
-fn execute_plan(request: ExecuteRequest) -> ExecutionOutcome {
-    let options = ExecuteOptions {
-        recent_activity_days: request.recent_activity_days,
-        untracked_as_unsafe: request.untracked_as_unsafe,
-        whitelist: request.whitelist,
-        log_path: request.log_path.map(PathBuf::from),
-        ..ExecuteOptions::default()
-    };
-    core_execute(&request.plan, &request.snapshot, &options)
+async fn execute_plan(request: ExecuteRequest) -> Result<ExecutionOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let options = ExecuteOptions {
+            recent_activity_days: request.recent_activity_days,
+            untracked_as_unsafe: request.untracked_as_unsafe,
+            whitelist: request.whitelist,
+            log_path: request.log_path.map(PathBuf::from),
+            ..ExecuteOptions::default()
+        };
+        core_execute(&request.plan, &request.snapshot, &options)
+    })
+    .await
+    .map_err(|error| format!("the execution task did not finish: {error}"))
 }
 
 /// Where the operation log lives on this machine, so the settings page can show
 /// the path it is actually writing to instead of a guess.
 #[tauri::command]
-fn log_path() -> Option<String> {
+async fn log_path() -> Option<String> {
     log::default_log_path().map(|path| path.display().to_string())
 }
 
 /// The audit trail, newest last.
 #[tauri::command]
-fn read_history() -> Result<Vec<HistoryEntry>, String> {
-    let Some(path) = log::default_log_path() else {
-        return Ok(Vec::new());
-    };
-    Ok(log::read(&path))
+async fn read_history() -> Result<Vec<HistoryEntry>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let Some(path) = log::default_log_path() else {
+            return Vec::new();
+        };
+        log::read(&path)
+    })
+    .await
+    .map_err(|error| format!("the log read did not finish: {error}"))
 }
 
 /// Empties the operation log.
@@ -77,11 +98,15 @@ fn read_history() -> Result<Vec<HistoryEntry>, String> {
 /// The file itself stays: "the log is empty" and "there is no log" are
 /// different answers, and only one of them means the app has never run.
 #[tauri::command]
-fn clear_log() -> Result<(), String> {
-    let Some(path) = log::default_log_path() else {
-        return Ok(());
-    };
-    log::clear(&path).map_err(|error| error.to_string())
+async fn clear_log() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let Some(path) = log::default_log_path() else {
+            return Ok(());
+        };
+        log::clear(&path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("the log clear did not finish: {error}"))?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

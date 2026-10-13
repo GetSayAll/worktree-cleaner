@@ -29,6 +29,12 @@ when the language changes. `locale.test.ts` fails if a table's keys differ.
 - Never use permanent-delete commands to clean up a user's directories.
 - Every deletion decision must be backed by a verifiable reason.
 - macOS and Windows behaviour are verified separately.
+- **Every Tauri command that does real work is `async`, and its body runs on
+  `spawn_blocking`.** A command without the `async` keyword runs on the main thread,
+  which is the one that draws the window: a scan takes over a second (1.16 s for a
+  single-worktree project, 1.34 s for five) and an execution spawns Git and moves
+  directories, so either one freezes the UI for its whole duration. The work is
+  blocking by nature, so it does not belong on an async worker either.
 
 ## Where a change belongs
 
