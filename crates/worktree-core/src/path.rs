@@ -235,6 +235,42 @@ pub fn whitelist_hit(candidate: &Path, rules: &[PathBuf]) -> Option<PathBuf> {
     None
 }
 
+/// Expands a leading `~` (or `~/`) to the user's home directory.
+///
+/// Whitelist rules and scan paths are typed by a human, so they arrive as
+/// `~/dev` rather than as an absolute path. The expansion happens here — once,
+/// before any comparison — so every caller works with absolute paths, which is
+/// what [`validate_path_for_deletion`] and [`whitelist_hit`] require.
+///
+/// When no home directory can be determined the prefix is kept literally: a rule
+/// that cannot be expanded must not silently become a relative path that matches
+/// nothing.
+pub fn expand_tilde(raw: &str) -> PathBuf {
+    let trimmed = raw.trim();
+    if trimmed == "~" {
+        return home_dir();
+    }
+    for prefix in ["~/", "~\\"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            if rest.is_empty() {
+                return home_dir();
+            }
+            return home_dir().join(rest);
+        }
+    }
+    PathBuf::from(trimmed)
+}
+
+/// The user's home directory, or an empty path when it cannot be determined.
+fn home_dir() -> PathBuf {
+    for variable in ["HOME", "USERPROFILE"] {
+        if let Some(value) = std::env::var_os(variable).filter(|value| !value.is_empty()) {
+            return PathBuf::from(value);
+        }
+    }
+    PathBuf::new()
+}
+
 /// Top-level root + system location checks.
 fn reject_roots(path: &Path) -> Result<(), PathRejection> {
     // A component count ≤ 2 means the "/xxx" level: no top-level directory itself may

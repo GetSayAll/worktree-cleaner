@@ -2,10 +2,13 @@
 //!
 //! Scope: Git parsing, status assessment, artifact scanning, and path validation.
 //!
-//! **This crate is read-only**: it never performs any deletion. Deletion lives in a
-//! separate place and can only be driven by a plan object (development contract §2).
+//! **This crate is read-only**: it never performs any deletion. Deletion lives in
+//! a separate place and can only be driven by a plan object (development contract §2).
 
+pub mod artifact;
+pub mod cleanup;
 pub mod git;
+pub mod log;
 pub mod path;
 pub mod reason;
 pub mod timefmt;
@@ -19,8 +22,15 @@ pub use worktree::{
     WorktreeCheckOptions, WorktreeEntry,
 };
 
+use std::path::PathBuf;
+use std::time::{Duration, Instant, SystemTime};
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::artifact::{measure_dir, scan_artifacts, ArtifactScanOptions};
+use crate::path::expand_tilde;
+use crate::timefmt::format_rfc3339;
 
 /// Contract version of `snapshot.json`. Must be bumped whenever fields are added,
 /// removed, or change meaning (development contract D20).
@@ -30,13 +40,162 @@ use thiserror::Error;
 /// would render `null` as `0 B`.
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 2;
 
+/// Why a scan could not be produced.
+///
+/// Every variant is a distinct, honest answer: an empty path, a path that is not
+/// there, and a path that is not a Git repository must never collapse into one
+/// generic failure the UI would have to guess about (D3).
 #[derive(Debug, Error)]
 pub enum ScanError {
-    /// The orchestrator (default-branch detection, artifact walk, snapshot assembly)
-    /// lands with the CLI stage. The worktree checks it will call already exist in
-    /// [`crate::worktree`].
-    #[error("the scan orchestrator is not implemented yet; the worktree checks live in worktree::check_worktree")]
-    NotImplemented,
+    #[error("the path is empty")]
+    Empty,
+    #[error("the path does not exist: {0}")]
+    NotFound(String),
+    #[error("not a Git repository: {0}")]
+    NotAGitRepository(String),
+    #[error("git could not be queried: {0}")]
+    GitFailed(String),
+}
+
+/// Knobs the caller (Tauri shell, CLI) passes into a scan.
+///
+/// Durations are milliseconds on the wire so the front end does not have to know
+/// Rust's `Duration` encoding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanOptions {
+    /// How deep below a worktree root an artifact candidate may sit.
+    pub max_depth: usize,
+    /// Budget for one directory size measurement.
+    pub per_dir_timeout_ms: u64,
+    /// Budget for the whole scan. When it runs out, the unscanned remainder is
+    /// reported in `warnings` instead of being silently skipped.
+    pub scan_budget_ms: u64,
+    /// Activity window in days.
+    pub recent_activity_days: u32,
+    /// Treat untracked files as `Unsafe` instead of `Review`.
+    pub untracked_as_unsafe: bool,
+    /// Whitelist rules as written by the user; `~` is expanded here.
+    pub whitelist: Vec<String>,
+    /// Budget for one Git command.
+    pub git_timeout_ms: u64,
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self {
+            max_depth: 6,
+            per_dir_timeout_ms: 30_000,
+            scan_budget_ms: 600_000,
+            recent_activity_days: 7,
+            untracked_as_unsafe: false,
+            whitelist: Vec::new(),
+            git_timeout_ms: 10_000,
+        }
+    }
+}
+
+/// Which channel a plan item travels through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlanItemKind {
+    Worktree,
+    Artifact,
+}
+
+/// One `git worktree remove` / `git worktree prune` in a plan.
+///
+/// Mirrors `WorktreeRemovalItem` in `src/types.ts` field for field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeRemovalItem {
+    pub kind: PlanItemKind,
+    pub path: String,
+    pub branch: Option<String>,
+    /// Display only: the executor re-derives the command from the re-checked
+    /// record instead of parsing this string, so a stale plan cannot run a
+    /// command the re-check disagrees with.
+    pub command: String,
+    pub force: bool,
+    pub untracked_files: Vec<String>,
+    /// `null` = unmeasurable, so the plan does not claim a size it cannot know.
+    pub size_bytes: Option<u64>,
+}
+
+/// One move to the system Trash in a plan.
+///
+/// Mirrors `TrashMoveItem` in `src/types.ts` field for field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrashMoveItem {
+    pub kind: PlanItemKind,
+    pub path: String,
+    pub artifact_kind: String,
+    pub size_bytes: Option<u64>,
+    pub file_count: u64,
+    /// Set when the artifact disappears together with a selected worktree; it is
+    /// then not a separate deletion.
+    pub bundled_with_worktree: Option<String>,
+}
+
+/// A cleanup plan, as produced by the UI and consumed by the executor.
+///
+/// Mirrors `CleanupPlan` in `src/types.ts` field for field.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupPlan {
+    pub worktree_removals: Vec<WorktreeRemovalItem>,
+    pub trash_moves: Vec<TrashMoveItem>,
+    pub excluded_unsafe: u32,
+    pub total_bytes: u64,
+    /// How many independently deleted items have an unknown size; while this is
+    /// above zero, `total_bytes` is a lower bound.
+    pub total_bytes_unknown: u32,
+    pub blockers: Vec<String>,
+    pub ack_reasons: Vec<String>,
+}
+
+/// What an executed action was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HistoryAction {
+    WorktreeRemove,
+    TrashMove,
+    Prune,
+}
+
+/// How one executed action ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionResult {
+    Ok,
+    Skipped,
+    Failed,
+}
+
+/// One line of the per-item result table.
+///
+/// Mirrors `ResultEntry` in `src/types.ts` field for field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultEntry {
+    pub action: HistoryAction,
+    pub target: String,
+    pub result: ExecutionResult,
+    pub detail: String,
+    /// `null` = the size was never measurable; must not collapse to 0.
+    pub size_bytes: Option<u64>,
+}
+
+/// One line of the operation log.
+///
+/// Mirrors `HistoryEntry` in `src/types.ts` field for field. The log records
+/// time / action / target / reason / result / size (D15) and never leaves the
+/// machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub at: String,
+    pub action: HistoryAction,
+    pub target: String,
+    pub reason: String,
+    pub result: ExecutionResult,
+    pub size_bytes: Option<u64>,
+    pub detail: String,
 }
 
 /// The check result for a single Git worktree.
@@ -118,8 +277,122 @@ pub struct ProjectSnapshot {
     pub warnings: Vec<String>,
 }
 
-pub fn scan_project(_path: &str) -> Result<ProjectSnapshot, ScanError> {
-    Err(ScanError::NotImplemented)
+/// Runs one scan of `path` and assembles its [`ProjectSnapshot`].
+///
+/// The orchestrator owns the order of operations and nothing else: worktree
+/// decisions come from [`check_worktree`], artifact decisions from
+/// [`crate::artifact::check_artifact`], and both derive their level from their
+/// reasons (D2). Everything it cannot establish — a size measurement that timed
+/// out, a budget that ran out — is reported in `warnings` rather than filled in
+/// (D3).
+pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot, ScanError> {
+    let raw = path.trim();
+    if raw.is_empty() {
+        return Err(ScanError::Empty);
+    }
+    let root = expand_tilde(raw);
+    if !root.is_dir() {
+        return Err(ScanError::NotFound(root.display().to_string()));
+    }
+
+    let per_dir_timeout = Duration::from_millis(options.per_dir_timeout_ms.max(1));
+    let git_timeout = Duration::from_millis(options.git_timeout_ms.max(1));
+    let budget = Duration::from_millis(options.scan_budget_ms);
+    let runner = ProcessGitRunner::new(git_timeout);
+    let started = Instant::now();
+
+    let listing = runner
+        .run(&root, &["worktree", "list", "--porcelain", "-z"])
+        .map_err(|error| ScanError::GitFailed(error.to_string()))?;
+    if !listing.success() {
+        return Err(ScanError::NotAGitRepository(format!(
+            "git worktree list failed: {}",
+            listing.stderr.trim()
+        )));
+    }
+    let entries = parse_worktree_list(&listing.stdout);
+    if entries.is_empty() {
+        return Err(ScanError::NotAGitRepository(
+            "git reported no worktrees".to_string(),
+        ));
+    }
+
+    let default_branch = detect_default_branch(&runner, &root);
+    let whitelist: Vec<PathBuf> = options
+        .whitelist
+        .iter()
+        .map(|rule| expand_tilde(rule))
+        .collect();
+    let now = SystemTime::now();
+    let mut warnings: Vec<String> = Vec::new();
+
+    // ---- worktrees ----
+    let mut worktrees: Vec<WorktreeRecord> = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        if started.elapsed() > budget {
+            warnings.push(format!(
+                "the scan budget of {}s ran out after {} of {} worktrees; the remaining ones were not scanned",
+                budget.as_secs(),
+                index,
+                entries.len()
+            ));
+            break;
+        }
+        let is_main = index == 0 && !entry.is_bare;
+        let size_bytes = measure_dir(&entry.path, per_dir_timeout).bytes;
+        if size_bytes.is_none() {
+            warnings.push(format!(
+                "size measurement of {} did not complete within {}s; the size is recorded as unknown",
+                entry.path.display(),
+                per_dir_timeout.as_secs()
+            ));
+        }
+        let check_options = WorktreeCheckOptions {
+            default_branch: default_branch.clone(),
+            recent_activity_days: options.recent_activity_days,
+            untracked_as_unsafe: options.untracked_as_unsafe,
+            whitelist: whitelist.clone(),
+            now,
+            size_bytes,
+        };
+        worktrees.push(check_worktree(
+            &runner,
+            &root,
+            entry,
+            is_main,
+            &check_options,
+        ));
+    }
+
+    // ---- artifacts ----
+    // Only worktrees that still exist can hold artifacts; a prunable entry's
+    // directory is gone, and the walk would otherwise report the same nothing
+    // twice.
+    let present_roots: Vec<PathBuf> = worktrees
+        .iter()
+        .filter(|record| !record.is_prunable)
+        .map(|record| PathBuf::from(&record.path))
+        .collect();
+    let artifact_options = ArtifactScanOptions {
+        max_depth: options.max_depth.max(1),
+        per_dir_timeout,
+        recent_activity_days: options.recent_activity_days,
+        whitelist,
+        now,
+        budget_deadline: Some(started + budget),
+    };
+    let artifact_scan = scan_artifacts(&runner, &present_roots, &artifact_options);
+    warnings.extend(artifact_scan.warnings);
+
+    Ok(ProjectSnapshot {
+        schema_version: SNAPSHOT_SCHEMA_VERSION,
+        root: root.display().to_string(),
+        scanned_at: format_rfc3339(SystemTime::now()),
+        default_branch,
+        worktrees,
+        artifacts: artifact_scan.records,
+        warnings,
+    })
 }
 
 #[cfg(test)]

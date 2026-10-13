@@ -9,3 +9,9 @@ repository.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# D5: directories leave through the system Trash and never through `remove_dir_all`.
+# BSD-2-Clause, compatible with this crate's GPL-3.0-only.
+trash = "5"
+
+[dev-dependencies]
+tempfile = "3"
