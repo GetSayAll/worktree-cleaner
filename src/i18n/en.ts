@@ -49,6 +49,7 @@ export const en = {
     overview: "Overview",
     worktrees: "Worktree",
     artifacts: "Build artifacts",
+    hygiene: "Disk hygiene",
     plan: "Cleanup plan",
     result: "Result",
     history: "History",
@@ -85,8 +86,11 @@ export const en = {
       no_upstream: "has no upstream branch and is not merged",
       unmerged: "not merged into the default branch",
       untracked: "has untracked files",
+      // No longer produced by a scan: a stash belongs to the repository, not to the
+      // worktree being judged. Kept so that audit logs written before it was withdrawn
+      // still render.
       stash: "has stash entries",
-      recent_activity: "changed within the activity window",
+      recent_activity: "committed within the activity window",
       agent_active: "a Git command may be running",
       cannot_verify: "cannot complete the check",
       whitelisted: "matches a whitelist rule",
@@ -365,7 +369,7 @@ export const en = {
       head: "HEAD",
       upstream: "Upstream",
       mergeStatus: "Merge status",
-      stash: "stash",
+      stash: "Repository stash",
       untrackedFiles: "Untracked files",
       directorySize: "Directory size"
     },
@@ -420,6 +424,228 @@ export const en = {
       `Selected ${artifacts} artifacts · ${worktrees} worktrees · Estimated reclaimable`,
     backToWorktrees: "Back to Worktree",
     generatePlan: "Generate cleanup plan"
+  },
+  // The disk-hygiene policy, as a checklist. One entry per rule of
+  // docs/DISK_HYGIENE.md, one per situation the audit can report, and the wiring
+  // that makes each rule true. The numbers in `states` arrive as arguments: the
+  // audit sends what it measured and the sentence is written here, so a threshold
+  // is stated in the reader's language rather than frozen in the scanner.
+  hygiene: {
+    title: "Disk hygiene",
+    lede:
+      "The policy of docs/DISK_HYGIENE.md, checked against this repository. Read-only: nothing here deletes anything, and no finding changes whether an item is safe to remove.",
+    metOf: (met: number, total: number) => `${met} of ${total} rules met`,
+    stats: {
+      violation: "Rules broken",
+      advisory: "Worth fixing",
+      unchecked: "Not checked",
+      met: "Rules met"
+    },
+    violationBanner: (rules: number) =>
+      `${rules === 1 ? "One rule is" : `${rules} rules are`} broken. Each finding names the path it is about and what to do; nothing has been changed.`,
+    level: {
+      ok: "Met",
+      advisory: "Worth fixing",
+      violation: "Broken",
+      unknown: "Not checked"
+    },
+    rules: {
+      L1: "Worktrees live inside the repository",
+      L2: "One clone per repository",
+      L3: "No nesting",
+      L4: "Naming: repo-branch-YYYYMMDD",
+      L5: "Ignore entries are anchored and committed",
+      L6: "git clean -x and -X are forbidden",
+      L7: "Excluded from editor and platform indexes",
+      T1: "At most 50 worktrees",
+      T2: "A merge closes its worktree",
+      T3: "Seven idle days make a worktree stale",
+      T4: "Nothing survives 30 days",
+      T5: "A session cleans up what it created",
+      B1: "Output lives in declared locations only",
+      B11: "git status lists no generated path",
+      B2: "One cache root, mirrored by worktree name",
+      B3: "Shared reads, isolated writes",
+      B4: "Disposable by construction",
+      B5: "Ten gigabytes per cache slot",
+      Q1: "Free space above 15%, frozen below 10%",
+      Q2: "The cache stays under a tenth of the volume",
+      Q3: "Refused at creation, not reported afterwards",
+      X1: "Exceptions carry a rule and an expiry"
+    },
+    states: {
+      L1: {
+        outside_repository:
+          "Outside {expected}. A worktree beside the repository is not removed when the repository is.",
+        inside_but_undeclared:
+          "Inside the repository but not under {expected}, so Git sees it as ordinary untracked files.",
+      },
+      L2: {
+        not_checkable: "A second clone cannot be seen from inside one repository.",
+      },
+      L3: {
+        nested_worktree: "This worktree sits inside {parent}.",
+      },
+      L4: {
+        not_a_slug: "{name} is not lowercase and hyphen-separated.",
+        too_long: "{name} is {length} characters; the limit is {limit}.",
+        no_date_suffix: "{name} does not end with its creation date as YYYYMMDD.",
+        invalid_date: "{name} ends with a date that does not exist.",
+        missing_repo_prefix:
+          "{name} does not start with {prefix}-, so it cannot be traced back to this repository.",
+      },
+      L5: {
+        missing_entry: "Nothing ignores the declared paths; {entry} is not in .gitignore.",
+        no_worktrees_yet:
+          "{entry} is not ignored yet. There is no worktree today; the entry is needed before the first one.",
+        unanchored_pattern:
+          "The pattern {pattern} at {source}:{line} has no leading slash, so it matches at any depth — a build inside a worktree quietly creates its own copy.",
+        local_only:
+          "{pattern} lives only in {source}, which is not committed: nobody else's clone ignores either path.",
+        elsewhere:
+          "The paths are ignored by {source}, which is outside this repository's own .gitignore.",
+        nested_worktree_dir:
+          "A .worktree/ directory exists inside a worktree; only the repository root should have one.",
+      },
+      L6: {
+        not_checkable:
+          "git clean is not logged, so a scan cannot see a command that has already run.",
+      },
+      L7: {
+        not_checkable:
+          "Editor search and platform indexing are configured outside the repository.",
+      },
+      T1: {
+        over_cap: "{count} worktrees are registered; the cap is {cap}.",
+        near_cap: "{count} of {cap} registered. Remove one before creating the next.",
+      },
+      T2: {
+        merged_still_present:
+          "{branch} is already merged into the default branch. Removing the worktree is part of finishing the change, not a separate task.",
+      },
+      T3: {
+        stale: "No commit and no uncommitted change for {days} days.",
+        stale_with_changes:
+          "No commit for {days} days, and {dirty} changed with {untracked} untracked. Reported, not removed: the work has to leave first.",
+      },
+      T4: {
+        past_ceiling: "Created {days} days ago; nothing survives {ceiling} days.",
+        age_unknown:
+          "{count} worktree directories report no creation time, so their age cannot be checked.",
+      },
+      T5: {
+        not_checkable: "A session's exit is not recorded anywhere a scan can read.",
+      },
+      B1: {
+        outside_declared:
+          "This {kind} directory is outside build-cache/, so it cannot be audited, quotaed, or deleted from one place.",
+      },
+      B11: {
+        untracked_in_status: "git status lists this {kind} directory as untracked.",
+        tracked_in_git: "Git tracks files inside this {kind} directory.",
+      },
+      B2: {
+        no_cache_root:
+          "There is no build-cache/ at the repository root, so every build writes wherever its tool defaults to.",
+        orphan_slot: "build-cache/{slot} has no worktree named {slot}.",
+        missing_slots: "{count} worktrees have no cache slot yet: {slots}.",
+        nested_cache_root: "A second build-cache/ exists inside a worktree.",
+      },
+      B3: {
+        not_checkable:
+          "Which dependencies a build shares is decided by its own configuration.",
+      },
+      B4: {
+        not_checkable:
+          "Whether something reads the cache as an input cannot be established by reading it.",
+      },
+      B5: {
+        slot_over_cap: "This slot holds {size}; the ceiling for one worktree is {cap_bytes}.",
+        slot_unmeasurable: "The slot could not be measured, so its size is unknown.",
+      },
+      Q1: {
+        frozen:
+          "{percent} free ({available} of {total}). Below 10% nothing new is created — no worktree, cache entry, or release artifact — until free space is back above 12%.",
+        warning: "{percent} free ({available} of {total}). Between 10% and 15% this is a warning.",
+        space_unknown: "The volume's free space could not be read.",
+      },
+      Q2: {
+        over_share: "build-cache holds {size}, {percent} of the volume; the guide is a tenth.",
+        share_unknown:
+          "{count} cache slots could not be measured, so the share is a lower bound.",
+      },
+      Q3: {
+        not_checkable:
+          "Admission runs before creation; a scan only sees what already exists.",
+      },
+      X1: {
+        entry_without_expiry:
+          "Line {line} names a path without a rule and an expiry date, so as written it waives nothing.",
+        expiry_not_a_date:
+          "Line {line} gives {expires} as the expiry; it has to read YYYY-MM-DD.",
+        expired: "The waiver on line {line} expired on {expires}.",
+        dangling: "Line {line} waives a path that no longer exists."
+      }
+    },
+    fixes: {
+      L1: "Move it in: git worktree move <path> <repo>/.worktree/<repo>-<branch>-<YYYYMMDD>",
+      L2: "Keep the canonical clone and make the other a worktree of it.",
+      L3: "Remove the inner worktree; a worktree never owns another one.",
+      L4: "Rename it with git worktree move, so the directory carries the branch and the date.",
+      L5: "Add both entries to .gitignore, anchored, and commit them.",
+      L6: "Install the shell wrapper below. It is the only hard gate this rule can have.",
+      L7: "Add both paths to the editor's search exclusions and the platform index's ignore list.",
+      T1: "Remove a worktree before creating the next one.",
+      T2: "git worktree remove -- <path>, then delete build-cache/<name>/.",
+      T3: "Remove it — or push the branch first if it holds work.",
+      T4: "Push the branch or export a patch, then remove it. The ceiling is not negotiable.",
+      T5: "Remove it before the session ends, or hand it over by naming it and the next action.",
+      B1: "Point the build at its slot through WORKTREE_BUILD_CACHE, then delete this directory.",
+      B11: "Ignore it, or move it under build-cache/ and ignore it there.",
+      B2: "Create the slot the worktree writes to, or delete the slot nothing owns.",
+      B3: "Share resolved dependencies from build-cache/shared/ and keep compiled output per worktree.",
+      B4: "Make sure nothing reads the slot as an input; then it can be deleted at any time.",
+      B5: "Clear the slot. A cache may be deleted at any time without warning (B4).",
+      Q1: "Free space before creating anything else.",
+      Q2: "Evict an idle worktree's slot before creating a new one.",
+      Q3: "Check T1, Q1, and Q2 before creating anything.",
+      X1: "Write the rule and the expiry date on the line, or delete the line."
+    },
+    findings: {
+      title: "Findings",
+      empty: "Every rule this scan can check is met.",
+      evidence: "Evidence",
+      fix: "Fix",
+      acceptedTitle: "Accepted exceptions",
+      acceptedUntil: (date: string) => `Accepted until ${date}, per .worktree-keep`
+    },
+    setup: {
+      title: "Set up before the first worktree",
+      note:
+        "Four pieces of wiring make the rest of the policy hold. Their status comes from the audit above; the snippets are what to paste.",
+      items: {
+        ignore: "Both ignore entries, anchored and committed",
+        cache: "One cache root, and the variable that points builds at it",
+        guard: "A shell wrapper that refuses git clean -x and -X",
+        close: "One command that closes a worktree together with its slot"
+      }
+    },
+    snippets: {
+      gitignore: "/.worktree/\n/build-cache/\n",
+      cache:
+        "export WORKTREE_BUILD_CACHE=\"$PWD/build-cache/<worktree-name>\"\nexport CARGO_TARGET_DIR=\"$WORKTREE_BUILD_CACHE/target\"\n",
+      guard:
+        "git() {\n  local arg wants_clean=0\n  for arg in \"$@\"; do\n    [ \"$arg\" = clean ] && wants_clean=1\n  done\n  if [ \"$wants_clean\" = 1 ]; then\n    for arg in \"$@\"; do\n      case \"$arg\" in\n        -*x*|*-*X*|--ignored*)\n          printf 'refused: git clean %s would delete .worktree/ (L6)\\n' \"$arg\" >&2\n          return 1 ;;\n      esac\n    done\n  fi\n  command git \"$@\"\n}\n",
+      close:
+        "git worktree remove -- \"<repo>/.worktree/<name>\"\n# then move build-cache/<name>/ to the {{trash}}\n"
+    },
+    copy: "Copy",
+    scope: {
+      title: "What this audit cannot see",
+      note:
+        "L2, L6, L7, T5, B3, B4, and Q3 are reported as not checked: each depends on something outside one repository — another clone, a command that has already run, an editor's index, a session's exit, or a decision made at creation time. C1–C3 cover machine-level caches and release artifacts. A rule without evidence is never called met."
+    },
+    policyRef: "The rules are numbered as they are in docs/DISK_HYGIENE.md."
   },
   plan: {
     title: "Cleanup plan",

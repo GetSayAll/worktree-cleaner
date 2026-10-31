@@ -861,6 +861,14 @@ mod tests {
             default_branch: Some("main".to_string()),
             worktrees,
             artifacts,
+            // The executor's re-check reads the worktree and artifact records; the
+            // compliance audit is not an input to a deletion decision (D24), so an
+            // empty report is the honest fixture here.
+            hygiene: crate::HygieneReport {
+                rules: Vec::new(),
+                findings: Vec::new(),
+                warnings: Vec::new(),
+            },
             warnings: Vec::new(),
         }
     }

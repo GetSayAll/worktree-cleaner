@@ -255,11 +255,61 @@ confirmed action with a reason attached to every path.
 
 ## 7. Exceptions
 
+**X1 — An exception names the rule, the path, and the date it expires.**
+
 An exception is valid only when written down: the rule waived, the path, the
 reason, and the date it expires. Keep them in one file at the repository root —
-`.worktree-keep`, one path per line, so the same file serves as both the waiver and
+`.worktree-keep`, one entry per line, so the same file serves as both the waiver and
 the record of why the path is still there.
+
+The line is tab-separated, because a path may contain spaces:
+
+```
+<path>	<rule[,rule…] | *>	<YYYY-MM-DD>	# why this path stays
+```
+
+All four fields are required. `*` waives every rule for that path; a rule list
+waives only the rules it names, so an accepted violation of B1 does not silently
+excuse a T4. The date is the day the waiver stops applying — the path is then
+reported like any other.
 
 An exception without an expiry date is not an exception — it is the old behaviour
 with extra steps. Any rule waived twice for the same reason is either wrong or
 under-specified; fix the rule instead of adding a third exception.
+
+---
+
+## 8. How this policy is checked
+
+Worktree Cleaner audits one repository at a time against the rules above and
+reports each one as met, worth fixing, broken, or **not checked**. It is read-only:
+it reports, it never deletes, and a finding never changes whether something is safe
+to delete.
+
+| Rule | What the audit reads |
+|---|---|
+| L1, L3 | the registered worktree paths, against `<repo>/.worktree/` and against each other |
+| L4 | each worktree directory name: slug, length, date suffix, repository prefix |
+| L5 | `git check-ignore -v` for both declared paths: present, anchored, and in the repository's own `.gitignore` |
+| T1 | the number of registered worktrees, warned at 90% of the cap |
+| T2 | worktrees whose branch is already merged into the default branch |
+| T3 | the newer of the HEAD commit time and the directory's creation time |
+| T4 | the directory's creation time |
+| B1 | every recognised artifact directory, against `<repo>/build-cache/` |
+| B1.1 | the scan's own Git facts: tracked, or ignored |
+| B2 | the slots under `build-cache/` against the registered worktrees, and for a second `build-cache/` inside a worktree |
+| B5 | the size of each slot |
+| Q1, Q2 | the volume's free and total space |
+| X1 | `.worktree-keep`, field by field |
+
+Reported as **not checked** rather than as met: L2 (a second clone is outside the
+scanned path), L6 (a command that has already run), L7 (editor and platform index
+configuration), T5 (a session's exit), B3 and B4 (how a build uses the cache), Q3
+(admission happens at creation time), and C1–C3 (machine-level, outside any one
+repository). A scan that cannot see a rule says so; silence is not compliance.
+
+The prevention half lives on the same page. Every rule carries the wiring that
+makes it true — the two ignore entries, the cache-slot variable, the shell wrapper
+that refuses `git clean -x` / `-X`, and the two commands that close a worktree and
+delete its slot — so the page can be worked through before the first worktree is
+created rather than after the disk is full.

@@ -94,6 +94,39 @@ describe("the app shell", () => {
     host.remove();
   });
 
+  it("gives every hygiene rule a title and every finding a sentence", async () => {
+    // The page reads its copy straight from the message table, keyed by rule. A
+    // key the table does not have renders an empty title or an empty fix line,
+    // which is invisible in a type check but makes the page useless — and the one
+    // id that carries a dot (`B1.1`) is the one a dotted key cannot hold.
+    const { app, host } = mountApp();
+    state.snapshot.value = mockSnapshot;
+    state.view.value = "hygiene";
+    await nextTick();
+
+    const heads = [...host.querySelectorAll(".group-head")];
+    expect(heads.length).toBeGreaterThan(5);
+    for (const head of heads) {
+      const rule = head.querySelector(".chip")?.textContent?.trim() ?? "";
+      const title = head.querySelector(".group-head__path")?.textContent?.trim() ?? "";
+      expect(title.length, `${rule} has no title`).toBeGreaterThan(0);
+      expect(title, `${rule} fell back to its bare id`).not.toBe(rule);
+    }
+    // The dotted id is among them, so this covers the mapping and not just the
+    // rules whose ids happen to be plain letters and digits.
+    expect(heads.map((head) => head.querySelector(".chip")?.textContent?.trim())).toContain("B1.1");
+
+    const text = host.textContent ?? "";
+    expect(text).not.toContain("undefined");
+    // Each finding carries its own sentence, not just its evidence line.
+    expect(text).not.toContain("Fix: \n");
+
+    app.unmount();
+    host.remove();
+    state.view.value = "welcome";
+    state.snapshot.value = null;
+  });
+
   it("does not offer a cleanup action it cannot carry out", async () => {
     const { app, host } = mountApp();
     state.snapshot.value = mockSnapshot;

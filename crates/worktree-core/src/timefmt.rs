@@ -45,6 +45,57 @@ pub fn humanize_days(days: u64) -> String {
     }
 }
 
+/// Parses `YYYY-MM-DDTHH:MM:SSZ` back into an instant.
+///
+/// The only timestamps this core reads back are ones it wrote itself — HEAD commit
+/// times and activity fields of its own snapshot — so a strict fixed-width parse of
+/// exactly that format is the honest contract: anything else is `None`, which a
+/// caller must treat as "not measured" rather than as an old timestamp (D3).
+pub fn parse_rfc3339(text: &str) -> Option<SystemTime> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 20
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes[19] != b'Z'
+    {
+        return None;
+    }
+    let year: i64 = text.get(0..4)?.parse().ok()?;
+    let month: u32 = text.get(5..7)?.parse().ok()?;
+    let day: u32 = text.get(8..10)?.parse().ok()?;
+    let hour: i128 = text.get(11..13)?.parse().ok()?;
+    let minute: i128 = text.get(14..16)?.parse().ok()?;
+    let second: i128 = text.get(17..19)?.parse().ok()?;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    let days = days_from_civil(year, month, day);
+    Some(from_unix_seconds(
+        days * SECONDS_PER_DAY + hour * 3600 + minute * 60 + second,
+    ))
+}
+
+/// Days since 1970-01-01 for a civil date. The inverse of [`civil_from_days`].
+const fn days_from_civil(year: i64, month: u32, day: u32) -> i128 {
+    let year = year as i128;
+    let month = month as i128;
+    let day = day as i128;
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400; // [0, 399]
+    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year; // [0, 146096]
+    era * 146_097 + day_of_era - 719_468
+}
+
 /// Seconds since the Unix epoch as a signed value, so pre-epoch times work.
 fn unix_seconds(time: SystemTime) -> i128 {
     match time.duration_since(UNIX_EPOCH) {
@@ -100,18 +151,6 @@ mod tests {
 
     /// The inverse of [`civil_from_days`], kept here so the round trips below are
     /// real checks rather than tautologies.
-    fn days_from_civil(year: i64, month: u32, day: u32) -> i128 {
-        let year = i128::from(year);
-        let month = i128::from(month);
-        let day = i128::from(day);
-        let year = if month <= 2 { year - 1 } else { year };
-        let era = year.div_euclid(400);
-        let year_of_era = year - era * 400; // [0, 399]
-        let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
-        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year; // [0, 146096]
-        era * 146_097 + day_of_era - 719_468
-    }
-
     #[test]
     fn epoch_formats_as_expected() {
         assert_eq!(format_rfc3339(UNIX_EPOCH), "1970-01-01T00:00:00Z");
@@ -129,24 +168,31 @@ mod tests {
         for seconds in [-1_i128, 0, 1, 1_700_000_000, 1_767_225_600] {
             let formatted = format_rfc3339(from_unix_seconds(seconds));
             let parsed = parse_rfc3339(&formatted).expect("parse back");
-            assert_eq!(parsed, seconds, "round trip failed for {seconds}");
+            assert_eq!(
+                parsed,
+                from_unix_seconds(seconds),
+                "round trip failed for {seconds}"
+            );
         }
     }
 
-    /// Minimal parser for the format [`format_rfc3339`] produces, used only to prove
-    /// the round trip.
-    fn parse_rfc3339(text: &str) -> Option<i128> {
-        let (date, time) = text.split_once('T')?;
-        let (year, rest) = date.split_once('-')?;
-        let (month, day) = rest.split_once('-')?;
-        let (hour, rest) = time.split_once(':')?;
-        let (minute, second) = rest.split_once(':')?;
-        let second = second.strip_suffix('Z')?;
-        let days = days_from_civil(year.parse().ok()?, month.parse().ok()?, day.parse().ok()?);
-        let seconds: i128 = hour.parse().ok()?;
-        let seconds =
-            seconds * 3600 + minute.parse::<i128>().ok()? * 60 + second.parse::<i128>().ok()?;
-        Some(days * 86_400 + seconds)
+    #[test]
+    fn parse_rejects_anything_it_did_not_write() {
+        // A strict parser is the point: a timestamp it cannot read is "not measured",
+        // and a lenient one would answer with a wrong date instead (D3).
+        for text in [
+            "",
+            "2026-01-01",
+            "2026-01-01T00:00:00",
+            "2026-13-01T00:00:00Z",
+            "2026-01-32T00:00:00Z",
+            "2026-01-01T24:00:00Z",
+            "2026-01-01T00:60:00Z",
+            "2026-01-01T00:00:00+00:00",
+            "not a timestamp at all",
+        ] {
+            assert_eq!(parse_rfc3339(text), None, "{text} should not parse");
+        }
     }
 
     #[test]

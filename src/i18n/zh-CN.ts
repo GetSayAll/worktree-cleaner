@@ -42,6 +42,7 @@ export const zhCN = {
     overview: "总览",
     worktrees: "工作树",
     artifacts: "构建产物",
+    hygiene: "磁盘卫生",
     plan: "清理计划",
     result: "执行结果",
     history: "历史记录",
@@ -76,8 +77,9 @@ export const zhCN = {
       no_upstream: "没有上游分支，且尚未合并",
       unmerged: "未合并进默认分支",
       untracked: "含有未跟踪文件",
+      // 扫描不再产生：stash 属于仓库而不属于被判定 worktree。保留只为让旧审计日志仍能渲染。
       stash: "存在 stash 条目",
-      recent_activity: "在活动时间窗口内有过改动",
+      recent_activity: "活动时间窗口内有过提交",
       agent_active: "可能有 Git 命令正在运行",
       cannot_verify: "无法完成检查",
       whitelisted: "命中白名单规则",
@@ -343,7 +345,7 @@ export const zhCN = {
       head: "HEAD",
       upstream: "上游分支",
       mergeStatus: "合并状态",
-      stash: "stash",
+      stash: "仓库级 stash",
       untrackedFiles: "未跟踪文件",
       directorySize: "目录体积"
     },
@@ -398,6 +400,216 @@ export const zhCN = {
       `已选 ${artifacts} 个产物 · ${worktrees} 个工作树 · 预计可回收`,
     backToWorktrees: "返回工作树",
     generatePlan: "生成清理计划"
+  },
+  // 磁盘卫生规范，做成一张清单。每条规则对应 docs/DISK_HYGIENE.md 里的一条；
+  // 每种情形（states）对应审计能报出的一种情况；fixes 是可以照着做的那一步。
+  // states 里的数字由审计以参数形式给出——审计只报告它量到了什么，句子写在这里，
+  // 这样阈值是用读者选择的语言说出来的，而不是冻在扫描器里。
+  hygiene: {
+    title: "磁盘卫生",
+    lede:
+      "对照 docs/DISK_HYGIENE.md 检查本仓库。全程只读：这里不会删除任何东西，任何一条问题也不会改变某一项「是否可删」的判断。",
+    metOf: (met: number, total: number) => `${total} 条规则中符合 ${met} 条`,
+    stats: {
+      violation: "违反的规则",
+      advisory: "建议处理",
+      unchecked: "未检查",
+      met: "符合的规则"
+    },
+    violationBanner: (rules: number) =>
+      `有 ${rules} 条规则被违反。下面每条问题都写明了涉及的路径和处理办法；目前没有改动任何东西。`,
+    level: {
+      ok: "符合",
+      advisory: "建议处理",
+      violation: "违反",
+      unknown: "未检查"
+    },
+    rules: {
+      L1: "工作树放在仓库内部",
+      L2: "一个仓库只有一个 clone",
+      L3: "禁止嵌套",
+      L4: "命名：仓库-分支-YYYYMMDD",
+      L5: "忽略条目必须锚定并提交",
+      L6: "禁止 git clean -x 与 -X",
+      L7: "从编辑器与系统索引中排除",
+      T1: "工作树最多 50 个",
+      T2: "合并即关闭工作树",
+      T3: "闲置七天即为陈旧",
+      T4: "任何工作树不超过 30 天",
+      T5: "会话清理自己创建的东西",
+      B1: "产物只能出现在声明位置",
+      B11: "git status 不出现任何生成物",
+      B2: "唯一的缓存根，按工作树名镜像",
+      B3: "共享读，隔离写",
+      B4: "天生可丢弃",
+      B5: "单个缓存槽位 10 GB",
+      Q1: "可用空间高于 15%，低于 10% 冻结",
+      Q2: "缓存不超过卷容量的一成",
+      Q3: "在创建时拒绝，而非事后报告",
+      X1: "例外必须写明规则与失效日期"
+    },
+    states: {
+      L1: {
+        outside_repository:
+          "位于 {expected} 之外。仓库被删除时，放在仓库旁边的工作树不会跟着消失。",
+        inside_but_undeclared:
+          "在仓库内部，但不在 {expected} 之下，于是 Git 把它当作普通的未跟踪文件。",
+      },
+      L2: {
+        not_checkable: "从一个仓库内部看不到第二个 clone。",
+      },
+      L3: {
+        nested_worktree: "这个工作树位于 {parent} 内部。",
+      },
+      L4: {
+        not_a_slug: "{name} 不是小写、连字符分隔的形式。",
+        too_long: "{name} 有 {length} 个字符；上限是 {limit}。",
+        no_date_suffix: "{name} 没有以创建日期 YYYYMMDD 结尾。",
+        invalid_date: "{name} 结尾的日期并不存在。",
+        missing_repo_prefix: "{name} 没有以 {prefix}- 开头，无法追溯到本仓库。",
+      },
+      L5: {
+        missing_entry: "两个声明路径都没有被忽略；.gitignore 里没有 {entry}。",
+        no_worktrees_yet:
+          "{entry} 还没有被忽略。目前没有工作树；这条要在创建第一个之前就写好。",
+        unanchored_pattern:
+          "{source}:{line} 的模式 {pattern} 没有前导斜杠，会在任意层级匹配——某个工作树内部跑一次构建，就会悄悄长出属于它自己的一份。",
+        local_only:
+          "{pattern} 只写在 {source} 里，而那个文件不会提交：别人的 clone 两个路径都没被忽略。",
+        elsewhere: "这些路径由 {source} 忽略，而它不在本仓库自己的 .gitignore 里。",
+        nested_worktree_dir: "某个工作树内部出现了 .worktree/ 目录；它只应存在于仓库根目录。",
+      },
+      L6: {
+        not_checkable: "git clean 不留日志，扫描看不到一条已经执行过的命令。",
+      },
+      L7: {
+        not_checkable: "编辑器的文件搜索与系统索引都在仓库之外配置。",
+      },
+      T1: {
+        over_cap: "已注册 {count} 个工作树；上限是 {cap} 个。",
+        near_cap: "已注册 {count}/{cap} 个。创建下一个之前先移除一个。",
+      },
+      T2: {
+        merged_still_present:
+          "{branch} 已经合入主线。移除该工作树是「完成这次改动」的一部分，不是另一件单独的任务。",
+      },
+      T3: {
+        stale: "连续 {days} 天既无新提交，也无未提交改动。",
+        stale_with_changes:
+          "{days} 天没有提交，且仍有 {dirty} 处改动、{untracked} 个未跟踪文件。只报告，不删除：得先把成果带出去。",
+      },
+      T4: {
+        past_ceiling: "创建于 {days} 天前；任何工作树都不超过 {ceiling} 天。",
+        age_unknown: "{count} 个工作树目录读不出创建时间，因此无法核对其存活时长。",
+      },
+      T5: {
+        not_checkable: "会话的退出没有被记录在任何扫描能读到的地方。",
+      },
+      B1: {
+        outside_declared:
+          "这个 {kind} 目录在 build-cache/ 之外，因此无法在一个地方审计、限额和删除。",
+      },
+      B11: {
+        untracked_in_status: "git status 把这个 {kind} 目录列为未跟踪。",
+        tracked_in_git: "Git 跟踪着这个 {kind} 目录里的文件。",
+      },
+      B2: {
+        no_cache_root:
+          "仓库根目录没有 build-cache/，于是每次构建都写到工具自己的默认位置去了。",
+        orphan_slot: "build-cache/{slot} 找不到名为 {slot} 的工作树。",
+        missing_slots: "有 {count} 个工作树还没有缓存槽位：{slots}。",
+        nested_cache_root: "某个工作树内部出现了第二个 build-cache/。",
+      },
+      B3: {
+        not_checkable: "构建共享哪些依赖，由它自己的配置决定。",
+      },
+      B4: {
+        not_checkable: "某处是否把缓存当作输入来读，光读缓存本身判断不了。",
+      },
+      B5: {
+        slot_over_cap: "这个槽位已占 {size}；单个工作树的上限是 {cap_bytes}。",
+        slot_unmeasurable: "这个槽位无法测量，因此体积未知。",
+      },
+      Q1: {
+        frozen:
+          "可用空间 {percent}（{available} / {total}）。低于 10% 时不得新建任何东西——工作树、缓存条目、发布产物都不行——直到可用空间回到 12% 以上。",
+        warning: "可用空间 {percent}（{available} / {total}）。处于 10%–15% 之间，属于告警。",
+        space_unknown: "读不到这个卷的可用空间。",
+      },
+      Q2: {
+        over_share: "build-cache 已占 {size}，为卷容量的 {percent}；建议控制在一成以内。",
+        share_unknown: "有 {count} 个缓存槽位无法测量，因此这个占比只是下限。",
+      },
+      Q3: {
+        not_checkable: "准入发生在创建之前；扫描只看得到已经存在的东西。",
+      },
+      X1: {
+        entry_without_expiry:
+          "第 {line} 行只写了路径，没有规则也没有失效日期；按现在这样写，它什么都豁免不了。",
+        expiry_not_a_date: "第 {line} 行把失效日期写成 {expires}；必须是 YYYY-MM-DD。",
+        expired: "第 {line} 行的豁免已于 {expires} 失效。",
+        dangling: "第 {line} 行豁免的路径已经不存在了。"
+      }
+    },
+    fixes: {
+      L1: "迁进去：git worktree move <路径> <仓库>/.worktree/<仓库>-<分支>-<YYYYMMDD>",
+      L2: "保留规范 clone，把另一个改成它的工作树。",
+      L3: "移除内层工作树；工作树不会拥有另一个工作树。",
+      L4: "用 git worktree move 改名，让目录名带上分支与日期。",
+      L5: "把两条条目加进 .gitignore，带前导斜杠，并提交。",
+      L6: "装上下面的 shell 包装器。这条规则唯一能有的硬拦截就是它。",
+      L7: "把两个路径加进编辑器的搜索排除与系统索引的忽略列表。",
+      T1: "先移除一个工作树，再创建下一个。",
+      T2: "git worktree remove -- <路径>，然后删除 build-cache/<名称>/。",
+      T3: "移除它——如果上面还有成果，先把分支推送出去。",
+      T4: "推送分支或导出 patch，然后移除。上限没有例外。",
+      T5: "在会话结束前移除，或明确交接：点名该工作树并说明下一步动作。",
+      B1: "用 WORKTREE_BUILD_CACHE 把构建指向它自己的槽位，然后删掉这个目录。",
+      B11: "把它忽略掉，或移到 build-cache/ 下再忽略。",
+      B2: "创建该工作树写入的槽位，或删掉没有归属的那个槽位。",
+      B3: "已解析的依赖放在 build-cache/shared/ 共享，编译产物按工作树隔离。",
+      B4: "确认没有任何东西把它当作输入读取；此后它随时可以删除。",
+      B5: "清空这个槽位。缓存任何时候都可以无预警删除（B4）。",
+      Q1: "先腾出空间，再创建别的东西。",
+      Q2: "先回收某个闲置工作树的槽位，再新建。",
+      Q3: "创建任何东西之前，先过 T1、Q1、Q2 这三关。",
+      X1: "在这一行补上规则与失效日期，或者把这一行删掉。"
+    },
+    findings: {
+      title: "问题",
+      empty: "本次扫描能检查的规则全部符合。",
+      evidence: "依据",
+      fix: "处理",
+      acceptedTitle: "已接受的例外",
+      acceptedUntil: (date: string) => `已接受至 ${date}（见 .worktree-keep）`
+    },
+    setup: {
+      title: "在创建第一个工作树之前做好",
+      note:
+        "四处接线做到位，其余规则才立得住。状态来自上面的审计；下面的片段可以直接粘贴。",
+      items: {
+        ignore: "两条忽略条目，带前导斜杠并提交",
+        cache: "唯一的缓存根，以及把构建指向它的变量",
+        guard: "拒绝 git clean -x / -X 的 shell 包装器",
+        close: "一条把工作树连同槽位一起关闭的命令"
+      }
+    },
+    snippets: {
+      gitignore: "/.worktree/\n/build-cache/\n",
+      cache:
+        "export WORKTREE_BUILD_CACHE=\"$PWD/build-cache/<工作树名>\"\nexport CARGO_TARGET_DIR=\"$WORKTREE_BUILD_CACHE/target\"\n",
+      guard:
+        "git() {\n  local arg wants_clean=0\n  for arg in \"$@\"; do\n    [ \"$arg\" = clean ] && wants_clean=1\n  done\n  if [ \"$wants_clean\" = 1 ]; then\n    for arg in \"$@\"; do\n      case \"$arg\" in\n        -*x*|*-*X*|--ignored*)\n          printf 'refused: git clean %s would delete .worktree/ (L6)\\n' \"$arg\" >&2\n          return 1 ;;\n      esac\n    done\n  fi\n  command git \"$@\"\n}\n",
+      close:
+        "git worktree remove -- \"<仓库>/.worktree/<名称>\"\n# 然后把 build-cache/<名称>/ 移到{{trash}}\n"
+    },
+    copy: "复制",
+    scope: {
+      title: "这次审计看不到什么",
+      note:
+        "L2、L6、L7、T5、B3、B4、Q3 会被报成「未检查」：它们各自取决于一个仓库之外的东西——另一个 clone、一条已经执行过的命令、编辑器的索引、会话的退出，或创建当刻做出的决定。C1–C3 属于机器级缓存与发布产物。没有证据的规则，永远不会被说成「符合」。"
+    },
+    policyRef: "规则编号与 docs/DISK_HYGIENE.md 一致。"
   },
   plan: {
     title: "清理计划",

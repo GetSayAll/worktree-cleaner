@@ -49,7 +49,7 @@ Fixed left-side navigation + top project bar.
 
 ```
 Top bar: project path · scan time · three-level counts · [Rescan]
-Sidebar: Overview / Worktree / Build artifacts / Cleanup plan / History / Settings
+Sidebar: Overview / Worktree / Build artifacts / Disk hygiene / Cleanup plan / History / Settings
 ```
 
 Before a scan, only "Welcome" in the sidebar is available; data pages appear only after the scan completes.
@@ -158,6 +158,18 @@ Before execution, walk through each item; if one fails, show the blocking reason
 - Appearance: follow system / light / dark.
 - Language: follow system / English / 中文. English is the source locale; the interface follows the system language by default and can be switched manually.
 
+### 10. Disk hygiene
+
+Every other page answers "what can I remove now". This one answers "why did it get this bad, and what makes sure it does not happen again". It is `docs/DISK_HYGIENE.md` made checkable from inside a repository: one row per rule, one finding per broken instance, and the wiring that keeps the rule true afterwards.
+
+- **Rule status**: all 22 rules with one of four states — met, worth fixing, broken, not checked. The count of met rules is the page's headline.
+- **Findings, grouped by rule**: each row names the path, says what is wrong in one sentence, shows the evidence the audit actually read (a path, a count, `git check-ignore -v` output, a free-space figure), and gives the one-line fix. Ordered broken first.
+- **Accepted exceptions**: a path waived by `.worktree-keep` stays on the page with the date its waiver expires. Hiding it would make a written exception look like compliance.
+- **Before the first worktree**: four copyable snippets, each tied to the rule it makes true — the two anchored ignore entries, `WORKTREE_BUILD_CACHE` for pointing a build at its slot, the shell wrapper that makes `git clean -x`/`-X` refuse to run, and the two-command close (`git worktree remove` then delete the slot).
+- **What this page cannot see**: the rules no scan can observe from inside one repository (a second clone, `git clean` that already ran, editor indexes, admission decisions) are listed with the audit's own reason, at `not checked` rather than at "met". A page that reported them as passing would be claiming a check that never happened.
+
+The audit never feeds a deletion decision: it holds no checkbox, selects nothing, and `cleanup.rs` does not read it (D24). It is a report about the repository's shape, and the cleanup plan is built from the worktree and artifact records alone.
+
 ---
 
 ## 4. Data contract
@@ -232,6 +244,7 @@ pub struct ProjectSnapshot {
     pub default_branch: Option<String>,
     pub worktrees: Vec<WorktreeRecord>,
     pub artifacts: Vec<ArtifactRecord>,
+    pub hygiene: HygieneReport,        // see Section 5.4; never an input to a deletion decision (D24)
     pub warnings: Vec<String>,         // scan degradation notes
 }
 ```
@@ -326,6 +339,44 @@ Any failure during the scan must raise the level, never lower it:
 | no permission to read a directory | record the size as unknown (show `unknown` instead of `0`), add `af.cannot_verify` |
 | size measurement timed out | show `≥ X MB (scan incomplete)`, add `af.cannot_verify` |
 | failed to determine the default branch | `merged_into_default = None`; all entries that depend on merge status are judged Review |
+
+### 5.4 Disk hygiene audit
+
+A second, independent pass over the same scan results, checking the policy in `docs/DISK_HYGIENE.md`: where worktrees live, how they are named, how long they live, where build output goes, what the volume has left. It reuses the worktree and artifact records the scan already built and asks Git only two further questions (`git check-ignore -v`, free space), so it costs one extra directory walk per cache slot rather than a second scan.
+
+What it reads for each rule is a table in `docs/DISK_HYGIENE.md` §8, kept next to the policy it implements, and a test fails when the two drift apart.
+
+```rust
+pub enum HygieneRule { L1, L2, L3, L4, L5, L6, L7, T1, T2, T3, T4, T5,
+                       B1, B11 /* "B1.1" */, B2, B3, B4, B5, Q1, Q2, Q3, X1 }
+
+pub enum HygieneLevel { Ok, Advisory, Violation, Unknown }   // serializes lowercase
+
+pub struct HygieneFinding {
+    pub rule: HygieneRule,
+    pub level: HygieneLevel,
+    pub subject: String,                    // the path or name the finding is about
+    pub evidence: String,                   // what the audit read: a path, a count, a command's output
+    pub args: BTreeMap<String, DetailArg>,  // the situation, plus the raw values its sentence needs
+    pub waived_until: Option<String>,       // set when .worktree-keep accepts this path until that date
+}
+
+pub struct HygieneRuleStatus { pub rule: HygieneRule, pub level: HygieneLevel, pub findings: u32 }
+
+pub struct HygieneReport {
+    pub rules: Vec<HygieneRuleStatus>,      // all 22, in policy order
+    pub findings: Vec<HygieneFinding>,      // violations, then advisories, then the unobservable ones
+    pub warnings: Vec<String>,
+}
+```
+
+Three properties are part of the contract rather than the implementation:
+
+- **A rule's level is its worst finding.** `Ok` means a check ran and found nothing; it is never the default. The seven rules no scan can observe from inside one repository (L2, L6, L7, T5, B3, B4, Q3) report `Unknown` with a `not_checkable` finding and their reason, because D3's "unknown is never safe" applies to a policy report exactly as it applies to a deletion verdict.
+- **A failing check raises the level of the rule it touches, never lowers it.** A slot whose size cannot be read is reported as unmeasurable, not as 0 bytes; a worktree whose creation time cannot be read makes T4 `Unknown` rather than met.
+- **`args` carries raw numbers, not formatted ones.** A byte count arrives as a number and the front end decides how it reads — which is also what lets one number be `1.29 GB` on an English screen and a different unit on a Chinese one; a size spelled in Rust would freeze one language into the other's screen.
+
+`.worktree-keep` accepts a path for a stated rule set until a stated date. An accepted finding keeps its record and its evidence and turns `Ok`, with the date on the page: an exception is on the record, not invisible.
 
 ---
 
@@ -436,7 +487,7 @@ src/
   types.ts                   types aligned with the Rust serde output (including SafetyStatus / Reason / record structures)
   format.ts                  size, time, and path display
   styles.css                 design tokens and component styles (light / dark sets)
-  mock/snapshot.ts           sample data: 6 worktrees, 14 artifacts, history records, settings defaults
+  mock/snapshot.ts           sample data: 6 worktrees, 14 artifacts, a hygiene audit, history records, settings defaults
   components/
     SafetyBadge.vue          three-level safety badge
     ReasonList.vue           reason list (sorted by severity, with evidence lines)
@@ -447,6 +498,7 @@ src/
     OverviewView.vue         overview
     WorktreesView.vue        worktree list and expanded detail
     ArtifactsView.vue        build artifacts (grouped by worktree, size threshold, sorting)
+    HygieneView.vue          disk hygiene: rule status, findings by rule, accepted exceptions, the wiring that prevents a recurrence
     CleanupPlanView.vue      cleanup plan and confirmation (Channel A / Channel B / preconditions / export)
     ResultView.vue           execution result
     HistoryView.vue          history log
@@ -507,12 +559,13 @@ The core functionality cannot be accomplished in a pure browser, so there is no 
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "root": "/Users/andy/MySrc/remote-mic-app",
   "scanned_at": "2026-10-11T09:12:00Z",
   "default_branch": "main",
   "worktrees": [],
   "artifacts": [],
+  "hygiene": { "rules": [], "findings": [], "warnings": [] },
   "warnings": []
 }
 ```

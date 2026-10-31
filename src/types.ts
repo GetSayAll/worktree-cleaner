@@ -91,10 +91,88 @@ export interface ProjectSnapshot {
   default_branch: string | null;
   worktrees: WorktreeRecord[];
   artifacts: ArtifactRecord[];
+  /** Compliance with the disk-hygiene policy; read-only, and never a deletion verdict. */
+  hygiene: HygieneReport;
   warnings: string[];
 }
 
-export const SNAPSHOT_SCHEMA_VERSION = 2;
+export const SNAPSHOT_SCHEMA_VERSION = 3;
+
+/**
+ * One numbered rule of `docs/DISK_HYGIENE.md`.
+ *
+ * Mirrors `HygieneRule` in `crates/worktree-core/src/hygiene.rs`. The identifiers
+ * are the document's own, so a finding can be read against the rule it breaks
+ * without a lookup table in between. C1–C3 are not here: they are machine-level,
+ * and this audit looks at one repository.
+ */
+export type HygieneRule =
+  | "L1"
+  | "L2"
+  | "L3"
+  | "L4"
+  | "L5"
+  | "L6"
+  | "L7"
+  | "T1"
+  | "T2"
+  | "T3"
+  | "T4"
+  | "T5"
+  | "B1"
+  | "B1.1"
+  | "B2"
+  | "B3"
+  | "B4"
+  | "B5"
+  | "Q1"
+  | "Q2"
+  | "Q3"
+  | "X1";
+
+/**
+ * How much one finding matters.
+ *
+ * `unknown` is not a level on the same scale: it says the rule could not be
+ * observed, which must never be rendered as either met or broken (D3).
+ */
+export type HygieneLevel = "ok" | "advisory" | "violation" | "unknown";
+
+/**
+ * One policy finding.
+ *
+ * Mirrors `HygieneFinding` in `crates/worktree-core/src/hygiene.rs`. `args.state`
+ * selects the sentence in the message table and the rest of `args` fills it in;
+ * `evidence` is the measurement and is shown as it stands.
+ */
+export interface HygieneFinding {
+  rule: HygieneRule;
+  level: HygieneLevel;
+  /** What it is about: a worktree path, a cache slot, a file, or the repository. */
+  subject: string;
+  /** The measurement behind the finding. Never empty. */
+  evidence: string;
+  args: Record<string, DetailArg>;
+  /** Set when `.worktree-keep` covers this finding; it is then accepted until that date. */
+  waived_until?: string;
+}
+
+/** What one rule came to across all its findings. Mirrors `HygieneRuleStatus`. */
+export interface HygieneRuleStatus {
+  rule: HygieneRule;
+  level: HygieneLevel;
+  findings: number;
+}
+
+/** The audit for one repository. Mirrors `HygieneReport`. */
+export interface HygieneReport {
+  /** One entry per rule, in policy order — the checklist, decided in Rust. */
+  rules: HygieneRuleStatus[];
+  /** Violations first, then advisories, then the rules that could not be checked. */
+  findings: HygieneFinding[];
+  /** Notes about the audit itself, not findings: nothing is known to be wrong. */
+  warnings: string[];
+}
 
 export interface WorktreeRemovalItem {
   kind: "worktree";
