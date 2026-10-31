@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::artifact::{measure_dir, scan_artifacts, ArtifactScanOptions};
-use crate::path::expand_tilde;
+use crate::path::{expand_tilde, is_in_system_trash};
 use crate::timefmt::format_rfc3339;
 
 /// Contract version of `snapshot.json`. Must be bumped whenever fields are added,
@@ -407,6 +407,8 @@ pub struct WorktreeRecord {
     /// `None` means undetermined, and **must not** be treated as merged.
     pub merged_into_default: Option<bool>,
     pub stash_count: u32,
+    /// The HEAD commit time — the only "last activity" signal. `None` when it could
+    /// not be read (a `wt.cannot_verify` reason then holds the verdict at Review).
     pub last_updated_at: Option<String>,
     /// Agent inferred from path characteristics; `None` when it cannot be identified —
     /// never guess.
@@ -503,9 +505,50 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
     let now = SystemTime::now();
     let mut warnings: Vec<String> = Vec::new();
 
+    // ---- repository-level Git facts ----
+    // `refs/stash` lives in the common Git directory, so every worktree answers with
+    // the same list and `git worktree remove` never touches it. It is read once here
+    // rather than once per worktree: a 109-worktree repository was paying 108 extra
+    // git processes for an identical answer, and — because the count was reported as
+    // a per-worktree reason — every clean worktree of a repository holding a single
+    // stash was downgraded. A failed read is a scan warning, never a `0`.
+    let repository_stash_count = match runner.run(&root, &["stash", "list", "--format=%gd"]) {
+        Ok(output) if output.success() => Some(
+            output
+                .stdout
+                .lines()
+                .filter(|line| !line.is_empty())
+                .count() as u32,
+        ),
+        Ok(output) => {
+            warnings.push(format!(
+                "the repository stash count could not be read: git stash list exited with {:?}: {}",
+                output.code,
+                output.stderr.trim()
+            ));
+            None
+        }
+        Err(error) => {
+            warnings.push(format!(
+                "the repository stash count could not be read: {error}"
+            ));
+            None
+        }
+    };
+
     // ---- worktrees ----
     let mut worktrees: Vec<WorktreeRecord> = Vec::new();
+    let mut trashed_worktrees = 0usize;
     for (index, entry) in entries.iter().enumerate() {
+        // A worktree whose directory sits in the system Trash was discarded by
+        // the user, not deleted: Git still lists it, but measuring it, reporting
+        // it and offering to remove it would reach into the Trash (D5 runs one
+        // way). Skipped before any check, and reported below rather than
+        // silently dropped.
+        if is_in_system_trash(&entry.path) {
+            trashed_worktrees += 1;
+            continue;
+        }
         if started.elapsed() > budget {
             warnings.push(format!(
                 "the scan budget of {}s ran out after {} of {} worktrees; the remaining ones were not scanned",
@@ -531,6 +574,7 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
             whitelist: whitelist.clone(),
             now,
             size_bytes,
+            repository_stash_count,
         };
         worktrees.push(check_worktree(
             &runner,
@@ -538,6 +582,11 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
             entry,
             is_main,
             &check_options,
+        ));
+    }
+    if trashed_worktrees > 0 {
+        warnings.push(format!(
+            "{trashed_worktrees} worktree(s) inside the system Trash were not scanned; the Trash is left alone"
         ));
     }
 

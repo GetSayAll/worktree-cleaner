@@ -174,8 +174,11 @@ Form C: Tauri desktop shell ── IPC ──────────┤
 
 ## 4. Testing requirements
 
-- **Every reason code has at least one positive and one negative case.** The list of
-  codes is in the decision tables in section 5 of the product plan.
+- **Every reason code that is still emitted has at least one positive and one negative
+  case.** The list of codes is in the decision tables in section 5 of the product plan.
+  A code retained only so that audit logs written by an earlier version still render is
+  exempt from the positive case, but must carry a test proving it is no longer produced.
+  Today that is `wt.stash` (see the note under product plan §5.1).
 - The path validator must have a fuzz test (cargo-fuzz or proptest). Invariant:
   **any path that passes verification must be absolute, free of NUL bytes, and free
   of `..` path components.**
@@ -352,7 +355,7 @@ and the optional Tauri desktop shell (Form C).
 
 ### Current coverage status
 
-Last updated 2026-10-13. "Met" means a passing automated check exists and would
+Last updated 2026-10-24. "Met" means a passing automated check exists and would
 fail if the behaviour regressed. "Blocked" means the criterion belongs to a
 deliverable that does not exist yet. Three rows are marked **renegotiated**: the
 criterion as written cannot hold in the design that shipped, and the replacement
@@ -361,7 +364,7 @@ guarantee is named next to it.
 | Stage | Criterion | Status |
 |---|---|---|
 | P0 | 1 · `cargo test` green | Met — 141 unit tests plus four integration files (8 + 5 + 3 + 4) |
-| P0 | 2 · every `wt.*` reason code has a test case | Met — all 16 `wt.*` codes have a positive and a negative case, and every reason asserts non-empty `text` and `evidence` |
+| P0 | 2 · every `wt.*` reason code has a test case | Met — all 15 codes in the decision table have a positive and a negative case, every reason asserts non-empty `text` and `evidence`, and `wt.stash` — retained for old audit logs, no longer emitted — has a test asserting it cannot reach a record |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 86 entries. The floor is set to the current count rather than left at 60, so the corpus cannot shrink unnoticed; a generated property test covers 20,000 random paths on top |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
 | P0 | 5 · `cargo clippy -- -D warnings` | Met, and widened into a real gate: `pnpm lint:rust` runs the format check and `cargo clippy --workspace --all-targets`, with `clippy::all`, `clippy::pedantic`, the rustc `unused` group and `unsafe_code` denied in `[workspace.lints]`. `clippy::nursery` stays a warning because those lints are experimental. The ten `pedantic` lints that remain allowed each carry their reason in `Cargo.toml` |

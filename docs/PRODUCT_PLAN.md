@@ -87,7 +87,7 @@ Expanded detail panel:
 - Full path, short HEAD SHA, whether detached.
 - Relationship to upstream: ahead / behind; when there is no upstream, explicitly write "no upstream branch" rather than leaving it blank.
 - Whether merged into the default branch (the default branch name is displayed and can be changed).
-- stash count, untracked file count.
+- stash count (a **repository** fact, shown for information and never a reason — `refs/stash` is shared by every worktree and `git worktree remove` does not touch it), untracked file count.
 - The inferred owning agent (identify `codex` / `claude` / `cursor` / `aider` / `workbuddy` by path features; show "unknown" when it can't be identified — don't guess).
 - **Reason list**: one line per reason; green is positive evidence (merged / clean), amber and red are risk items, each followed by its evidence text.
 
@@ -171,7 +171,8 @@ pub enum SafetyStatus { Safe, Review, Unsafe }
 
 pub enum ReasonCode {          // serializes to strings like "wt.dirty"
     WtDirty,
-    // …all reason codes are in the Section 5 decision table, 26 in total
+    // …every emitted code is in the Section 5 decision table; wt.stash is kept
+    //   only so that audit logs written before it was withdrawn still render
 }
 
 pub struct Reason {
@@ -201,7 +202,7 @@ pub struct WorktreeRecord {
     pub behind: u32,
     pub has_upstream: bool,
     pub merged_into_default: Option<bool>, // None = cannot determine
-    pub stash_count: u32,
+    pub stash_count: u32, // repository-wide, measured once per scan; never a reason
     pub last_updated_at: Option<String>,
     pub agent: Option<String>,
     pub size_bytes: Option<u64>,   // None = cannot measure (no permission / timeout)
@@ -248,8 +249,8 @@ All data sources are read-only Git commands; the `.git` file format is never par
 - `git worktree list --porcelain` — path, HEAD, branch, `locked`, `prunable`, bare; the first entry is the main working tree.
 - `git -C <wt> status --porcelain=v2 --branch` — number of uncommitted changes, number of untracked files, ahead/behind, upstream branch.
 - `git -C <wt> merge-base --is-ancestor <wt-head> <default>` — whether merged (exit code 0 means yes, 1 means no, anything else means cannot determine).
-- `git -C <wt> stash list --format=%gd` — stash count.
-- The later of the HEAD commit time and the directory mtime is taken as "last activity".
+- `git -C <root> stash list --format=%gd` — stash count, read **once per scan** from the repository root. A stash is a repository fact, not a worktree one: `refs/stash` lives in the common Git directory, so every worktree answers with the same list, and `git worktree remove` never touches it. It is carried on the record as a fact and contributes no reason (see §5.1 note).
+- The **HEAD commit time** is taken as "last activity". The directory mtime is *not* part of the signal: it moves only when a top-level entry is created, deleted or renamed, not when a file deeper inside is edited, so a bulk touch (indexer, backup, cleanup script) marks a worktree "recent" that nobody worked in — measured: 22 clean-and-merged worktrees with an 8-10-day-old HEAD were downgraded by one such touch. Genuine recent work is already covered by `wt.dirty` / `wt.untracked` / `wt.agent_active`. If the HEAD time cannot be read, `wt.cannot_verify` holds the verdict at Review and `last_updated_at` stays empty.
 - `git -C <wt> ls-files --others --exclude-standard` — list of untracked files (shown when `--force`).
 
 Decision table:
@@ -264,7 +265,6 @@ Decision table:
 | `wt.no_upstream` | no upstream and not merged | Review | `branch has no upstream and is not merged into main` |
 | `wt.unmerged` | not merged into the default branch | Review | `not merged into main` |
 | `wt.untracked` | untracked files > 0 | Review (configurable to Unsafe) | `N untracked files` |
-| `wt.stash` | stash > 0 | Review | `N stash entries` |
 | `wt.recent_activity` | last activity < activity days | Review | `last activity: 3 days ago` |
 | `wt.agent_active` | a `.git/index.lock` exists in the directory | Review | `index.lock present, possibly in use` |
 | `wt.cannot_verify` | any check timed out / no permission / command failed | Review | `cannot read status: <reason>` |
@@ -273,7 +273,9 @@ Decision table:
 | `wt.merged` | merged into the default branch | Safe (positive) | `merged into main` |
 | `wt.clean` | no changes, no untracked files | Safe (positive) | `working tree clean` |
 
-The necessary and sufficient condition for **Safe**: not the main working tree, not locked, no uncommitted changes, ahead = 0, merged into the default branch (`merged_into_default == Some(true)`), stash = 0, no sign of activity, no `cannot_verify`. If any one is not satisfied, downgrade.
+The necessary and sufficient condition for **Safe**: not the main working tree, not locked, no uncommitted changes, ahead = 0, merged into the default branch (`merged_into_default == Some(true)`), no sign of activity, no `cannot_verify`. If any one is not satisfied, downgrade.
+
+**Stash is deliberately absent from this table.** It was a Review row (`wt.stash`), and it was wrong: `refs/stash` lives in the common Git directory, so all worktrees of a repository report the same list, and `git worktree remove` never touches it. One stash in a repository therefore downgraded every clean worktree it had — measured on a 109-worktree repository, 48 of 48 clean-and-merged worktrees, none of which would have lost anything. The count stays on the record as a fact the detail panel shows; it can no longer move a verdict. The code `wt.stash` is no longer emitted and must not be reused for another meaning (audit logs written before this change still render it).
 
 **It is not allowed to treat `merged_into_default == None` (cannot determine) as merged.**
 

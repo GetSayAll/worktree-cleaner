@@ -6,9 +6,17 @@
 //! `wt.cannot_verify` with level `Review` and is never allowed to look like a
 //! positive result (D3).
 //!
-//! Data sources are read-only Git commands plus two filesystem facts (the directory
-//! mtime and the presence of `.git/index.lock`); the `.git` file format is never
-//! parsed (development contract section 2).
+//! Data sources are read-only Git commands plus one filesystem fact (the presence of
+//! `.git/index.lock`); the `.git` file format is never parsed (development contract
+//! section 2).
+//!
+//! One datum is deliberately **not** a reason: the stash count. `refs/stash` lives in
+//! the common Git directory, so every linked worktree reports the same list, and
+//! `git worktree remove` never touches it. A stash is therefore a fact about the
+//! repository, not about the worktree being judged: reporting it per worktree
+//! downgraded every clean worktree of a repository holding a single stash (measured
+//! on a 109-worktree repository: 48 of 48 clean-and-merged worktrees). The count is
+//! measured once per scan and carried on the record as a Git fact, without a reason.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -206,6 +214,12 @@ pub struct WorktreeCheckOptions {
     /// Worktree directory size measured by the caller; `None` = unmeasurable, which
     /// must stay distinguishable from `0` (development contract section 3).
     pub size_bytes: Option<u64>,
+    /// Stash entries held by the **repository**, measured once per scan by the
+    /// orchestrator. Not a per-worktree measurement: `refs/stash` is shared by every
+    /// worktree, so asking each one returns the same list. `None` = the call failed,
+    /// which is reported as a scan warning; the record then carries `0` because
+    /// `stash_count` has no "unknown" state. It influences no verdict either way.
+    pub repository_stash_count: Option<u32>,
     // There is deliberately no per-command timeout here: the timeout belongs to
     // the [`crate::git::GitRunner`], which owns the processes. The orchestrator
     // passes the setting into `ProcessGitRunner::new`, so one knob, one owner.
@@ -220,6 +234,7 @@ impl Default for WorktreeCheckOptions {
             whitelist: Vec::new(),
             now: SystemTime::now(),
             size_bytes: None,
+            repository_stash_count: None,
         }
     }
 }
@@ -366,7 +381,6 @@ pub fn check_worktree(
 
     // ---- per-worktree checks: impossible when the directory is gone ----
     let mut status: Option<StatusInfo> = None;
-    let mut stash_count: u32 = 0;
     let mut untracked_file_list: Vec<String> = Vec::new();
     // Exact untracked file count from `ls-files --others`, when that call
     // succeeded. `None` = not measured; the folded status count is then used.
@@ -430,27 +444,6 @@ pub fn check_worktree(
             }
         }
 
-        if let Some(output) = run_checked(
-            runner,
-            &entry.path,
-            "the stash list",
-            &["stash", "list", "--format=%gd"],
-            &mut reasons,
-        ) {
-            stash_count = output
-                .stdout
-                .lines()
-                .filter(|line| !line.is_empty())
-                .count() as u32;
-            if stash_count > 0 {
-                reasons.push(Reason::review(
-                    ReasonCode::WtStash,
-                    "has stash entries",
-                    format!("{stash_count} stash entries"),
-                ));
-            }
-        }
-
         if status.as_ref().is_some_and(|info| info.untracked_files > 0) {
             if let Some(output) = run_checked(
                 runner,
@@ -503,7 +496,16 @@ pub fn check_worktree(
             }
         }
 
-        // Last activity = the later of the HEAD commit time and the directory mtime.
+        // Last activity = the HEAD commit time, and only the HEAD commit time.
+        //
+        // The directory mtime used to be half of this signal, and was removed: it
+        // changes only when a *top-level entry* is created, deleted or renamed, not
+        // when a file deeper inside is edited. The result was a false-positive class
+        // that drowned the verdict — one bulk touch (an indexer, a backup, a cleanup
+        // script) refreshed 22 worktrees of a repository whose last commit was 8-10
+        // days old, and every one of them was downgraded to "recent activity".
+        // Genuine recent work is already visible as `wt.dirty` / `wt.untracked` /
+        // `wt.agent_active`, so the mtime side carried no weight it could bear.
         let commit_time = run_checked(
             runner,
             &entry.path,
@@ -526,18 +528,10 @@ pub fn check_worktree(
                 None
             }
         });
-        let directory_mtime = match std::fs::metadata(&entry.path).and_then(|meta| meta.modified())
-        {
-            Ok(time) => Some(time),
-            // Gone cannot happen here (the branch above caught it); any other
-            // error leaves the activity unknown rather than silently absent.
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => {
-                reasons.push(cannot_verify_io("the directory modification time", &error));
-                None
-            }
-        };
-        activity = later_of(commit_time, directory_mtime);
+        // With no second signal to fall back on, an unreadable HEAD time leaves the
+        // timestamp empty — the `wt.cannot_verify` reason above already keeps the
+        // verdict at Review, so nothing is silently called Safe (D3).
+        activity = commit_time;
 
         // A Git command holding `index.lock` may be running right now.
         // `--git-path` resolves the per-worktree gitdir, so a linked worktree's lock
@@ -670,7 +664,7 @@ pub fn check_worktree(
         behind: status.as_ref().map_or(0, |info| info.behind),
         has_upstream: status.as_ref().is_some_and(|info| info.upstream.is_some()),
         merged_into_default: merged,
-        stash_count,
+        stash_count: opts.repository_stash_count.unwrap_or(0),
         last_updated_at: activity.map(format_rfc3339),
         agent: infer_agent(&entry.path),
         size_bytes: opts.size_bytes,
@@ -804,14 +798,6 @@ fn absolutize(base: &Path, reported: &Path) -> PathBuf {
         reported.to_path_buf()
     } else {
         base.join(reported)
-    }
-}
-
-fn later_of(first: Option<SystemTime>, second: Option<SystemTime>) -> Option<SystemTime> {
-    match (first, second) {
-        (Some(a), Some(b)) => Some(a.max(b)),
-        (Some(a), None) => Some(a),
-        (None, b) => b,
     }
 }
 
@@ -970,7 +956,6 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     fn calm_rules(status: &str) -> Vec<(Vec<String>, Canned)> {
         vec![
             canned(&["status", "--porcelain=v2", "--branch"], status),
-            canned(&["stash", "list", "--format=%gd"], ""),
             canned(&["log", "-1", "--format=%ct"], "1700000000\n"),
             canned(
                 &["rev-parse", "--git-path", "index.lock"],
@@ -1334,7 +1319,6 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
 
         let not_merged = vec![
             canned(&["status", "--porcelain=v2", "--branch"], CLEAN_STATUS),
-            canned(&["stash", "list", "--format=%gd"], ""),
             canned(&["log", "-1", "--format=%ct"], "1700000000\n"),
             canned(
                 &["rev-parse", "--git-path", "index.lock"],
@@ -1455,53 +1439,73 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
-    fn wt_stash_counts_entries() {
+    fn a_repository_stash_count_is_a_fact_and_never_a_reason() {
+        // The regression this replaces: `refs/stash` lives in the common Git directory,
+        // so every linked worktree answered with the same list. A repository holding a
+        // single stash therefore downgraded *all* of its clean worktrees to Review —
+        // 48 of 48 clean-and-merged worktrees in a 109-worktree repository — even
+        // though `git worktree remove` never touches a stash. The count is now measured
+        // once per scan and carried as a fact: it must not reach the reason list, and no
+        // per-worktree stash command may run.
         let dir = temp_dir("stash");
         backdate(&dir, 30 * 86_400);
+        let mut opts = default_options();
+        opts.repository_stash_count = Some(2);
+        let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
+        let record = check_worktree(&runner, &dir, &feature_entry(&dir), false, &opts);
+        assert_eq!(record.stash_count, 2);
+        assert!(!has(&record, ReasonCode::WtStash));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        assert!(!runner.called(&["stash", "list", "--format=%gd"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_recent_head_commit_fires_recent_activity() {
+        // The directory is 30 days old; only the commit is fresh. The activity signal
+        // is the HEAD commit time, so this must fire.
+        let dir = temp_dir("recent");
+        backdate(&dir, 30 * 86_400);
+        let mut opts = default_options();
+        opts.now = SystemTime::now();
+        let recent_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("after epoch")
+            .as_secs()
+            - 2 * 86_400;
         let mut rules = calm_rules(CLEAN_STATUS);
         for rule in &mut rules {
             if rule.0
                 == vec![
-                    "stash".to_string(),
-                    "list".to_string(),
-                    "--format=%gd".to_string(),
+                    "log".to_string(),
+                    "-1".to_string(),
+                    "--format=%ct".to_string(),
                 ]
             {
                 if let Canned::Out(output) = &mut rule.1 {
-                    output.stdout = "stash@{0}\nstash@{1}\n".to_string();
+                    output.stdout = format!("{recent_secs}\n");
                 }
             }
         }
         let runner = FakeGitRunner::new(rules);
-        let record = check_worktree(
-            &runner,
-            &dir,
-            &feature_entry(&dir),
-            false,
-            &default_options(),
-        );
-        assert!(has(&record, ReasonCode::WtStash));
-        assert_eq!(record.stash_count, 2);
+        let record = check_worktree(&runner, &dir, &feature_entry(&dir), false, &opts);
+        assert!(has(&record, ReasonCode::WtRecentActivity));
         assert_eq!(record.safety.status, SafetyStatus::Review);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn wt_recent_activity_uses_the_directory_mtime() {
-        let dir = temp_dir("recent");
-        // The clock is injected, but the mtime is a real filesystem fact, so the two
-        // must agree: backdating is expressed against the same instant.
+    fn a_touched_directory_with_an_old_commit_is_not_recent() {
+        // The false positive this replaces: a bulk touch (indexer, backup, cleanup
+        // script) refreshes the top-level directory mtime while the last commit is
+        // months old. Measured in the wild, one such touch downgraded 22 otherwise
+        // clean-and-merged worktrees. The mtime is no longer part of the signal, so
+        // the verdict must stay Safe.
+        let dir = temp_dir("touched");
+        // No `backdate`: the directory was just created, so its mtime is "now".
         let mut opts = default_options();
         opts.now = SystemTime::now();
-        // The directory mtime is "now" (just created) and the commit is old: the later
-        // of the two wins, so the worktree counts as recently active.
-        let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
-        let record = check_worktree(&runner, &dir, &feature_entry(&dir), false, &opts);
-        assert!(has(&record, ReasonCode::WtRecentActivity));
-        assert_eq!(record.safety.status, SafetyStatus::Review);
-
-        backdate(&dir, 30 * 86_400);
-        let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
+        let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS)); // the commit is from 2023
         let record = check_worktree(&runner, &dir, &feature_entry(&dir), false, &opts);
         assert!(!has(&record, ReasonCode::WtRecentActivity));
         assert_eq!(record.safety.status, SafetyStatus::Safe);
@@ -1736,12 +1740,12 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
-    fn a_permission_error_on_stash_yields_review_with_cannot_verify() {
+    fn a_permission_error_on_the_commit_time_yields_review_with_cannot_verify() {
         let dir = temp_dir("permission");
         backdate(&dir, 30 * 86_400);
         let mut rules = calm_rules(CLEAN_STATUS);
         rules[1] = failing(
-            &["stash", "list", "--format=%gd"],
+            &["log", "-1", "--format=%ct"],
             Some(128),
             "fatal: unable to read .git/worktrees/x",
         );
@@ -1756,7 +1760,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         assert!(has(&record, ReasonCode::WtCannotVerify));
         assert_eq!(record.safety.status, SafetyStatus::Review);
         // The clean reason came from a check that did succeed, so it stays; the level
-        // is still Review because the stash check failed.
+        // is still Review because the commit-time check failed.
         assert!(has(&record, ReasonCode::WtClean));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1855,17 +1859,6 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             {
                 if let Canned::Out(output) = &mut rule.1 {
                     output.stdout = format!("{}\n", lock.display());
-                }
-            }
-            if rule.0
-                == vec![
-                    "stash".to_string(),
-                    "list".to_string(),
-                    "--format=%gd".to_string(),
-                ]
-            {
-                if let Canned::Out(output) = &mut rule.1 {
-                    output.stdout = "stash@{0}\n".to_string();
                 }
             }
         }
@@ -2067,7 +2060,6 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         opts.default_branch = Some("develop".to_string());
         let runner = FakeGitRunner::new(vec![
             canned(&["status", "--porcelain=v2", "--branch"], CLEAN_STATUS),
-            canned(&["stash", "list", "--format=%gd"], ""),
             canned(&["log", "-1", "--format=%ct"], "1700000000\n"),
             canned(
                 &["rev-parse", "--git-path", "index.lock"],
@@ -2317,7 +2309,8 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     #[test]
     fn a_non_numeric_commit_time_fails_closed() {
         // A `%ct` that does not parse must not silently drop the activity signal:
-        // the directory mtime still answers, and the failure is visible.
+        // there is no second signal to fall back on, so the timestamp stays empty
+        // and the failure is visible.
         let dir = temp_dir("bad-commit-time");
         backdate(&dir, 30 * 86_400);
         let mut rules = calm_rules(CLEAN_STATUS);
@@ -2351,8 +2344,8 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             .expect("cannot verify reason");
         assert!(reason.evidence.contains("non-numeric"));
         assert!(
-            record.last_updated_at.is_some(),
-            "the directory mtime still answers"
+            record.last_updated_at.is_none(),
+            "no signal, no timestamp: an unparseable commit time must not invent one"
         );
         assert!(!has(&record, ReasonCode::WtRecentActivity));
         assert_eq!(record.safety.status, SafetyStatus::Review);
@@ -2365,9 +2358,10 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         let dir = temp_dir("secondary-failures");
         backdate(&dir, 30 * 86_400);
 
-        // -- log fails: activity falls back to the directory mtime
+        // -- log fails: no second signal exists, so the timestamp stays empty and
+        //    the verdict is held at Review by wt.cannot_verify
         let mut rules = calm_rules(CLEAN_STATUS);
-        rules[2] = failing(
+        rules[1] = failing(
             &["log", "-1", "--format=%ct"],
             Some(128),
             "fatal: bad default revision",
@@ -2381,7 +2375,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             &default_options(),
         );
         assert!(has(&record, ReasonCode::WtCannotVerify));
-        assert!(record.last_updated_at.is_some());
+        assert!(record.last_updated_at.is_none());
         assert_eq!(record.safety.status, SafetyStatus::Review);
 
         // -- ls-files fails: the folded status count is used, the list stays
@@ -2477,29 +2471,35 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 code: Some(1),
             }),
         ));
-        // The log call fails, which is what puts wt.cannot_verify into the set.
-        rules[2] = failing(
-            &["log", "-1", "--format=%ct"],
-            Some(128),
-            "fatal: bad default revision",
-        );
-        rules.push(canned(
-            &["ls-files", "--others", "--exclude-standard"],
-            "notes.md\n",
-        ));
-        // Two stash entries, and the lock file the rev-parse call must report.
+        // ls-files fails, which is what puts wt.cannot_verify into the set (the folded
+        // status count still carries wt.untracked). The log call must succeed with a
+        // recent commit time: recent_activity now tracks the HEAD commit alone, so a
+        // failing log could no longer let it appear beside wt.cannot_verify.
+        let recent_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("after epoch")
+            .as_secs()
+            - 2 * 86_400;
         for rule in &mut rules {
             if rule.0
                 == vec![
-                    "stash".to_string(),
-                    "list".to_string(),
-                    "--format=%gd".to_string(),
+                    "log".to_string(),
+                    "-1".to_string(),
+                    "--format=%ct".to_string(),
                 ]
             {
                 if let Canned::Out(output) = &mut rule.1 {
-                    output.stdout = "stash@{0}\nstash@{1}\n".to_string();
+                    output.stdout = format!("{recent_secs}\n");
                 }
             }
+        }
+        rules.push(failing(
+            &["ls-files", "--others", "--exclude-standard"],
+            Some(128),
+            "fatal: bad repository",
+        ));
+        // The lock file the rev-parse call must report.
+        for rule in &mut rules {
             if rule.0
                 == vec![
                     "rev-parse".to_string(),
@@ -2523,9 +2523,8 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 "wt.whitelisted",
                 "wt.dirty",
                 "wt.unpushed",
-                "wt.stash",
-                "wt.untracked",
                 "wt.cannot_verify",
+                "wt.untracked",
                 "wt.agent_active",
                 "wt.recent_activity",
                 "wt.unmerged",

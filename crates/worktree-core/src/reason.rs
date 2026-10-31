@@ -43,6 +43,11 @@ pub enum ReasonCode {
     WtUnmerged,
     #[serde(rename = "wt.untracked")]
     WtUntracked,
+    /// **No longer emitted.** A stash lives in the common Git directory, so it belongs
+    /// to the repository and not to the worktree being judged; reporting it per
+    /// worktree downgraded every clean worktree of a repository holding one stash.
+    /// The code stays for audit logs written by an earlier version, and is never
+    /// reused for another meaning.
     #[serde(rename = "wt.stash")]
     WtStash,
     #[serde(rename = "wt.recent_activity")]

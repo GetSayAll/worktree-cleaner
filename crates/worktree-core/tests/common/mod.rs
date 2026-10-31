@@ -196,7 +196,21 @@ pub fn trash_entry_paths(name: &str) -> Vec<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         if let Some(home) = std::env::var_os("HOME") {
-            found.push(PathBuf::from(home).join(".Trash").join(name));
+            let trash = PathBuf::from(home).join(".Trash");
+            found.push(trash.join(name));
+            // macOS renames on a collision instead of overwriting: a second entry
+            // called `node_modules` lands as `node_modules 2`. Cargo runs the tests
+            // in one binary in parallel, so two of them move a `node_modules` at
+            // the same moment often enough to matter — and a lookup by exact name
+            // then reports "found []" for an entry that is sitting right there.
+            if let Ok(entries) = std::fs::read_dir(&trash) {
+                let prefix = format!("{name} ");
+                for entry in entries.flatten() {
+                    if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                        found.push(entry.path());
+                    }
+                }
+            }
         }
     }
     #[cfg(all(unix, not(target_os = "macos")))]

@@ -14,6 +14,10 @@
 //! - the walk never descends into a recognised artifact directory, so an artifact
 //!   nested inside another artifact is reported once, at its own path.
 //!
+//! A third boundary is the system Trash: neither a root, a candidate nor a
+//! descent step crosses into a `.Trash` / `.Trashes` / `$Recycle.Bin` component
+//! (D5 runs one way — out through the Trash, never in).
+//!
 //! Size measurement is the only filesystem walk, and it runs on a worker thread
 //! with a timeout: an unmeasurable size stays `None` and must never be read as `0`
 //! (development contract section 3). A size timeout does **not** downgrade the
@@ -24,7 +28,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::git::GitRunner;
-use crate::path::whitelist_hit;
+use crate::path::{is_in_system_trash, whitelist_hit};
 use crate::reason::{Reason, ReasonCode, SafetyAssessment};
 use crate::timefmt::{elapsed_days, format_rfc3339, humanize_days};
 use crate::ArtifactRecord;
@@ -332,6 +336,12 @@ pub fn scan_artifacts(
     let mut budget_spent = false;
 
     for root in roots {
+        // A root inside the system Trash is skipped even though it exists: the
+        // scan already dropped its worktree (see `scan_project`), and this is
+        // the second line of the same boundary for any other caller.
+        if is_in_system_trash(root) {
+            continue;
+        }
         // A prunable worktree has no directory left, so it has no artifacts. Any
         // other stat failure is not evidence of absence, so only `NotFound`
         // skips (the same rule the worktree checks use).
@@ -406,10 +416,22 @@ fn collect_candidates(root: &Path, max_depth: usize) -> Vec<Candidate> {
             let is_dir = entry.metadata().is_ok_and(|meta| meta.is_dir());
 
             if lookup_kind(&name).is_some() {
+                // An artifact-looking directory inside the Trash is not the
+                // project's build output (D5: the Trash is read in one
+                // direction only).
+                if is_in_system_trash(&path) {
+                    continue;
+                }
                 out.push(Candidate { path, name });
                 continue;
             }
-            if is_dir && name != ".git" && name != ".hg" && name != ".svn" && depth < max_depth {
+            if is_dir
+                && name != ".git"
+                && name != ".hg"
+                && name != ".svn"
+                && !is_in_system_trash(&path)
+                && depth < max_depth
+            {
                 stack.push((path, depth + 1));
             }
         }

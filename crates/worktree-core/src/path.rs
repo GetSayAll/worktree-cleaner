@@ -277,6 +277,44 @@ pub fn whitelist_hit(candidate: &Path, rules: &[PathBuf]) -> Option<PathBuf> {
     None
 }
 
+/// Whether `path` lives inside the operating system's Trash.
+///
+/// A directory the user already moved to the Trash is not part of the project
+/// any more, but Git does not know that: `git worktree list` keeps reporting a
+/// worktree whose directory was trashed rather than deleted, because the
+/// directory is still there — only `prunable` once Git notices it is *gone*,
+/// which a Trashed directory is not. A scan that lists such an entry measures
+/// it, reports it and offers to remove it: reaching into the one place this app
+/// promises to leave alone. Deletion goes **through** the Trash (D5), never the
+/// other way round, and the same boundary applies to reading.
+///
+/// Recognised by a path **component** named (case-insensitively):
+///
+/// - `.Trash` — the user's own Trash on macOS (`~/.Trash`);
+/// - `.Trashes` — the per-volume Trash on macOS (`/.Trashes/<uid>` on the boot
+///   volume, `/Volumes/<name>/.Trashes/<uid>` on any other);
+/// - `$Recycle.Bin` — the Recycle Bin at the root of a drive on Windows.
+///
+/// Component matching rather than a root list, and deliberately so: it needs no
+/// `HOME` (a scan must not change its answer because an environment variable
+/// went missing), no drive enumeration, and it survives a symlinked spelling of
+/// the home directory. The cost is that a project directory the user
+/// deliberately named `.Trash` is skipped too — the conservative direction,
+/// reported through a scan warning rather than applied silently.
+pub fn is_in_system_trash(path: &Path) -> bool {
+    lexical_normalize(path)
+        .components()
+        .any(|component| match component {
+            Component::Normal(name) => {
+                let name = name.to_string_lossy();
+                name.eq_ignore_ascii_case(".Trash")
+                    || name.eq_ignore_ascii_case(".Trashes")
+                    || name.eq_ignore_ascii_case("$Recycle.Bin")
+            }
+            _ => false,
+        })
+}
+
 /// Expands a leading `~` (or `~/`) to the user's home directory.
 ///
 /// Whitelist rules and scan paths are typed by a human, so they arrive as
@@ -1532,5 +1570,77 @@ mod tests {
         let validated = validate_path_for_deletion(Path::new("/tmp/./a/./b"), &ctx())
             .expect("passes validation");
         assert_eq!(validated.as_path(), Path::new("/tmp/a/b"));
+    }
+
+    #[test]
+    fn a_path_inside_the_system_trash_is_recognised() {
+        // The real case this exists for: Codex registered a worktree under the
+        // wrong repository, the user trashed the directory, and `git worktree
+        // list` kept reporting it — the directory is still there, so Git does
+        // not mark it prunable. Without this check the scan lists it, measures
+        // it and offers to remove it.
+        for path in [
+            "/Users/andy/.Trash/open-voice-bridge-wrong-repo-20260907",
+            "/Users/andy/.Trash/open-voice-bridge-wrong-repo-20260907/.git",
+            "/Users/andy/.Trash",
+            // The per-volume Trash: the boot volume, and an external one.
+            "/.Trashes/501/repo--feature",
+            "/Volumes/Backup/.Trashes/501/repo--feature",
+        ] {
+            assert!(
+                is_in_system_trash(Path::new(path)),
+                "should be inside the Trash: {path}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_path_inside_the_windows_recycle_bin_is_recognised() {
+        // On Windows the drive letter is a prefix component, so `$Recycle.Bin`
+        // is the first normal component under the drive root. On Unix the same
+        // string is one long file name — which is why this case is
+        // Windows-only, and why the shared check matches whole components
+        // rather than string prefixes.
+        for path in [
+            r"C:\$Recycle.Bin\S-1-5-21-1234\repo--feature",
+            r"d:\$recycle.bin\repo--feature",
+        ] {
+            assert!(
+                is_in_system_trash(Path::new(path)),
+                "should be inside the Recycle Bin: {path}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_trash_check_ignores_case_but_not_component_prefixes() {
+        // Case folding, because the filesystem that matters ignores it.
+        for path in [
+            "/users/andy/.trash/repo--feature",
+            "/Users/Andy/.TRASH/repo--feature",
+            "/volumes/backup/.trashes/501/repo--feature",
+        ] {
+            assert!(
+                is_in_system_trash(Path::new(path)),
+                "one directory, several spellings: {path}"
+            );
+        }
+        // A directory whose name merely *starts* with a Trash name is not the
+        // Trash: matching by string prefix would silently skip a real project.
+        for path in [
+            "/Users/andy/.Trashcan/repo",
+            "/Users/andy/.Trashes-old/repo",
+            "/Users/andy/MySrc/proj/$Recycle.Bin-backup/repo",
+            "/Users/andy/MySrc/proj/node_modules",
+            "/Volumes/External/repo/dist",
+            "/Users/andy/Develop/Src/AISrc/.worktrees/repo--feature",
+        ] {
+            assert!(
+                !is_in_system_trash(Path::new(path)),
+                "an ordinary path must not read as Trash: {path}"
+            );
+        }
     }
 }

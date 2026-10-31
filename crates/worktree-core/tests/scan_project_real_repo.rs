@@ -259,6 +259,52 @@ fn an_unusable_path_is_rejected_with_a_specific_reason() {
 }
 
 #[test]
+fn a_worktree_inside_the_system_trash_is_not_scanned() {
+    // The case from a real scan of `remote-mic-app`: a worktree registered under
+    // the wrong repository, trashed by the user, still listed by
+    // `git worktree list` because the directory still exists. Git never marks
+    // it prunable, so without the Trash boundary it is measured, reported and
+    // offered for removal — inside the user's Trash.
+    //
+    // The fixture keeps its `.Trash` inside the throwaway base directory: the
+    // test must prove the boundary without touching the real Trash.
+    let repo = Repo::new("trash");
+    let trashed = repo.add_worktree_at(&repo.base.join(".Trash").join("wt-trashed"), "trashed/x");
+    backdate_tree(&repo.root, 30);
+    backdate_tree(&trashed, 30);
+
+    let snapshot = scan_project(&repo.root.display().to_string(), &options()).expect("scan");
+
+    assert_eq!(
+        snapshot.worktrees.len(),
+        1,
+        "the trashed worktree must not be reported: {:?}",
+        snapshot.worktrees
+    );
+    assert!(
+        snapshot.worktrees[0].is_main,
+        "the surviving entry is the main worktree"
+    );
+    assert!(
+        snapshot.artifacts.is_empty(),
+        "nothing under the Trash is walked either: {:?}",
+        snapshot.artifacts
+    );
+    assert!(
+        snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Trash")),
+        "the skip is reported, not silent: {:?}",
+        snapshot.warnings
+    );
+
+    // The repository itself is untouched by the skip (D1): Git still lists both
+    // worktrees; it is the scanner that leaves the Trashed one alone.
+    assert_eq!(repo.worktree_paths().len(), 2);
+}
+
+#[test]
 fn a_scan_of_a_real_repository_changes_nothing() {
     let repo = build_repo("read-only");
     let before_status = repo.stdout_of(&["status", "--porcelain=v2", "--branch"]);
