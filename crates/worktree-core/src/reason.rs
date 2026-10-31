@@ -41,6 +41,20 @@ pub enum ReasonCode {
     WtNoUpstream,
     #[serde(rename = "wt.unmerged")]
     WtUnmerged,
+    /// Every commit on this branch has an equivalent patch in the default branch,
+    /// although the commits themselves are not ancestors of it.
+    ///
+    /// This is the squash-merge answer. A branch merged through GitHub's default
+    /// strategy is rewritten into one new commit, so `merge-base --is-ancestor`
+    /// says "not merged" about work that is entirely in the default branch —
+    /// measured on one machine at 11 of 33 branches reported unmerged. The check is
+    /// `git cherry`, which compares patch-ids rather than ancestry.
+    ///
+    /// It is `Safe` because it is a command's answer, not a judgement about a diff.
+    /// What it cannot see: a commit applied and then reverted still matches its
+    /// patch-id, so a reverted change reads as absorbed.
+    #[serde(rename = "wt.absorbed")]
+    WtAbsorbed,
     #[serde(rename = "wt.untracked")]
     WtUntracked,
     /// **No longer emitted.** A stash lives in the common Git directory, so it belongs
@@ -96,7 +110,7 @@ pub enum ReasonCode {
 impl ReasonCode {
     /// All reason codes. Used by the contract-drift test (the serialised value must
     /// match [`Self::as_str`]).
-    pub const ALL: [ReasonCode; 27] = [
+    pub const ALL: [ReasonCode; 28] = [
         ReasonCode::WtMain,
         ReasonCode::WtLocked,
         ReasonCode::WtDirty,
@@ -104,6 +118,7 @@ impl ReasonCode {
         ReasonCode::WtDetached,
         ReasonCode::WtNoUpstream,
         ReasonCode::WtUnmerged,
+        ReasonCode::WtAbsorbed,
         ReasonCode::WtUntracked,
         ReasonCode::WtStash,
         ReasonCode::WtRecentActivity,
@@ -136,6 +151,7 @@ impl ReasonCode {
             ReasonCode::WtDetached => "wt.detached",
             ReasonCode::WtNoUpstream => "wt.no_upstream",
             ReasonCode::WtUnmerged => "wt.unmerged",
+            ReasonCode::WtAbsorbed => "wt.absorbed",
             ReasonCode::WtUntracked => "wt.untracked",
             ReasonCode::WtStash => "wt.stash",
             ReasonCode::WtRecentActivity => "wt.recent_activity",
@@ -386,7 +402,7 @@ mod tests {
                 "reason code must carry a wt. / af. prefix: {s}"
             );
         }
-        assert_eq!(ReasonCode::ALL.len(), 27);
+        assert_eq!(ReasonCode::ALL.len(), 28);
     }
 
     #[test]

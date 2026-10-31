@@ -737,6 +737,82 @@ was checked to fail without the fix:
   budgets now travel from the front end, and the scan and the re-check measure the same
   directories with the same numbers.
 
+**Decided (2026-11-01)**
+
+1. **The merge check answers against the remote default branch, and a squash merge
+   counts as merged.** Two defects and one gap, found by running the scanner against
+   a developer machine holding 359 worktrees (389 GB).
+
+   `detect_default_branch` prefers `refs/remotes/origin/HEAD` and strips it to the
+   short name; `merge_base_is_ancestor` then passed that bare name to
+   `git merge-base --is-ancestor`, which resolves it to `refs/heads/main` first. The
+   `origin/<name>` candidate its own comment described as the reason the fallback
+   exists was therefore unreachable — the local branch always answers 0 or 1 and the
+   loop returns on the first answer. Local `main` trailed `origin/main` by 6 to 1336
+   commits in five repositories, and 116 of 199 clean-and-pushed worktrees were
+   reported `wt.unmerged` when they had been merged. The error ran the other way too:
+   one worktree was called `Safe` because its HEAD sat in a local-only `main` commit,
+   which is the direction D3 forbids. The candidates are now `origin/<name>` then
+   `<name>`, so a repository with no remote still falls back to the local branch
+   (`merge_check_falls_back_to_the_local_name`), and
+   `the_remote_default_branch_answers_before_the_local_one` cans the local branch as
+   "not an ancestor" and requires a merged verdict — which can only come from the
+   remote name having been asked first.
+
+   The second defect is squash merges: `merge-base --is-ancestor` answers "is this
+   commit in the default branch", not "is this change in it", and GitHub's default
+   strategy rewrites the commit. 11 of 33 branches reported `wt.unmerged` were fully
+   absorbed. `commits_absorbed` now asks `git cherry`, which compares patch-ids, and
+   emits `wt.absorbed` at `Safe` — a command's answer, not a judgement about a diff.
+   `WorktreeRecord.absorbed_into_default` carries the fact separately from
+   `merged_into_default` because they are different facts, and `wt.no_upstream` treats
+   an absorbed branch as merged. §5's decision table gained the row, and every locale
+   table gained the message. The revert hole was accepted rather than closed: a commit
+   applied and then reverted still matches its patch-id, so the detail shows the count
+   and the ref it was compared against, not a claimed commit.
+
+   Tiers C and D of `docs/WORKTREE_TRIAGE.md` stay out of the core: they are
+   judgements about a diff's value, and 19 of the 22 branches that survived the
+   ancestry and patch checks carried real code. A worktree keeps going to `Review`
+   for uncommitted changes even when the changed file is `Resources/Info.plist` — one
+   such file turned out to drop `NSMicrophoneUsageDescription` and add
+   `CFBundleDocumentTypes`, which is authorship, not a version stamp.
+
+2. **The worktree page says when the repository will refill.** A cleanup pass that
+   leaves the cause in place is a cleanup the user repeats next month and concludes
+   did not work. When the disk-hygiene audit reports any rule at `violation`, the
+   worktree page carries a warning banner above the list with the count and a link to
+   the hygiene page. The count comes from `hygiene.rules` — the same list the hygiene
+   page and the nav badge count — and the banner decides nothing about deletion; it
+   only says why the pile will come back.
+
+3. **The activity window is three days, and a reverted change is no longer absorbed.**
+   Two follow-ups to the decision above, both chosen after measuring what the tool
+   would and would not have selected on a real machine.
+
+   The window dropped from seven days to three. It exists to catch work someone is in
+   the middle of, and a merged branch touched three days ago is finished — the merge
+   ends the work, not the calendar. On the same 184 otherwise-safe worktrees, seven
+   days held 69 of them back, every one merged and none being edited. The value is
+   now `DEFAULT_ACTIVITY_DAYS`, and it no longer feeds `HygieneOptions::idle_days`:
+   `docs/DISK_HYGIENE.md` fixes T3 at seven days, and the two numbers answer different
+   questions ("is someone working here" versus "has this been abandoned"). Sharing
+   them meant a change to one silently rewrote the other against its own policy
+   document; `hygiene::IDLE_DAYS` is now passed explicitly.
+
+   The revert hole in decision 1 is closed. `git cherry` compares patch-ids, and a
+   patch-id survives a revert — the applying commit still matches after another commit
+   undoes it — so matching the patch proved only that the patch *had been* applied.
+   `content_still_present` now asks whether the default branch holds the same content
+   for the files the branch touched (`git diff <head> <target> -- <that file list>`,
+   the list coming from `<target>...<head>`). A revert makes the two sides differ and
+   the branch stays `Review`; the reason carries both halves so the reader can see
+   that the patch matched and the content did not. The comparison is deliberately
+   strict — if the default branch changed one of those files again after the merge,
+   the answer is "cannot confirm", which costs a re-read instead of a silent
+   deletion — and it refuses to confirm past 200 touched files rather than build a
+   command line it cannot reason about.
+
 **Open**
 
 1. **How to verify the Windows Recycle Bin path**: D16 requires separate verification

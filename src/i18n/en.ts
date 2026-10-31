@@ -96,6 +96,7 @@ export const en = {
       whitelisted: "matches a whitelist rule",
       prunable: "the working directory no longer exists",
       merged: "merged into the default branch",
+      absorbed: "every commit has an equivalent patch in the default branch",
       clean: "clean working tree"
     },
     af: {
@@ -385,6 +386,8 @@ export const en = {
     mergeUnknown: (branch: string) => `cannot be determined whether merged into ${branch}`,
     mergeYes: (branch: string) => `merged into ${branch}`,
     mergeNo: (branch: string) => `not merged into ${branch}`,
+    /** The ancestry answer is "no", but every commit's patch is already there. */
+    mergeAbsorbed: (branch: string) => `its patches are already in ${branch} (squash merge)`,
     stateGone: "directory is gone",
     stateDirty: (n: number) => `dirty ${n}`,
     stateClean: "clean",
@@ -393,7 +396,14 @@ export const en = {
     selectedSummary: (worktrees: number, artifacts: number) =>
       `Selected ${worktrees} worktrees · ${artifacts} artifacts · Estimated reclaimable`,
     continueToArtifacts: "Continue to artifacts",
-    generatePlan: "Generate cleanup plan"
+    generatePlan: "Generate cleanup plan",
+    // Shown on this page because this is where a cleanup starts: a repository that
+    // violates the disk-hygiene policy will refill with worktrees and caches after
+    // every pass, so the cause has to sit next to the symptom.
+    hygieneTitle: "This repository will keep refilling",
+    hygieneBody: (n: number) =>
+      `${n} disk-hygiene ${n === 1 ? "rule is" : "rules are"} violated — worktree count, caches or idle state that grows back after a cleanup.`,
+    hygieneAction: "Open disk hygiene"
   },
   artifacts: {
     title: "Build artifacts",

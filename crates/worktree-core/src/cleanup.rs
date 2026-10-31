@@ -56,7 +56,7 @@ pub struct ExecuteOptions {
 impl Default for ExecuteOptions {
     fn default() -> Self {
         Self {
-            recent_activity_days: 7,
+            recent_activity_days: crate::DEFAULT_ACTIVITY_DAYS,
             untracked_as_unsafe: false,
             whitelist: Vec::new(),
             per_dir_timeout: Duration::from_secs(30),
@@ -819,6 +819,7 @@ mod tests {
             behind: 0,
             has_upstream: true,
             merged_into_default: Some(true),
+            absorbed_into_default: false,
             stash_count: 0,
             last_updated_at: Some("2026-01-01T00:00:00Z".to_string()),
             agent: None,
@@ -1263,7 +1264,10 @@ mod tests {
             path.file_name().and_then(|name| name.to_str()),
             Some("operations.log")
         );
-        assert_eq!(options.recent_activity_days, 7);
+        // Compared against the constant rather than the number: this assertion exists
+        // to keep the re-check window in step with the scan's, and a literal here is
+        // how the two drift apart.
+        assert_eq!(options.recent_activity_days, crate::DEFAULT_ACTIVITY_DAYS);
         assert!(!options.untracked_as_unsafe);
         assert!(options.whitelist.is_empty());
     }

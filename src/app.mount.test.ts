@@ -145,4 +145,32 @@ describe("the app shell", () => {
     app.unmount();
     host.remove();
   });
+
+  it("says on the worktree page when the repository will refill", async () => {
+    // A cleanup that leaves the cause in place is repeated next month, and the second
+    // pass is where a tool loses its credibility. The count comes from the core's own
+    // hygiene verdict (`hygiene.rules`), not from a re-count in the view, so the page
+    // and the audit cannot drift apart.
+    const { app, host } = mountApp();
+    state.snapshot.value = mockSnapshot;
+    state.view.value = "worktrees";
+    await nextTick();
+
+    const violated = mockSnapshot.hygiene.rules.filter((rule) => rule.level === "violation").length;
+    expect(violated, "the sample snapshot no longer has a violation to show").toBeGreaterThan(0);
+
+    const banner = host.querySelector<HTMLElement>(".banner.banner--warn");
+    expect(banner, "the refill banner is missing").not.toBeNull();
+    expect(banner?.textContent).toContain(String(violated));
+
+    const action = banner?.querySelector<HTMLButtonElement>("button");
+    action?.click();
+    await nextTick();
+    expect(state.view.value, "the banner does not lead to the hygiene page").toBe("hygiene");
+
+    state.view.value = "welcome";
+    state.snapshot.value = null;
+    app.unmount();
+    host.remove();
+  });
 });

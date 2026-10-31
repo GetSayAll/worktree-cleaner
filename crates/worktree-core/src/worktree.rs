@@ -229,7 +229,7 @@ impl Default for WorktreeCheckOptions {
     fn default() -> Self {
         Self {
             default_branch: None,
-            recent_activity_days: 7,
+            recent_activity_days: crate::DEFAULT_ACTIVITY_DAYS,
             untracked_as_unsafe: false,
             whitelist: Vec::new(),
             now: SystemTime::now(),
@@ -569,6 +569,7 @@ pub fn check_worktree(
     }
 
     // ---- merge status: runs in `repo`, so it survives a missing directory ----
+    let mut absorbed = false;
     let merged = match (opts.default_branch.as_deref(), entry.head.as_deref()) {
         (Some(default_branch), Some(head)) => {
             match merge_base_is_ancestor(runner, repo, head, default_branch) {
@@ -581,11 +582,37 @@ pub fn check_worktree(
                     Some(true)
                 }
                 Ok((false, evidence)) => {
-                    reasons.push(Reason::review(
-                        ReasonCode::WtUnmerged,
-                        "not merged into the default branch",
-                        evidence,
-                    ));
+                    // Not an ancestor, which is what a squash merge looks like: the
+                    // change is in the default branch but as a different commit. Ask
+                    // the patch question before falling back to "unmerged".
+                    // The `if let` is the whole decision: either every commit already
+                    // has an equivalent patch upstream and the default branch still
+                    // holds that content, or the ancestry answer stands. A patch check
+                    // that could not run is not an upgrade — it must never make a
+                    // worktree look safer than it did (D3).
+                    match commits_absorbed(runner, repo, head, default_branch) {
+                        Ok((true, absorbed_evidence)) => {
+                            absorbed = true;
+                            reasons.push(Reason::safe(
+                                ReasonCode::WtAbsorbed,
+                                "every commit has an equivalent patch in the default branch",
+                                absorbed_evidence,
+                            ));
+                        }
+                        // The patch matched but the content is gone, which is what a
+                        // revert leaves behind. Both halves go into the evidence: the
+                        // second is the one the reader has to act on.
+                        Ok((false, why)) => reasons.push(Reason::review(
+                            ReasonCode::WtUnmerged,
+                            "not merged into the default branch",
+                            format!("{evidence}; {why}"),
+                        )),
+                        Err(_) => reasons.push(Reason::review(
+                            ReasonCode::WtUnmerged,
+                            "not merged into the default branch",
+                            evidence,
+                        )),
+                    }
                     Some(false)
                 }
                 // Anything that is neither exit 0 nor exit 1 answers nothing and
@@ -616,7 +643,10 @@ pub fn check_worktree(
 
     // ---- reasons that need both the status header and the merge answer ----
     if let Some(info) = &status {
-        if info.upstream.is_none() && merged != Some(true) {
+        // `absorbed` counts as merged here: the change is in the default branch, so
+        // "no upstream branch" carries none of the risk this reason exists to
+        // report — the work is not stranded.
+        if info.upstream.is_none() && merged != Some(true) && !absorbed {
             let evidence = match merged {
                 Some(false) => format!(
                     "no upstream branch and not merged into {}",
@@ -664,6 +694,7 @@ pub fn check_worktree(
         behind: status.as_ref().map_or(0, |info| info.behind),
         has_upstream: status.as_ref().is_some_and(|info| info.upstream.is_some()),
         merged_into_default: merged,
+        absorbed_into_default: absorbed,
         stash_count: opts.repository_stash_count.unwrap_or(0),
         last_updated_at: activity.map(format_rfc3339),
         agent: infer_agent(&entry.path),
@@ -672,28 +703,34 @@ pub fn check_worktree(
     }
 }
 
-/// Asks `git merge-base --is-ancestor` whether `head` is an ancestor of
-/// `default_branch`.
+/// Two candidate names are tried, in order: `origin/<name>` first, then the bare
+/// name.
 ///
-/// Two candidate names are tried, in order: the branch as detected, then
-/// `origin/<name>`. The fallback exists because `origin/HEAD` names a branch that
-/// often exists only as a remote-tracking ref — `git merge-base` does not resolve
-/// the bare name to it (verified against git 2.54), which would degrade every
-/// healthy worktree to `cannot_verify`. `--` keeps a branch name that starts with
-/// `-` from being parsed as an option. The exit code is the answer: 0 = ancestor,
-/// 1 = not an ancestor; every other outcome is an error the caller must treat as
-/// unknown (D3). A transport error (timeout, spawn failure) is returned as-is:
-/// retrying another name cannot fix it.
+/// The remote-tracking ref is tried first because it is the one that answers the
+/// question actually being asked — "is this change in the default branch" — while a
+/// local branch of the same name is an accident of checkout state. Measured on one
+/// machine, local `main` trailed `origin/main` by 6 to 1336 commits across five
+/// repositories; a bare name reported merged work as unmerged in 116 of 199 clean
+/// worktrees, and, where the local branch held commits that were never pushed,
+/// reported unmerged work as merged — the direction D3 forbids. The bare name stays
+/// as the fallback for a repository with no remote, where `origin/<name>` exits 128
+/// rather than answering.
+///
+/// `--` keeps a branch name that starts with `-` from being parsed as an option.
+/// The exit code is the answer: 0 = ancestor, 1 = not an ancestor; every other
+/// outcome is an error the caller must treat as unknown (D3). A transport error
+/// (timeout, spawn failure) is returned as-is: retrying another name cannot fix it.
 fn merge_base_is_ancestor(
     runner: &dyn GitRunner,
     repo: &Path,
     head: &str,
     default_branch: &str,
 ) -> Result<(bool, String), GitError> {
-    let mut candidates = vec![default_branch.to_string()];
+    let mut candidates = Vec::with_capacity(2);
     if !default_branch.contains('/') {
         candidates.push(format!("origin/{default_branch}"));
     }
+    candidates.push(default_branch.to_string());
     let mut last_error: Option<GitError> = None;
     for candidate in &candidates {
         let args = [
@@ -731,6 +768,163 @@ fn merge_base_is_ancestor(
         code: None,
         stderr: "no merge-base candidate resolved".to_string(),
     }))
+}
+
+/// Asks `git cherry` whether every commit on this branch already has an equivalent
+/// patch in the default branch.
+///
+/// `git cherry <upstream> <head>` prints one line per commit in
+/// `<upstream>..<head>`: `-` when an equivalent patch is already upstream, `+` when
+/// it is not. No `+` line means the work is there even though the commits are not
+/// ancestors of it, which is what a squash merge produces and what
+/// `merge-base --is-ancestor` cannot see.
+///
+/// The candidates mirror [`merge_base_is_ancestor`] — `origin/<name>` first, then
+/// the bare name — so both halves of the merge answer are asked against the same
+/// ref. A name that does not resolve exits 128 and the next one is tried; a
+/// transport error is returned as-is, because another name cannot fix it.
+///
+/// What this cannot see: a commit applied and then reverted still matches its
+/// patch-id, so a reverted change reads as absorbed.
+fn commits_absorbed(
+    runner: &dyn GitRunner,
+    repo: &Path,
+    head: &str,
+    default_branch: &str,
+) -> Result<(bool, String), GitError> {
+    let mut candidates = Vec::with_capacity(2);
+    if !default_branch.contains('/') {
+        candidates.push(format!("origin/{default_branch}"));
+    }
+    candidates.push(default_branch.to_string());
+    let mut last_error: Option<GitError> = None;
+    for candidate in &candidates {
+        let args = ["cherry", "--", candidate.as_str(), head];
+        match runner.run(repo, &args) {
+            Ok(output) if output.code == Some(0) => {
+                let mut unique = 0_usize;
+                let mut absorbed = 0_usize;
+                for line in output.stdout.lines() {
+                    match line.chars().next() {
+                        Some('+') => unique += 1,
+                        Some('-') => absorbed += 1,
+                        _ => {}
+                    }
+                }
+                if unique > 0 {
+                    return Ok((false, format!("{unique} commit(s) not in {candidate}")));
+                }
+                // A matching patch-id says the patch was applied, not that it is still
+                // there: a later revert leaves the patch-id matching and the code gone.
+                let (present, detail) = content_still_present(runner, repo, head, candidate)?;
+                let subject = if absorbed == 0 {
+                    format!("no commit of its own beyond {candidate}")
+                } else {
+                    format!("{absorbed} commit(s) have an equivalent patch in {candidate}")
+                };
+                return Ok(if present {
+                    (true, format!("{subject}, and {detail}"))
+                } else {
+                    (false, format!("{subject}, but {detail}"))
+                });
+            }
+            Ok(output) => {
+                last_error = Some(GitError::Failed {
+                    command: display_command(repo, &args),
+                    code: output.code,
+                    stderr: output.stderr.clone(),
+                });
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| GitError::Failed {
+        command: display_command(repo, &["cherry", "--", head]),
+        code: None,
+        stderr: "no cherry candidate resolved".to_string(),
+    }))
+}
+
+/// How many paths the content confirmation will ask about in one command.
+///
+/// Past this the answer is "cannot confirm" rather than a command line long enough to
+/// matter: the ordinary squash merge touches a handful of files, and a branch touching
+/// hundreds is not one this check should sign off on without reading it.
+const MAX_CONFIRM_PATHS: usize = 200;
+
+/// Confirms that the default branch still holds the content this branch produces.
+///
+/// `git cherry` compares patch-ids, and a patch-id survives a revert: the commit that
+/// applied the change still matches even after another commit undid it. Matching the
+/// patch is therefore not the same as the change being there now — the hole the
+/// triage document names and this closes.
+///
+/// The test is a tree comparison, not a history one. `git diff <head> <target> -- <the
+/// files this branch touched>` asks whether the two sides hold the same content for
+/// exactly those files; the file list comes from `<target>...<head>`, which is the
+/// branch's own diff against the merge base. A revert makes the two sides differ, so
+/// the branch stays `Review`. Because the comparison covers only the files the branch
+/// touched, unrelated work on the default branch cannot make it fail.
+///
+/// It is deliberately strict in one direction: if the default branch changed one of
+/// those files again after the merge, the two sides differ and the answer is "cannot
+/// confirm", which is `Review`. That is the safe direction — this check may cost a
+/// re-read, never a silent deletion.
+fn content_still_present(
+    runner: &dyn GitRunner,
+    repo: &Path,
+    head: &str,
+    target: &str,
+) -> Result<(bool, String), GitError> {
+    let range = format!("{target}...{head}");
+    let listing = runner.run(repo, &["diff", "--name-only", range.as_str(), "--"])?;
+    if listing.code != Some(0) {
+        return Err(GitError::Failed {
+            command: display_command(repo, &["diff", "--name-only", range.as_str(), "--"]),
+            code: listing.code,
+            stderr: listing.stderr,
+        });
+    }
+    let paths: Vec<&str> = listing
+        .stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .collect();
+    if paths.is_empty() {
+        // Nothing of its own to lose: every commit here is a merge whose parents are
+        // already in the default branch.
+        return Ok((true, "it changes no file of its own".to_string()));
+    }
+    if paths.len() > MAX_CONFIRM_PATHS {
+        return Ok((
+            false,
+            format!(
+                "it changes {} files, too many to confirm one by one",
+                paths.len()
+            ),
+        ));
+    }
+    let mut args: Vec<&str> = vec!["diff", "--quiet", head, target, "--"];
+    args.extend(paths.iter().copied());
+    let output = runner.run(repo, &args)?;
+    match output.code {
+        Some(0) => Ok((
+            true,
+            format!("the {} touched file(s) hold the same content", paths.len()),
+        )),
+        Some(1) => Ok((
+            false,
+            format!(
+                "{} touched file(s) no longer match — a later revert or rewrite",
+                paths.len()
+            ),
+        )),
+        _ => Err(GitError::Failed {
+            command: display_command(repo, &args),
+            code: output.code,
+            stderr: output.stderr,
+        }),
+    }
 }
 
 /// Runs one Git call and maps **every** failure onto a `wt.cannot_verify` reason
@@ -953,6 +1147,10 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     /// The canned answers every check needs for a clean, merged, inactive worktree.
+    ///
+    /// The merge answer is keyed on `origin/main`, not `main`: the remote-tracking
+    /// ref is the candidate the check tries first, and a fixture keyed on the bare
+    /// name would answer a call that is never made.
     fn calm_rules(status: &str) -> Vec<(Vec<String>, Canned)> {
         vec![
             canned(&["status", "--porcelain=v2", "--branch"], status),
@@ -967,7 +1165,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                     "--is-ancestor".to_string(),
                     "--".to_string(),
                     "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
-                    "main".to_string(),
+                    "origin/main".to_string(),
                 ],
                 Canned::Out(GitOutput {
                     stdout: String::new(),
@@ -1330,7 +1528,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                     "--is-ancestor".to_string(),
                     "--".to_string(),
                     "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
-                    "main".to_string(),
+                    "origin/main".to_string(),
                 ],
                 Canned::Out(GitOutput {
                     stdout: String::new(),
@@ -1354,6 +1552,294 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
+    fn the_remote_default_branch_answers_before_the_local_one() {
+        // What this pins: `merge-base --is-ancestor HEAD main` resolves `main` to the
+        // *local* branch, and in a worktree-heavy repository the local default is
+        // usually behind the remote — measured at 6 to 1336 commits behind across five
+        // repositories, which reported 116 of 199 clean worktrees as unmerged when they
+        // had in fact been merged. The local branch is canned as "not an ancestor"
+        // here, so a verdict of merged can only come from the remote name having been
+        // asked first, and the last assertion proves the local name was never asked.
+        let dir = temp_dir("remote-default");
+        backdate(&dir, 30 * 86_400);
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                head.to_string(),
+                "main".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert_eq!(record.merged_into_default, Some(true));
+        assert!(has(&record, ReasonCode::WtMerged));
+        assert!(!has(&record, ReasonCode::WtUnmerged));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        assert!(
+            !runner.called(&["merge-base", "--is-ancestor", "--", head, "main"]),
+            "the local branch must not be consulted once the remote one has answered"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_squash_merged_branch_is_absorbed_rather_than_unmerged() {
+        // `git cherry` printing only `-` lines means every commit has an equivalent
+        // patch upstream: the change is in the default branch under a rewritten
+        // commit, which is what GitHub's default merge strategy produces and what
+        // `merge-base --is-ancestor` reports as "not merged".
+        let dir = temp_dir("absorbed");
+        backdate(&dir, 30 * 86_400);
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.pop();
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                head.to_string(),
+                "origin/main".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
+        ));
+        rules.push(canned(
+            &["cherry", "--", "origin/main", head],
+            "- 1111111111111111111111111111111111111111\n- 2222222222222222222222222222222222222222\n",
+        ));
+        // The patch is in the default branch, and so is the content: the confirmation
+        // pass has to agree before the branch may be called absorbed.
+        let range = format!("origin/main...{head}");
+        rules.push(canned(&["diff", "--name-only", &range, "--"], "a.txt\n"));
+        rules.push(canned(
+            &["diff", "--quiet", head, "origin/main", "--", "a.txt"],
+            "",
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        // The ancestry answer stays honest — it is not an ancestor — and the patch
+        // answer is what carries the verdict.
+        assert_eq!(record.merged_into_default, Some(false));
+        assert!(record.absorbed_into_default);
+        assert!(has(&record, ReasonCode::WtAbsorbed));
+        assert!(!has(&record, ReasonCode::WtUnmerged));
+        // `CLEAN_STATUS` carries no upstream, so this also pins that an absorbed
+        // branch is not reported as stranded work.
+        assert!(!has(&record, ReasonCode::WtNoUpstream));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtAbsorbed)
+            .expect("absorbed reason");
+        assert!(
+            reason.evidence.contains("2 commit(s)") && reason.evidence.contains("origin/main"),
+            "the evidence must count the patches and name the ref: {}",
+            reason.evidence
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reverted_change_is_not_absorbed() {
+        // The hole that `git cherry` alone leaves open: the commit that applied the
+        // change still matches its patch-id after another commit undid it, so the
+        // patch check reports "absorbed" while the default branch no longer has the
+        // change. The content confirmation is what catches it, and the reason has to
+        // carry both halves so the reader can see why.
+        let dir = temp_dir("absorbed-then-reverted");
+        backdate(&dir, 30 * 86_400);
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.pop();
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                head.to_string(),
+                "origin/main".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
+        ));
+        rules.push(canned(
+            &["cherry", "--", "origin/main", head],
+            "- 1111111111111111111111111111111111111111\n",
+        ));
+        let range = format!("origin/main...{head}");
+        rules.push(canned(&["diff", "--name-only", &range, "--"], "a.txt\n"));
+        rules.push((
+            vec![
+                "diff".to_string(),
+                "--quiet".to_string(),
+                head.to_string(),
+                "origin/main".to_string(),
+                "--".to_string(),
+                "a.txt".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                // 1 = "they differ": the default branch does not hold this content.
+                code: Some(1),
+            }),
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert_eq!(record.merged_into_default, Some(false));
+        assert!(
+            !record.absorbed_into_default,
+            "a reverted change must not be called absorbed"
+        );
+        assert!(has(&record, ReasonCode::WtUnmerged));
+        assert!(!has(&record, ReasonCode::WtAbsorbed));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtUnmerged)
+            .expect("unmerged reason");
+        assert!(
+            reason.evidence.contains("equivalent patch")
+                && reason.evidence.contains("no longer match"),
+            "the evidence must show both halves: {}",
+            reason.evidence
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_unabsorbed_commit_keeps_the_branch_unmerged() {
+        // A single `+` line means work that exists only here. The verdict must stay
+        // `Review`, and the code must not claim the branch was absorbed.
+        let dir = temp_dir("partly-absorbed");
+        backdate(&dir, 30 * 86_400);
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.pop();
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                head.to_string(),
+                "origin/main".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
+        ));
+        rules.push(canned(
+            &["cherry", "--", "origin/main", head],
+            "- 1111111111111111111111111111111111111111\n+ 3333333333333333333333333333333333333333\n",
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert_eq!(record.merged_into_default, Some(false));
+        assert!(!record.absorbed_into_default);
+        assert!(has(&record, ReasonCode::WtUnmerged));
+        assert!(!has(&record, ReasonCode::WtAbsorbed));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failing_patch_check_never_upgrades_a_branch_to_absorbed() {
+        // `git cherry` failing answers nothing, and an unanswerable check must not
+        // make a worktree look safer than the ancestry answer alone did (D3).
+        let dir = temp_dir("cherry-failed");
+        backdate(&dir, 30 * 86_400);
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.pop();
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                head.to_string(),
+                "origin/main".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
+        ));
+        rules.push((
+            vec![
+                "cherry".to_string(),
+                "--".to_string(),
+                "origin/main".to_string(),
+                head.to_string(),
+            ],
+            Canned::Failed {
+                code: Some(128),
+                stderr: "fatal: bad revision\n".to_string(),
+            },
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert_eq!(record.merged_into_default, Some(false));
+        assert!(!record.absorbed_into_default);
+        assert!(has(&record, ReasonCode::WtUnmerged));
+        assert!(!has(&record, ReasonCode::WtAbsorbed));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn wt_unmerged_downgrades_a_clean_worktree_to_review() {
         let dir = temp_dir("unmerged");
         backdate(&dir, 30 * 86_400);
@@ -1365,7 +1851,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 "--is-ancestor".to_string(),
                 "--".to_string(),
                 "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
-                "main".to_string(),
+                "origin/main".to_string(),
             ],
             Canned::Out(GitOutput {
                 stdout: String::new(),
@@ -1651,7 +2137,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             "--is-ancestor",
             "--",
             "19402c62a2bdb19e2271df95ecfc1a272aad4bf6",
-            "main"
+            "origin/main"
         ]));
 
         let mut rules = calm_rules(CLEAN_STATUS);
@@ -1662,7 +2148,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 "--is-ancestor".to_string(),
                 "--".to_string(),
                 "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
-                "main".to_string(),
+                "origin/main".to_string(),
             ],
             Canned::Out(GitOutput {
                 stdout: String::new(),
@@ -2026,7 +2512,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 "--is-ancestor".to_string(),
                 "--".to_string(),
                 head.to_string(),
-                "main".to_string(),
+                "origin/main".to_string(),
             ],
             Canned::Io,
         ));
@@ -2043,16 +2529,19 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         assert!(!has(&record, ReasonCode::WtUnmerged));
         assert!(has(&record, ReasonCode::WtCannotVerify));
         assert_eq!(record.safety.status, SafetyStatus::Review);
-        assert!(!runner.called(&["merge-base", "--is-ancestor", "--", head, "origin/main"]));
+        // A transport error on the first candidate ends the search: the second name
+        // cannot fix a spawn failure, so it must never be tried.
+        assert!(!runner.called(&["merge-base", "--is-ancestor", "--", head, "main"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn merge_check_falls_back_to_the_remote_tracking_name() {
-        // Finding 5: `origin/HEAD` often names a branch that exists only as
-        // `refs/remotes/origin/<name>`, and `git merge-base` does not resolve the
-        // bare name to it (exit 128, no DWIM). Without the fallback every healthy
-        // worktree would degrade to cannot_verify.
+    fn merge_check_falls_back_to_the_local_name() {
+        // The candidate order is `origin/<name>` then `<name>`, so the fallback that
+        // matters is the local one: a repository with no remote has no
+        // `refs/remotes/origin/develop`, and `git merge-base` answers that with exit
+        // 128 rather than a verdict. Without the second candidate every healthy
+        // worktree of such a repository would degrade to cannot_verify.
         let dir = temp_dir("merge-fallback");
         backdate(&dir, 30 * 86_400);
         let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
@@ -2065,21 +2554,21 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 &["rev-parse", "--git-path", "index.lock"],
                 "/nonexistent/.git/index.lock\n",
             ),
-            // The bare name exits 128: git *ran* and answered "no such ref" (an
-            // `Ok` with a non-zero code, which is what `ProcessGitRunner` returns
-            // for a command that failed — a transport-level `Err` would instead
-            // short-circuit the candidate loop).
+            // The remote-tracking name exits 128: git *ran* and answered "no such
+            // ref" (an `Ok` with a non-zero code, which is what `ProcessGitRunner`
+            // returns for a command that failed — a transport-level `Err` would
+            // instead short-circuit the candidate loop).
             (
                 vec![
                     "merge-base".to_string(),
                     "--is-ancestor".to_string(),
                     "--".to_string(),
                     head.to_string(),
-                    "develop".to_string(),
+                    "origin/develop".to_string(),
                 ],
                 Canned::Out(GitOutput {
                     stdout: String::new(),
-                    stderr: "fatal: not a valid ref: develop\n".to_string(),
+                    stderr: "fatal: not a valid ref: origin/develop\n".to_string(),
                     code: Some(128),
                 }),
             ),
@@ -2089,7 +2578,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                     "--is-ancestor".to_string(),
                     "--".to_string(),
                     head.to_string(),
-                    "origin/develop".to_string(),
+                    "develop".to_string(),
                 ],
                 Canned::Out(GitOutput {
                     stdout: String::new(),
@@ -2110,13 +2599,13 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             .find(|reason| reason.code == ReasonCode::WtMerged)
             .expect("merged reason");
         assert!(
-            reason.evidence.contains("origin/develop"),
+            reason.evidence.contains("ancestor of develop"),
             "the evidence must name the candidate that answered: {}",
             reason.evidence
         );
-        // Both candidates were tried, the bare name first.
-        assert!(runner.called(&["merge-base", "--is-ancestor", "--", head, "develop"]));
+        // Both candidates were tried, the remote-tracking name first.
         assert!(runner.called(&["merge-base", "--is-ancestor", "--", head, "origin/develop"]));
+        assert!(runner.called(&["merge-base", "--is-ancestor", "--", head, "develop"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2463,7 +2952,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 "--is-ancestor".to_string(),
                 "--".to_string(),
                 "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
-                "main".to_string(),
+                "origin/main".to_string(),
             ],
             Canned::Out(GitOutput {
                 stdout: String::new(),

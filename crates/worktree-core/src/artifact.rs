@@ -304,7 +304,7 @@ impl Default for ArtifactScanOptions {
         Self {
             max_depth: 6,
             per_dir_timeout: Duration::from_secs(30),
-            recent_activity_days: 7,
+            recent_activity_days: crate::DEFAULT_ACTIVITY_DAYS,
             whitelist: Vec::new(),
             now: SystemTime::now(),
             budget_deadline: None,

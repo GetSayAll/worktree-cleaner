@@ -11,6 +11,7 @@ export type ReasonCode =
   | "wt.detached"
   | "wt.no_upstream"
   | "wt.unmerged"
+  | "wt.absorbed"
   | "wt.untracked"
   | "wt.stash"
   | "wt.recent_activity"
@@ -60,6 +61,13 @@ export interface WorktreeRecord {
   behind: number;
   has_upstream: boolean;
   merged_into_default: boolean | null;
+  /**
+   * Every commit here already has an equivalent patch in the default branch,
+   * though the commits are not ancestors of it — the squash-merge answer from
+   * `git cherry`. Separate from `merged_into_default` because the two are
+   * different facts; `false` means "not established", never "known not to be".
+   */
+  absorbed_into_default: boolean;
   stash_count: number;
   last_updated_at: string | null;
   agent: string | null;

@@ -85,6 +85,7 @@ export const zhCN = {
       whitelisted: "命中白名单规则",
       prunable: "工作目录已不存在",
       merged: "已合并进默认分支",
+      absorbed: "所有提交的改动都已在默认分支中",
       clean: "工作区干净"
     },
     af: {
@@ -361,6 +362,7 @@ export const zhCN = {
     mergeUnknown: (branch: string) => `无法判定是否已合并进 ${branch}`,
     mergeYes: (branch: string) => `已合并进 ${branch}`,
     mergeNo: (branch: string) => `未合并进 ${branch}`,
+    mergeAbsorbed: (branch: string) => `改动已在 ${branch} 中（压缩合并）`,
     stateGone: "目录已消失",
     stateDirty: (n: number) => `有改动 ${n}`,
     stateClean: "干净",
@@ -369,7 +371,10 @@ export const zhCN = {
     selectedSummary: (worktrees: number, artifacts: number) =>
       `已选 ${worktrees} 个工作树 · ${artifacts} 个产物 · 预计可回收`,
     continueToArtifacts: "继续查看构建产物",
-    generatePlan: "生成清理计划"
+    generatePlan: "生成清理计划",
+    hygieneTitle: "这个仓库会不断重新堆积",
+    hygieneBody: (n: number) => `有 ${n} 条磁盘卫生规则未通过：worktree 数量、缓存或闲置状态会在清理后继续长回来。`,
+    hygieneAction: "查看磁盘卫生"
   },
   artifacts: {
     title: "构建产物",

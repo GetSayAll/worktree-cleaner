@@ -1492,6 +1492,7 @@ mod tests {
             behind: 0,
             has_upstream: true,
             merged_into_default: Some(false),
+            absorbed_into_default: false,
             stash_count: 0,
             last_updated_at: Some(timestamp(0)),
             agent: None,

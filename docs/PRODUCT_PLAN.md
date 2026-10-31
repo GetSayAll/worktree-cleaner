@@ -36,7 +36,7 @@ All worktrees and build artifacts fall into one of three levels, and the level i
 | Level | Meaning | UI presentation | Selectable by default |
 |---|---|---|---|
 | **Safe** (safe to delete) | all checks pass, with positive evidence (merged / already gitignored) | green badge | yes, checked by default |
-| **Review** (needs confirmation) | not dangerous, but with uncertain factors (unmerged, activity within the last 7 days, read failure) | amber badge | yes, but **not** checked by default; the user must check it explicitly |
+| **Review** (needs confirmation) | not dangerous, but with uncertain factors (unmerged, activity within the last 3 days, read failure) | amber badge | yes, but **not** checked by default; the user must check it explicitly |
 | **Unsafe** (must not be deleted) | hits a hard prohibition condition (main working tree, uncommitted changes, unpushed commits, Git-locked, already tracked) | red badge | no, checkbox disabled |
 
 One rule: **the level is determined by the most severe reason in `reasons`**. Wherever the UI displays a level, the reasons must be expandable right next to it.
@@ -127,7 +127,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 - Whitelist match check.
 - Duplicate deletion check (a worktree and an artifact inside it are both selected).
 - The target still exists and its identity is unchanged (record inode / size when the plan is generated; re-check before execution; if inconsistent, require a rescan).
-- Target activity re-check: for a directory judged "safe" when the plan was generated, re-check before execution whether there was new writing within the last 7 days; if it has become active, suspend that item and ask the user to confirm.
+- Target activity re-check: for a directory judged "safe" when the plan was generated, re-check before execution whether there was new writing within the last 3 days; if it has become active, suspend that item and ask the user to confirm.
 
 **High-risk confirmation**
 
@@ -153,7 +153,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 
 - **Scan scope**: additional scan paths (one per line), maximum scan depth, per-directory timeout, whole-scan budget.
 - **Protection rules**: whitelist paths (matched directories are never deleted under any circumstances), protected branch names (the default branch is auto-detected and displayed by default), agent directories to protect.
-- **Decision thresholds**: activity days (default 7), artifact display size threshold (default 10 MB), whether "untracked files" count as unsafe (counts by default).
+- **Decision thresholds**: activity days (default 3), artifact display size threshold (default 10 MB), whether "untracked files" count as unsafe (counts by default).
 - **Deletion method**: Trash (default and not changeable, with the note "this tool does not provide permanent deletion").
 - Appearance: follow system / light / dark.
 - Language: follow system / English / 中文. English is the source locale; the interface follows the system language by default and can be switched manually.
@@ -277,8 +277,9 @@ Decision table:
 | `wt.detached` | detached HEAD with no upstream | Review | `HEAD is detached` |
 | `wt.no_upstream` | no upstream and not merged | Review | `branch has no upstream and is not merged into main` |
 | `wt.unmerged` | not merged into the default branch | Review | `not merged into main` |
+| `wt.absorbed` | every commit already has an equivalent patch in the default branch, though the commits are not ancestors of it | Safe (positive) | `2 commits have an equivalent patch in origin/main` |
 | `wt.untracked` | untracked files > 0 | Review (configurable to Unsafe) | `N untracked files` |
-| `wt.recent_activity` | last activity < activity days | Review | `last activity: 3 days ago` |
+| `wt.recent_activity` | the HEAD commit is newer than the activity window (default 3 days) | Review | `last activity: 2 days ago` |
 | `wt.agent_active` | a `.git/index.lock` exists in the directory | Review | `index.lock present, possibly in use` |
 | `wt.cannot_verify` | any check timed out / no permission / command failed | Review | `cannot read status: <reason>` |
 | `wt.whitelisted` | matches the user whitelist | Unsafe | `matches whitelist: <rule>` |
@@ -286,7 +287,9 @@ Decision table:
 | `wt.merged` | merged into the default branch | Safe (positive) | `merged into main` |
 | `wt.clean` | no changes, no untracked files | Safe (positive) | `working tree clean` |
 
-The necessary and sufficient condition for **Safe**: not the main working tree, not locked, no uncommitted changes, ahead = 0, merged into the default branch (`merged_into_default == Some(true)`), no sign of activity, no `cannot_verify`. If any one is not satisfied, downgrade.
+The necessary and sufficient condition for **Safe**: not the main working tree, not locked, no uncommitted changes, ahead = 0, merged into the default branch (`merged_into_default == Some(true)`, or `absorbed_into_default` when a squash merge rewrote the commit), no sign of activity, no `cannot_verify`. If any one is not satisfied, downgrade.
+
+**Merged and absorbed are two facts, not one.** `merged_into_default` answers "is this commit an ancestor of the default branch"; `absorbed_into_default` answers "does every commit here have an equivalent patch there", which is `git cherry`'s patch-id comparison. Both are Safe evidence because both are a command's answer rather than a judgement about a diff. A branch that is an ancestor is never also reported as absorbed. What absorption cannot see: a commit applied and then reverted still matches its patch-id, so a reverted change reads as absorbed. Measured when the check was added: 11 of 33 branches reported `wt.unmerged` were fully absorbed.
 
 **Stash is deliberately absent from this table.** It was a Review row (`wt.stash`), and it was wrong: `refs/stash` lives in the common Git directory, so all worktrees of a repository report the same list, and `git worktree remove` never touches it. One stash in a repository therefore downgraded every clean worktree it had — measured on a 109-worktree repository, 48 of 48 clean-and-merged worktrees, none of which would have lost anything. The count stays on the record as a fact the detail panel shows; it can no longer move a verdict. The code `wt.stash` is no longer emitted and must not be reused for another meaning (audit logs written before this change still render it).
 
@@ -313,7 +316,7 @@ Decision table:
 | `af.credentials` | a credential-looking file (`.env`, `id_rsa`, `*.pem`, `credentials.json`, …) sits anywhere inside the directory, at any depth | Unsafe | `<relative path> is inside; deleting the directory would delete it too` |
 | `af.symlink_outside` | the directory is a symlink and points outside the project root | Unsafe | `points to <target path>` |
 | `af.whitelisted` | matches the whitelist | Unsafe | `matches whitelist: <rule>` |
-| `af.recent_activity` | a write occurred within the recent activity days | Review | `last activity: 3 days ago` |
+| `af.recent_activity` | a write occurred within the activity window (default 3 days) | Review | `last activity: 2 days ago` |
 | `af.cannot_verify` | a Git call failed, or the size computation or directory listing did not complete, or the credential walk hit its entry bound | Review | `could not complete the check` |
 | `af.empty` | the directory contains no files **and the size measurement completed** — an unmeasurable directory also reports a file count of zero, and "could not measure" is not "empty" | Safe (positive) | `it contains no files` |
 | `af.git_ignored` | the directory as a whole is ignored by gitignore | Safe (positive) | `ignored by .gitignore` |
@@ -505,7 +508,7 @@ src/
     SettingsView.vue         settings
 ```
 
-The sample data deliberately covers every decision branch in the plan: the main working tree, a merged clean worktree, a worktree with uncommitted changes, a worktree that is unmerged and had activity within the last 7 days, a locked worktree, a worktree whose directory is gone, a git-tracked `build/`, a symlink pointing outside the project, and a `.nuxt` that times out during the scan.
+The sample data deliberately covers every decision branch in the plan: the main working tree, a merged clean worktree, a worktree with uncommitted changes, a worktree that is unmerged and had activity within the last 3 days, a locked worktree, a worktree whose directory is gone, a git-tracked `build/`, a symlink pointing outside the project, and a `.nuxt` that times out during the scan.
 
 Three ways to preview locally:
 

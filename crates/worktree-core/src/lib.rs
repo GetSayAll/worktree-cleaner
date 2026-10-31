@@ -67,6 +67,21 @@ pub enum ScanError {
     GitFailed(String),
 }
 
+/// How recently a worktree must have been committed to before it stops being a
+/// cleanup candidate.
+///
+/// Three days, not seven. The window exists to catch work someone is in the middle
+/// of, and a merged branch touched three days ago is already finished: the merge is
+/// what ends the work, not the calendar. Measured on a machine with 359 worktrees,
+/// the seven-day window held 69 of 184 otherwise-safe worktrees back — every one of
+/// them merged, none of them being edited.
+///
+/// This is not the disk-hygiene policy's idle window. `hygiene::IDLE_DAYS` answers a
+/// different question ("has this worktree been abandoned") and stays at seven; the
+/// two used to share this number, which meant changing one silently changed the
+/// other against `docs/DISK_HYGIENE.md`.
+pub const DEFAULT_ACTIVITY_DAYS: u32 = 3;
+
 /// Knobs the caller (Tauri shell, CLI) passes into a scan.
 ///
 /// Durations are milliseconds on the wire so the front end does not have to know
@@ -96,7 +111,7 @@ impl Default for ScanOptions {
             max_depth: 6,
             per_dir_timeout_ms: 30_000,
             scan_budget_ms: 600_000,
-            recent_activity_days: 7,
+            recent_activity_days: DEFAULT_ACTIVITY_DAYS,
             untracked_as_unsafe: false,
             whitelist: Vec::new(),
             git_timeout_ms: 10_000,
@@ -415,6 +430,16 @@ pub struct WorktreeRecord {
     pub has_upstream: bool,
     /// `None` means undetermined, and **must not** be treated as merged.
     pub merged_into_default: Option<bool>,
+    /// Every commit on this branch has an equivalent patch in the default branch,
+    /// although the commits themselves are not ancestors of it — the squash-merge
+    /// answer, from `git cherry`'s patch-id comparison.
+    ///
+    /// Separate from `merged_into_default` rather than folded into it: the two are
+    /// different facts, and a reader who wants "is the work in the default branch"
+    /// has to see which of the two answered. `false` means "not established", never
+    /// "known not to be absorbed".
+    #[serde(default)]
+    pub absorbed_into_default: bool,
     pub stash_count: u32,
     /// The HEAD commit time — the only "last activity" signal. `None` when it could
     /// not be read (a `wt.cannot_verify` reason then holds the verdict at Review).
@@ -636,7 +661,10 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
         &artifact_scan.records,
         &HygieneOptions {
             now,
-            idle_days: options.recent_activity_days,
+            // The hygiene policy's own idle window, not the scan's activity window:
+            // `docs/DISK_HYGIENE.md` fixes T3 at seven days, and the two numbers
+            // answering different questions must not move together.
+            idle_days: hygiene::IDLE_DAYS,
             per_dir_timeout,
             budget_deadline: Some(started + budget),
             ..HygieneOptions::default()
@@ -722,6 +750,7 @@ mod tests {
             behind: 0,
             has_upstream: true,
             merged_into_default: Some(false),
+            absorbed_into_default: false,
             stash_count: 0,
             last_updated_at: Some("2026-01-01T00:00:00Z".to_string()),
             agent: Some("codex".to_string()),

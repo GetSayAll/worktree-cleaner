@@ -25,6 +25,22 @@ const expanded = ref<string[]>([]);
 const root = computed(() => snapshot.value?.root ?? "");
 
 /**
+ * How many disk-hygiene rules the core reported as violated for this repository.
+ *
+ * Counted from `hygiene.rules` — the same list the hygiene page and the nav badge
+ * count — so the three never disagree. The verdict itself is the core's: this only
+ * decides whether to show the banner (D9).
+ *
+ * It belongs on this page because this is where a cleanup starts. A repository whose
+ * worktree count is over the cap, or that leaves merged worktrees behind, refills
+ * after every pass; without saying so, the user cleans the same repository again next
+ * month and concludes the tool did not work.
+ */
+const hygieneViolations = computed(
+  () => snapshot.value?.hygiene.rules.filter((rule) => rule.level === "violation").length ?? 0
+);
+
+/**
  * Whether a worktree lives outside the directory the user picked.
  *
  * Telling, not deciding: `git worktree add` accepts any path, so a worktree of the
@@ -87,10 +103,15 @@ function upstreamText(item: WorktreeRecord): string {
 
 function mergeText(item: WorktreeRecord): string {
   if (item.is_main) return messages.worktrees.mergeMain;
-  if (item.merged_into_default === null) return messages.worktrees.mergeUnknown(snapshot.value?.default_branch || messages.common.defaultBranch);
+  const branch = snapshot.value?.default_branch || messages.common.defaultBranch;
+  // Absorption is checked before the ancestry answer: the commit is not an ancestor,
+  // so `merged_into_default` is false here, and reporting that alone would hide the
+  // one fact that matters — the change is already in the default branch.
+  if (item.absorbed_into_default) return messages.worktrees.mergeAbsorbed(branch);
+  if (item.merged_into_default === null) return messages.worktrees.mergeUnknown(branch);
   return item.merged_into_default
-    ? messages.worktrees.mergeYes(snapshot.value?.default_branch || messages.common.defaultBranch)
-    : messages.worktrees.mergeNo(snapshot.value?.default_branch || messages.common.defaultBranch);
+    ? messages.worktrees.mergeYes(branch)
+    : messages.worktrees.mergeNo(branch);
 }
 
 function stateText(item: WorktreeRecord): string {
@@ -108,6 +129,16 @@ function stateText(item: WorktreeRecord): string {
     <div class="spread">
       <h1>{{ messages.worktrees.title }}</h1>
       <span class="faint tiny">{{ " " + messages.worktrees.dataSource + " " }}</span>
+    </div>
+
+    <div v-if="hygieneViolations > 0" class="banner banner--warn">
+      <span>!</span>
+      <span>
+        <span class="banner__title">{{ messages.worktrees.hygieneTitle }}</span>
+        {{ messages.worktrees.hygieneBody(hygieneViolations) }}
+      </span>
+      <span style="flex: 1"></span>
+      <button class="btn btn--ghost" @click="goTo('hygiene')">{{ messages.worktrees.hygieneAction }}</button>
     </div>
 
     <div class="row-wrap">
