@@ -53,7 +53,18 @@ fn options_with_log(path: &Path) -> ExecuteOptions {
 /// can prove an entry is this run's fixture and not the user's own directory.
 fn repo_with_a_safe_worktree(name: &str) -> (Repo, PathBuf, String) {
     let repo = Repo::new(name);
-    let marker = format!("worktree-cleaner-test-{}", std::process::id());
+    // The marker identifies *this* fixture inside the shared system Trash, so it
+    // carries the fixture name as well as the process id: cargo runs the tests in
+    // one binary in parallel, and a process-wide marker was the same string in
+    // every fixture, so one test's cleanup took the entry another test was about
+    // to look for.
+    //
+    // The brackets are load-bearing. The match is a substring test, and fixture
+    // names share prefixes — `bundled` is a prefix of `bundled-orphan` — so a bare
+    // `…-bundled` would also be found inside the `bundled-orphan` fixture's file
+    // and the "nothing was trashed" assertions would fail for a neighbour's entry.
+    // A closing bracket after the name cannot appear in a longer name.
+    let marker = format!("[worktree-cleaner-test-{}-{name}]", std::process::id());
 
     std::fs::write(repo.root.join(".gitignore"), "node_modules/\n").expect("write .gitignore");
     std::fs::write(repo.root.join("package.json"), "{}\n").expect("write manifest");

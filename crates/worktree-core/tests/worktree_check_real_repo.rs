@@ -383,7 +383,19 @@ fn a_scan_leaves_the_repository_untouched() {
 }
 
 #[test]
-fn a_recently_modified_worktree_is_flagged() {
+/// The activity signal is the HEAD commit time, and a bulk touch of the directory
+/// is not activity.
+///
+/// This is the counter-example that settled it. The directory mtime moves when a
+/// top-level entry is created, renamed or deleted — not when a file deeper inside
+/// is edited — so an indexer, a backup, or a cleanup script marks a worktree
+/// "recent" that nobody has worked in. While mtime was one of the two signals it
+/// downgraded every clean worktree a backup had walked over: measured on a
+/// 109-worktree repository, 48 of 48 clean-and-merged worktrees.
+///
+/// Both halves are pinned here, against real Git: an idle worktree is not
+/// "recent", and touching its directory does not make it so.
+fn a_bulk_directory_touch_does_not_make_a_worktree_recent() {
     let repo = build_repo("activity");
     let mut opts = options();
     opts.recent_activity_days = 7;
@@ -395,40 +407,46 @@ fn a_recently_modified_worktree_is_flagged() {
         .expect("feature worktree")
         .clone();
 
-    // Phase 1: the HEAD commit is dated 60 days ago (see build_repo), so only the
-    // directory mtime can make this worktree "recent" — this is what pins the
-    // mtime half of the activity signal against real Git.
+    // Phase 1: this worktree's HEAD commit is 60 days old (see `build_repo`), so it
+    // is outside the seven-day window and the recorded activity is that commit.
     let records = repo.scan(&opts);
     let feature_record = by_branch(&records, "feature/x");
-    assert!(has(feature_record, ReasonCode::WtRecentActivity));
+    assert!(
+        !has(feature_record, ReasonCode::WtRecentActivity),
+        "an idle worktree is not recently active: {:?}",
+        codes(feature_record)
+    );
     let stamped = parse_rfc3339_secs(
         feature_record
             .last_updated_at
             .as_deref()
             .expect("last_updated_at"),
     );
+    let age = secs(SystemTime::now()) - stamped;
     assert!(
-        (secs(SystemTime::now()) - stamped).abs() < 120,
-        "last_updated_at should track the fresh directory mtime, got {stamped}"
+        age > 30 * 86_400,
+        "last_updated_at must be the HEAD commit time (60 days old), got {stamped}"
     );
 
-    // Phase 2: backdate the directory to 30 days ago. The commit is 60 days old,
-    // so the later of the two signals is the mtime — and 30 days is outside the
-    // 7-day window, so the worktree must no longer count as recently active.
-    let target = SystemTime::now() - Duration::from_hours(720);
-    let file = std::fs::File::open(&feature).expect("open worktree dir");
-    file.set_times(
+    // Phase 2: touch the directory itself, the way a backup or an indexer does.
+    // Nothing in the repository changed, so nothing about the verdict may change.
+    let now = SystemTime::now();
+    let dir = std::fs::File::open(&feature).expect("open worktree dir");
+    dir.set_times(
         std::fs::FileTimes::new()
-            .set_accessed(target)
-            .set_modified(target),
+            .set_accessed(now)
+            .set_modified(now),
     )
-    .expect("backdate worktree dir");
+    .expect("touch the worktree directory");
+    drop(dir);
 
     let records = repo.scan(&opts);
-    // Match by branch rather than by path: git reports the `/private/var` form of a
-    // `/var` path on macOS, so the literal strings differ.
     let feature_record = by_branch(&records, "feature/x");
-    assert!(!has(feature_record, ReasonCode::WtRecentActivity));
+    assert!(
+        !has(feature_record, ReasonCode::WtRecentActivity),
+        "a directory mtime is not activity: {:?}",
+        codes(feature_record)
+    );
     let stamped = parse_rfc3339_secs(
         feature_record
             .last_updated_at
@@ -436,8 +454,8 @@ fn a_recently_modified_worktree_is_flagged() {
             .expect("last_updated_at"),
     );
     assert!(
-        (stamped - secs(target)).abs() <= 1,
-        "last_updated_at must be the directory mtime (the later signal), got {stamped}"
+        (secs(now) - stamped).abs() > 30 * 86_400,
+        "the touch must not become the recorded activity, got {stamped}"
     );
 }
 

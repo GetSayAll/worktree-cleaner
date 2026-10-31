@@ -157,6 +157,10 @@ pub fn execute_plan(
                 whitelist: whitelist.clone(),
                 now: opts.now,
                 size_bytes: record.size_bytes,
+                // Carried over rather than re-measured: the count is a repository-wide
+                // fact and no longer feeds the verdict, so re-reading it here would only
+                // invent a difference for a field the decision does not use.
+                repository_stash_count: Some(record.stash_count),
             },
         );
         if let Some(change) = worktree_change(record, &rechecked) {
