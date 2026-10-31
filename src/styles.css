@@ -608,6 +608,9 @@ a { color: var(--accent); }
 .reason--review .reason__mark { color: var(--review); }
 .reason--unsafe { border-color: var(--unsafe-border); background: var(--unsafe-bg); }
 .reason--unsafe .reason__mark { color: var(--unsafe); }
+/* The base chip is the neutral one: an "unknown" finding is neither a warning nor a
+   reassurance, and colouring it either way would be a claim the audit did not make. */
+.reason--neutral .reason__mark { color: var(--text-3); }
 
 /* ---------- misc blocks ---------- */
 .banner {

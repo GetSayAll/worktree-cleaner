@@ -8,6 +8,7 @@
 pub mod artifact;
 pub mod cleanup;
 pub mod git;
+pub mod hygiene;
 pub mod log;
 pub mod path;
 pub mod reason;
@@ -15,6 +16,10 @@ pub mod timefmt;
 pub mod worktree;
 
 pub use git::{GitError, GitOutput, GitRunner, ProcessGitRunner, DEFAULT_GIT_TIMEOUT};
+pub use hygiene::{
+    audit_hygiene, HygieneFinding, HygieneLevel, HygieneOptions, HygieneReport, HygieneRule,
+    HygieneRuleStatus, VolumeSpace,
+};
 pub use path::{validate_path_for_deletion, DeletionContext, PathRejection, ValidatedPath};
 pub use reason::{Reason, ReasonCode, SafetyAssessment, SafetyStatus};
 pub use worktree::{
@@ -39,7 +44,11 @@ use crate::timefmt::format_rfc3339;
 /// Version 2 widened `WorktreeRecord.size_bytes` from `u64` to `Option<u64>`: an
 /// unmeasurable size must stay distinguishable from `0`, and a version 1 consumer
 /// would render `null` as `0 B`.
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 2;
+///
+/// Version 3 added `hygiene`: the read-only policy audit of `docs/DISK_HYGIENE.md`.
+/// A version 2 consumer must reject the snapshot rather than quietly show a
+/// repository with no compliance report at all.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 
 /// Why a scan could not be produced.
 ///
@@ -452,6 +461,10 @@ pub struct ProjectSnapshot {
     pub default_branch: Option<String>,
     pub worktrees: Vec<WorktreeRecord>,
     pub artifacts: Vec<ArtifactRecord>,
+    /// Compliance with the disk-hygiene policy (`docs/DISK_HYGIENE.md`), read-only.
+    /// It decides nothing about deletion: an item can be perfectly safe to remove
+    /// and still break the layout, or the other way round.
+    pub hygiene: HygieneReport,
     /// Scan downgrade notes (timeout, permission errors, etc.).
     pub warnings: Vec<String>,
 }
@@ -611,6 +624,26 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
     let artifact_scan = scan_artifacts(&runner, &present_roots, &artifact_options);
     warnings.extend(artifact_scan.warnings);
 
+    // ---- policy compliance ----
+    // The audit reads the verdicts the two passes above already established — a
+    // second pass over the same worktrees would pay for the same Git calls twice —
+    // and asks only what neither pass asks: which ignore rule covers each declared
+    // path, what the cache slots cost, and how much room the volume has left.
+    let hygiene = audit_hygiene(
+        &runner,
+        &root,
+        &worktrees,
+        &artifact_scan.records,
+        &HygieneOptions {
+            now,
+            idle_days: options.recent_activity_days,
+            per_dir_timeout,
+            budget_deadline: Some(started + budget),
+            ..HygieneOptions::default()
+        },
+    );
+    warnings.extend(hygiene.warnings.iter().cloned());
+
     Ok(ProjectSnapshot {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         root: root.display().to_string(),
@@ -618,6 +651,7 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
         default_branch,
         worktrees,
         artifacts: artifact_scan.records,
+        hygiene,
         warnings,
     })
 }
@@ -631,7 +665,7 @@ mod tests {
         // The contract version must be readable by both the CLI and the web UI, and
         // match the constant in src/types.ts.
         let version = SNAPSHOT_SCHEMA_VERSION;
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
 
     #[test]
@@ -753,6 +787,21 @@ mod tests {
         assert_eq!(record, back);
     }
 
+    fn sample_hygiene() -> HygieneReport {
+        HygieneReport {
+            rules: HygieneRule::ALL
+                .iter()
+                .map(|rule| HygieneRuleStatus {
+                    rule: *rule,
+                    level: HygieneLevel::Ok,
+                    findings: 0,
+                })
+                .collect(),
+            findings: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
     #[test]
     fn project_snapshot_round_trips_through_json() {
         let snapshot = ProjectSnapshot {
@@ -762,10 +811,15 @@ mod tests {
             default_branch: Some("main".to_string()),
             worktrees: vec![sample_worktree()],
             artifacts: vec![sample_artifact()],
+            hygiene: sample_hygiene(),
             warnings: vec!["size measurement timed out for .nuxt".to_string()],
         };
         let json = serde_json::to_string(&snapshot).expect("serialize snapshot");
-        assert!(json.contains("\"schema_version\":2"));
+        assert!(json.contains("\"schema_version\":3"));
+        // The audit travels with the snapshot: a consumer that ignores it would show
+        // a repository with no compliance report and no sign that one was missing.
+        assert!(json.contains("\"hygiene\""));
+        assert!(json.contains("\"rules\""));
         let back: ProjectSnapshot = serde_json::from_str(&json).expect("deserialize snapshot");
         assert_eq!(snapshot, back);
     }

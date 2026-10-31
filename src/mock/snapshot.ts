@@ -1,7 +1,13 @@
 import type {
   ActivityEvent,
   ArtifactRecord,
+  DetailArg,
   HistoryEntry,
+  HygieneFinding,
+  HygieneLevel,
+  HygieneReport,
+  HygieneRule,
+  HygieneRuleStatus,
   ProjectSnapshot,
   Reason,
   WorktreeRecord
@@ -28,6 +34,167 @@ const mockScanWarning =
 const mockCoverageWarning =
   "The size of coverage under the main worktree timed out; only the size is unknown, the rebuildable judgement stands and the item stays Safe to delete.";
 
+// ---- sample policy audit ----------------------------------------------------
+//
+// The browser preview has no repository to audit, so this is the report a real
+// scan of this layout would produce: four worktrees beside the repository rather
+// than under `.worktree/`, one of them past the 30-day ceiling, build output next
+// to the manifests, and a volume two points above the freeze line. The roll-up is
+// computed from the findings here because sample data has to stay self-consistent;
+// the real roll-up happens in `crates/worktree-core/src/hygiene.rs` and the front
+// end never derives a level of its own.
+
+const HYGIENE_ORDER: HygieneRule[] = [
+  "L1",
+  "L2",
+  "L3",
+  "L4",
+  "L5",
+  "L6",
+  "L7",
+  "T1",
+  "T2",
+  "T3",
+  "T4",
+  "T5",
+  "B1",
+  "B1.1",
+  "B2",
+  "B3",
+  "B4",
+  "B5",
+  "Q1",
+  "Q2",
+  "Q3",
+  "X1"
+];
+
+function hygieneFinding(
+  rule: HygieneRule,
+  level: HygieneLevel,
+  subject: string,
+  evidence: string,
+  args: Record<string, DetailArg>,
+  waivedUntil?: string
+): HygieneFinding {
+  return {
+    rule,
+    level,
+    subject,
+    evidence,
+    args,
+    ...(waivedUntil === undefined ? {} : { waived_until: waivedUntil })
+  };
+}
+
+function hygieneRules(findings: HygieneFinding[]): HygieneRuleStatus[] {
+  const rank: Record<HygieneLevel, number> = { ok: 0, unknown: 1, advisory: 2, violation: 3 };
+  return HYGIENE_ORDER.map((rule) => {
+    const mine = findings.filter((finding) => finding.rule === rule);
+    const level = mine.reduce<HygieneLevel>(
+      (worst, finding) => (rank[finding.level] > rank[worst] ? finding.level : worst),
+      "ok"
+    );
+    return { rule, level, findings: mine.length };
+  });
+}
+
+function notChecked(rule: HygieneRule, evidence: string): HygieneFinding {
+  return hygieneFinding(rule, "unknown", mockRoot, evidence, { state: "not_checkable" });
+}
+
+const mockHygieneFindings: HygieneFinding[] = [
+  hygieneFinding("L1", "violation", `${mockRoot}--cursor-perf`, `declared root: ${mockRoot}/.worktree`, {
+    state: "outside_repository",
+    expected: `${mockRoot}/.worktree`
+  }),
+  hygieneFinding("L1", "violation", `${mockRoot}--codex-fix-ble`, `declared root: ${mockRoot}/.worktree`, {
+    state: "outside_repository",
+    expected: `${mockRoot}/.worktree`
+  }),
+  hygieneFinding("L1", "violation", `${mockRoot}--claude-ui`, `declared root: ${mockRoot}/.worktree`, {
+    state: "outside_repository",
+    expected: `${mockRoot}/.worktree`
+  }),
+  hygieneFinding("T4", "violation", `${mockRoot}--cursor-perf`, `directory created at ${daysAgo(41)}`, {
+    state: "past_ceiling",
+    days: 41,
+    ceiling: 30
+  }),
+  hygieneFinding("B1", "violation", `${mockRoot}/node_modules`, `not under ${mockRoot}/build-cache/: node_modules`, {
+    state: "outside_declared",
+    kind: "node_modules"
+  }),
+  // The one rule whose id carries a dot. It is in the sample on purpose: the
+  // message table cannot hold a dotted key, so this is the id most likely to
+  // render as a bare `B1.1` with no sentence beside it.
+  hygieneFinding("B1.1", "advisory", `${mockRoot}/target`, "git status --porcelain: ?? target/", {
+    state: "untracked_in_status",
+    kind: "target"
+  }),
+  hygieneFinding(
+    "L5",
+    "violation",
+    mockRoot,
+    ".git/info/exclude:3: /.worktree/ (for .worktree/__probe__)",
+    {
+      state: "local_only",
+      entry: "/.worktree/",
+      pattern: "/.worktree/",
+      source: ".git/info/exclude",
+      line: 3
+    }
+  ),
+  hygieneFinding("Q1", "advisory", mockRoot, "57 GB of 494 GB available (12%)", {
+    state: "warning",
+    percent: 12,
+    available: 57_000_000_000,
+    total: 494_000_000_000
+  }),
+  hygieneFinding("T2", "advisory", `${mockRoot}--claude-ui`, "merged into the default branch: claude/ui", {
+    state: "merged_still_present",
+    branch: "claude/ui"
+  }),
+  hygieneFinding("T3", "advisory", `${mockRoot}--cursor-perf`, `last commit at ${daysAgo(9)}`, {
+    state: "stale",
+    days: 9,
+    dirty: 0,
+    untracked: 0
+  }),
+  hygieneFinding("B2", "advisory", `${mockRoot}/build-cache`, "remote-mic-app--claude-ui, remote-mic-app--cursor-perf", {
+    state: "missing_slots",
+    count: 2,
+    slots: "remote-mic-app--claude-ui, remote-mic-app--cursor-perf"
+  }),
+  hygieneFinding("X1", "advisory", `${mockRoot}/.claude/worktrees/payout-legal-name`, ".worktree-keep:4: expired 2026-09-30", {
+    state: "dangling",
+    line: 4
+  }),
+  // One accepted exception, so the page shows what a waiver looks like: the path
+  // stays, the reason is on record, and the date it stops applying is visible.
+  hygieneFinding(
+    "B1",
+    "ok",
+    `${mockRoot}/coverage`,
+    `not under ${mockRoot}/build-cache/: coverage`,
+    { state: "outside_declared", kind: "coverage" },
+    "2026-12-31"
+  ),
+  notChecked("L2", "a second clone of this repository, if one exists, is not inside the scanned path"),
+  notChecked("L6", "git clean is not logged, so no scan can see a command that has already run"),
+  notChecked("L7", "editor search and platform indexing are configured outside the repository"),
+  notChecked("T5", "a session's exit is not recorded anywhere a scan can read"),
+  notChecked("B3", "which dependencies a build shares is decided by its own configuration"),
+  notChecked("B4", "whether something reads the cache as an input cannot be established by reading it"),
+  notChecked("Q3", "admission runs before creation; a scan only sees what already exists")
+];
+
+const mockHygiene: HygieneReport = {
+  rules: hygieneRules(mockHygieneFindings),
+  findings: mockHygieneFindings,
+  warnings: []
+};
+
 export const mockSnapshot: ProjectSnapshot = {
   // Never hand-write this number: the Rust core defines the same constant
   // (crates/worktree-core/src/lib.rs) and src/architecture.test.ts fails when the
@@ -53,7 +220,7 @@ export const mockSnapshot: ProjectSnapshot = {
       behind: 0,
       has_upstream: true,
       merged_into_default: true,
-      stash_count: 0,
+      stash_count: 1,
       last_updated_at: daysAgo(0),
       agent: null,
       size_bytes: 486_000_000,
@@ -77,7 +244,7 @@ export const mockSnapshot: ProjectSnapshot = {
       behind: 0,
       has_upstream: true,
       merged_into_default: true,
-      stash_count: 0,
+      stash_count: 1,
       last_updated_at: daysAgo(26),
       agent: "codex",
       size_bytes: 1_900_000_000,
@@ -101,7 +268,7 @@ export const mockSnapshot: ProjectSnapshot = {
       behind: 0,
       has_upstream: true,
       merged_into_default: false,
-      stash_count: 0,
+      stash_count: 1,
       last_updated_at: daysAgo(1),
       agent: "claude",
       size_bytes: 1_100_000_000,
@@ -132,7 +299,6 @@ export const mockSnapshot: ProjectSnapshot = {
       size_bytes: 2_400_000_000,
       safety: assess([
         { code: "wt.unmerged", severity: "Review", text: "not merged into main", evidence: "merge-base determines it is not an ancestor" },
-        { code: "wt.stash", severity: "Review", text: "has stash entries", evidence: "1 stash entry" },
         { code: "wt.recent_activity", severity: "Review", text: "changed within the last 7 days", evidence: "last activity: 2 days ago" }
       ])
     },
@@ -156,7 +322,7 @@ export const mockSnapshot: ProjectSnapshot = {
       behind: 1,
       has_upstream: true,
       merged_into_default: false,
-      stash_count: 0,
+      stash_count: 1,
       last_updated_at: daysAgo(11),
       agent: null,
       size_bytes: 640_000_000,
@@ -180,7 +346,7 @@ export const mockSnapshot: ProjectSnapshot = {
       behind: 0,
       has_upstream: true,
       merged_into_default: true,
-      stash_count: 0,
+      stash_count: 1,
       last_updated_at: daysAgo(58),
       agent: null,
       size_bytes: 0,
@@ -506,7 +672,8 @@ export const mockSnapshot: ProjectSnapshot = {
         { code: "af.git_ignored", severity: "Safe", text: "ignored by .gitignore", evidence: ".gitignore:15" }
       ])
     }
-  ] as ArtifactRecord[]
+  ] as ArtifactRecord[],
+  hygiene: mockHygiene
 };
 
 /** Sample user actions for the browser preview, newest last like the real log. */
@@ -590,7 +757,7 @@ export const scanTrace = [
   "git worktree list --porcelain -z",
   "status --porcelain=v2 --branch @ remote-mic-app--claude-ui",
   "merge-base --is-ancestor 9de04f1 main @ remote-mic-app--cursor-perf",
-  "stash list --format=%gd @ remote-mic-app--cursor-perf",
+  "stash list --format=%gd @ remote-mic-app → 1 entry, repository-wide",
   "scan remote-mic-app--codex-fix-ble/target …",
   "scan remote-mic-app--cursor-perf/target …",
   "check-ignore remote-mic-app/.turbo",

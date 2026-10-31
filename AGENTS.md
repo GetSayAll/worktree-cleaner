@@ -46,10 +46,12 @@ when the language changes. `locale.test.ts` fails if a table's keys differ.
 | the artifact verdict, or the recognised directory names | `crates/worktree-core/src/artifact.rs` | D7, D8 |
 | executing a plan | `crates/worktree-core/src/cleanup.rs` | D5, D6, D11, D14, D18 |
 | the audit log | `crates/worktree-core/src/log.rs` | D15 |
+| a disk-hygiene rule, the state it reports, or what it reads | `crates/worktree-core/src/hygiene.rs` **and** the rule table in `docs/DISK_HYGIENE.md`, in both languages | D24 — the audit is advisory and never reaches a deletion decision. The Rust test compiles the policy document in and fails when the rule list drifts |
+| a hygiene finding's wording, or the fix line under it | `src/i18n/en.ts` and every other table, under `hygiene.states` keyed by rule; `src/views/HygieneView.vue` renders it | D23, and §3 — a table key may not contain a dot, so `B1.1` is `B11` in the tables and `hygieneRuleKey` is the only mapping |
 | a field of a contract type | `crates/worktree-core/src/lib.rs` **and** `src/types.ts` | §3 — `src/architecture.test.ts` fails if they disagree |
 | an IPC command | `src-tauri/src/lib.rs`, plus `capabilities/default.json` for its permissions, plus `src/platform.ts` | §2 — the dependency direction is `src/` → IPC → `src-tauri/` → `worktree-core`, never back |
 | a user-visible string | `src/i18n/en.ts` **and** every other table under `src/i18n/` | D23 — `locale.test.ts` fails if the key sets differ |
-| what a list row shows, page width, or table columns | `src/styles.css`, and the row markup in `src/views/*.vue` (`item-row` for the three list pages, `cell-*` for the two tables left) | §7 decisions 5 and 6 — `pnpm test:layout` checks margins, row fit and name wrapping in a real browser |
+| what a list row shows, page width, or table columns | `src/styles.css`, and the row markup in `src/views/*.vue` (`item-row` for the list pages, `cell-*` for the two tables left) | §7 decisions 5 and 6 — `pnpm test:layout` checks margins, row fit and name wrapping in a real browser |
 | what the UI does with scan or execution results | `src/state.ts`, through `src/platform.ts` | §2 — the front end never re-makes a decision (D9) |
 
 ## The gate
@@ -83,7 +85,11 @@ before adding another.
 - Product design and decision tables: `docs/PRODUCT_PLAN.md`.
 - Development constraints and acceptance criteria: `docs/DEV_CONTRACT.md`.
   Implementation must follow that file.
-- Changes touching D1–D23, field contracts, or reason-code semantics require the
+- The disk-hygiene policy the audit implements: `docs/DISK_HYGIENE.md`, with
+  `DISK_HYGIENE.zh-CN.md` kept in step. Its §8 says what the audit reads for each
+  rule and what it cannot see; a rule that cannot be observed from inside one
+  repository is reported as `unknown`, never as met.
+- Changes touching D1–D24, field contracts, or reason-code semantics require the
   documentation change to land in the same commit.
 - UI structure and information architecture follow the frozen design under `src/`.
   The desktop shell reads real scan results over Tauri IPC and writes the audit

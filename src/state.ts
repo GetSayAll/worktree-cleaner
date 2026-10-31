@@ -34,6 +34,7 @@ export type ViewKey =
   | "overview"
   | "worktrees"
   | "artifacts"
+  | "hygiene"
   | "plan"
   | "result"
   | "history"

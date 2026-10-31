@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SNAPSHOT_SCHEMA_VERSION } from "./types";
+import { hygieneRuleKey } from "./format";
 import { en } from "./i18n/en";
 import { zhCN } from "./i18n/zh-CN";
 
@@ -92,7 +93,8 @@ describe("the Rust-to-TypeScript field contract", () => {
   const core = {
     "lib.rs": readFileSync(join(coreDir, "lib.rs"), "utf8"),
     "cleanup.rs": readFileSync(join(coreDir, "cleanup.rs"), "utf8"),
-    "reason.rs": readFileSync(join(coreDir, "reason.rs"), "utf8")
+    "reason.rs": readFileSync(join(coreDir, "reason.rs"), "utf8"),
+    "hygiene.rs": readFileSync(join(coreDir, "hygiene.rs"), "utf8")
   };
 
   const structs: Array<[string, keyof typeof core]> = [
@@ -106,7 +108,10 @@ describe("the Rust-to-TypeScript field contract", () => {
     ["ExecutionOutcome", "cleanup.rs"],
     ["Reason", "reason.rs"],
     ["SafetyAssessment", "reason.rs"],
-    ["ActivityEvent", "lib.rs"]
+    ["ActivityEvent", "lib.rs"],
+    ["HygieneFinding", "hygiene.rs"],
+    ["HygieneRuleStatus", "hygiene.rs"],
+    ["HygieneReport", "hygiene.rs"]
   ];
 
   for (const [name, file] of structs) {
@@ -204,5 +209,102 @@ describe("the Rust-to-TypeScript field contract", () => {
     expect([...tsActions].sort()).toEqual([...rustActions].sort());
     expect(tableCodes(en).sort()).toEqual([...rustActions].sort());
     expect(tableCodes(zhCN).sort()).toEqual([...rustActions].sort());
+  });
+
+  it("keeps the hygiene rule list, its type and its copy in step", () => {
+    // Three places, as above: the identifier the core sends, the union the front
+    // end types it as, and the two tables that give it a title and a fix.
+    const rustRules = [...core["hygiene.rs"].matchAll(/=> "([A-Z][0-9.]*)"/g)].map(
+      (match) => match[1]
+    );
+
+    const block = types.match(/export type HygieneRule =([\s\S]*?);/);
+    expect(block, "HygieneRule not found in src/types.ts").not.toBeNull();
+    const tsRules = [...block![1].matchAll(/"([A-Z][0-9.]*)"/g)].map((match) => match[1]);
+
+    expect(rustRules.length).toBeGreaterThan(20);
+    expect([...tsRules].sort()).toEqual([...rustRules].sort());
+    for (const table of [en, zhCN]) {
+      // `B1.1` reaches the UI with its dot; the table spells it `B11` because a
+      // key may not carry one (see `hygieneRuleKey`).
+      expect(Object.keys(table.hygiene.rules).sort()).toEqual(rustRules.map(hygieneRuleKey).sort());
+      expect(Object.keys(table.hygiene.fixes).sort()).toEqual(rustRules.map(hygieneRuleKey).sort());
+    }
+  });
+
+  it("gives every hygiene situation a sentence under the rule that raises it", () => {
+    // A finding with no entry falls back to its evidence line: true, but it leaves
+    // the reader without the one thing the table is for. The states sit under the
+    // rule they belong to, so the two have to agree twice over — the rule has to
+    // exist and the situation has to be filed under it.
+    const source = core["hygiene.rs"];
+
+    // Three findings choose their situation in a `let` before they are built, so
+    // a scan of `.state("…")` alone would miss them; those definitions are read
+    // too, and attributed to the finding that follows them.
+    const assigned = [...source.matchAll(/let state = [^;]*;/g)].map((match) => ({
+      at: match.index ?? 0,
+      states: [...match[0].matchAll(/"([a-z0-9_]+)"/g)].map((inner) => inner[1])
+    }));
+
+    const rustPairs: string[] = [];
+    for (const call of source.matchAll(/HygieneFinding::new\(\s*HygieneRule::([A-Z][0-9.]*)/g)) {
+      const rule = hygieneRuleKey(call[1]);
+      const from = (call.index ?? 0) + call[0].length;
+      const stateCall = /\.state\(([^)]*)\)/.exec(source.slice(from, from + 900));
+      if (!stateCall) continue;
+      const argument = stateCall[1].trim();
+      if (argument.startsWith('"')) {
+        rustPairs.push(`${rule}.${argument.replace(/"/g, "")}`);
+        continue;
+      }
+      const at = from + stateCall.index;
+      const definition = assigned.filter((entry) => entry.at < at).pop();
+      for (const situation of definition?.states ?? []) rustPairs.push(`${rule}.${situation}`);
+    }
+    // The unobservable rules are built from a table rather than one call each, so
+    // their pairing is read from that table.
+    const unobservable = /const NOT_CHECKABLE[\s\S]*?\n\];/.exec(source)?.[0] ?? "";
+    for (const rule of unobservable.matchAll(/HygieneRule::([A-Z][0-9.]*)/g)) {
+      rustPairs.push(`${hygieneRuleKey(rule[1])}.not_checkable`);
+    }
+
+    const rustStates = [
+      ...new Set([
+        ...[...source.matchAll(/\.state\("([a-z0-9_]+)"\)/g)].map((match) => match[1]),
+        ...assigned.flatMap((entry) => entry.states)
+      ])
+    ];
+    const pairs = (table: typeof en): string[] =>
+      Object.entries(table.hygiene.states).flatMap(([rule, entries]) =>
+        Object.keys(entries).map((situation) => `${rule}.${situation}`)
+      );
+
+    expect(rustPairs.length).toBeGreaterThan(30);
+    expect(rustStates.length).toBeGreaterThan(30);
+    for (const table of [en, zhCN]) {
+      // The core's sentence is the one that must exist. A situation filed under
+      // the wrong rule — the plausible mistake, since the names are shared across
+      // families — shows up here and nowhere else.
+      const missing = rustPairs.filter((pair) => !pairs(table).includes(pair));
+      expect(missing.sort()).toEqual([]);
+      expect([...new Set(pairs(table).map((pair) => pair.slice(pair.indexOf(".") + 1)))]
+        .sort())
+        .toEqual([...rustStates].sort());
+    }
+
+    // Every rule key is one this build knows: a typo would otherwise leave a
+    // situation with two sentences and its real one with none, and the pair
+    // comparison above could not tell.
+    const block = types.match(/export type HygieneRule =([\s\S]*?);/);
+    const rules = [...(block?.[1] ?? "").matchAll(/"([A-Z][0-9.]*)"/g)].map((match) =>
+      hygieneRuleKey(match[1])
+    );
+    expect(rules.length).toBeGreaterThan(20);
+    for (const table of [en, zhCN]) {
+      for (const rule of Object.keys(table.hygiene.states)) {
+        expect(rules.includes(rule), `${rule} is not a known rule id`).toBe(true);
+      }
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { messages } from "./i18n";
-import type { DetailArg, DetailCode, Reason, ReasonCode } from "./types";
+import type { DetailArg, DetailCode, HygieneFinding, Reason, ReasonCode } from "./types";
 
 const KB = 1024;
 
@@ -118,6 +118,54 @@ export function detailArg(arg: DetailArg | undefined): string {
   if (typeof arg === "number") return formatCount(arg);
   if (typeof arg === "boolean") return arg ? messages.detail.yes : messages.detail.no;
   return arg;
+}
+
+/**
+ * The reader-facing wording of one policy finding.
+ *
+ * The core sends the rule, the situation and the raw values; which sentence they
+ * become belongs to the message table, so a Chinese screen never carries an English
+ * decision. A situation this build has no copy for falls back to the evidence line,
+ * which is a fact and stays true either way — an id would mean nothing to a reader,
+ * and a blank row would look like the finding had gone away.
+ */
+export function hygieneText(finding: HygieneFinding): string {
+  const state = typeof finding.args.state === "string" ? finding.args.state : "";
+  const table: Record<string, Record<string, string> | undefined> = messages.hygiene.states;
+  const copy = table[hygieneRuleKey(finding.rule)]?.[state];
+  if (typeof copy !== "string") return finding.evidence;
+  return copy.replace(/\{(\w+)\}/g, (_, name: string) => hygieneArg(name, finding.args[name]));
+}
+
+/**
+ * The message-table key for a hygiene rule.
+ *
+ * `B1.1` is the one rule whose id carries a dot, and the locale test walks a
+ * table by splitting a leaf path on dots — so a dotted key would be read as one
+ * level deeper than it is and the copy would go missing in every language. The
+ * table spells it `B11`; the wire format keeps the dot, because that is what the
+ * policy document calls it.
+ */
+export function hygieneRuleKey(rule: string): string {
+  return rule.replace(/\./g, "");
+}
+
+/**
+ * One value of a finding, written the way this language writes it.
+ *
+ * Byte counts arrive as raw numbers and are formatted here, for the same reason
+ * `detailArg` does it: a size spelled in Rust would freeze an English unit into a
+ * Chinese screen. The key decides, because the wire format is untagged — `Bytes`,
+ * `Count` and `Percent` all arrive as plain numbers.
+ */
+function hygieneArg(name: string, value: DetailArg | undefined): string {
+  if (name.endsWith("_bytes") || name === "size" || name === "available" || name === "total") {
+    return typeof value === "number" ? formatBytes(value) : messages.common.unknown;
+  }
+  if (name === "percent") {
+    return typeof value === "number" ? `${formatCount(value)}%` : messages.common.unknown;
+  }
+  return detailArg(value);
 }
 
 /**

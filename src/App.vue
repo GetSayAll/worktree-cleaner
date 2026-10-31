@@ -26,6 +26,7 @@ import ScanningView from "./views/ScanningView.vue";
 import OverviewView from "./views/OverviewView.vue";
 import WorktreesView from "./views/WorktreesView.vue";
 import ArtifactsView from "./views/ArtifactsView.vue";
+import HygieneView from "./views/HygieneView.vue";
 import CleanupPlanView from "./views/CleanupPlanView.vue";
 import ResultView from "./views/ResultView.vue";
 import HistoryView from "./views/HistoryView.vue";
@@ -37,6 +38,7 @@ const VIEWS = {
   overview: OverviewView,
   worktrees: WorktreesView,
   artifacts: ArtifactsView,
+  hygiene: HygieneView,
   plan: CleanupPlanView,
   result: ResultView,
   history: HistoryView,
@@ -52,6 +54,7 @@ const NAV: Array<{ key: ViewKey; label: keyof Messages["nav"] }> = [
   { key: "overview", label: "overview" },
   { key: "worktrees", label: "worktrees" },
   { key: "artifacts", label: "artifacts" },
+  { key: "hygiene", label: "hygiene" },
   { key: "plan", label: "plan" },
   { key: "result", label: "result" },
   { key: "history", label: "history" },
@@ -74,6 +77,12 @@ function navCount(key: ViewKey): string {
       return `${worktrees.value.length}`;
     case "artifacts":
       return `${artifacts.value.length}`;
+    case "hygiene": {
+      // What is broken, not what was checked: a page whose badge counted 22
+      // compliant rules would say nothing a reader needs.
+      const broken = snapshot.value?.hygiene.rules.filter((rule) => rule.level === "violation").length ?? 0;
+      return broken > 0 ? `${broken}` : "";
+    }
     case "plan": {
       const picked = selectedSummary.value.worktrees + selectedSummary.value.artifacts;
       return picked > 0 ? `${picked}` : "";

@@ -54,8 +54,8 @@ data, not UI chrome, and stay English. See D23 and section 3.
 
 ## 1. Immutable design decisions
 
-Numbered D1–D23. Each one is a hard constraint; violating it is an implementation
-bug. D17–D23 are form-factor and repository-wide constraints.
+Numbered D1–D24. Each one is a hard constraint; violating it is an implementation
+bug. D17–D24 are form-factor and repository-wide constraints.
 
 | ID | Decision | Why | How to verify |
 |---|---|---|---|
@@ -82,6 +82,7 @@ bug. D17–D23 are form-factor and repository-wide constraints.
 | D21 | No form may weaken the existing constraints: D5 (Trash only) and D6 (`git worktree remove` only) hold in every form | Changing the form is not a reason to relax safety | One verification record per form, each covering D5 and D6 |
 | D22 | The report web page must open with no network and no server (assets inlined) and must not introduce a runtime backend dependency | The availability of a read-only form should not depend on the environment | Open it offline over `file://` and complete a full review |
 | D23 | **English for everything that ships as open source.** Code, comments, identifiers, documentation, commit messages, file names, and user-visible strings in the repository are English, and English is the default and the source locale. The one exception is UI locale data under `src/i18n/`: the English source table plus one translated table per additional locale, keys identical to the source table, file names and keys in English. Content deliberately kept out of the open-source distribution may be written in Chinese | This is an international open-source project; a mixed-language repository is not reviewable by the community it targets | A scan of tracked files finds no non-English natural language outside `src/i18n/`; every commit message reads in English; a test fails when any locale table's keys differ from `en.ts` |
+| D24 | **The disk-hygiene audit is advisory and never an input to a deletion decision.** It is read-only (D1), it reports `Unknown` — never "met" — for every rule it cannot observe from inside one repository, and no part of the cleanup path may read it. A rule's level is the worst finding it has; `Ok` means a check ran and found nothing. The rule set is the one in `docs/DISK_HYGIENE.md`, and its ids, its situations and its copy are pinned to that document by test | A cleanup verdict and a policy report answer different questions. Letting one move the other would either block a removal for a reason the user cannot act on in that step, or read a policy breach as permission to delete. And a rule reported as met when nothing was checked is D3's failure mode wearing a different hat | `cleanup.rs` builds a plan from worktree and artifact records only; a plan built alongside a report full of violations is unchanged. A test asserts the audit's rule ids equal the policy document's table, and that only the rules the document itself marks unobservable are reported `Unknown` |
 
 ---
 
@@ -124,14 +125,33 @@ Form C: Tauri desktop shell ── IPC ──────────┤
 - Reason codes use the `wt.*` / `af.*` form (worktree / artifact). They are
   **additive only**: a semantic change requires a new code, and retired codes are
   marked deprecated but never reused.
+- Hygiene findings use a **separate** identifier family — `L1`–`L7`, `T1`–`T5`,
+  `B1`, `B1.1`, `B2`–`B5`, `Q1`–`Q3`, `X1` — and the two families must not be
+  mixed: a reason code answers "may I delete this", a hygiene rule answers "is the
+  repository shaped the way the policy requires". Both are additive on the same
+  terms. The rule list, the situations a rule can be in, and the one-line fix for
+  each come from `docs/DISK_HYGIENE.md`: the Rust side compiles that document into
+  its tests and asserts the table there equals `HygieneRule::ALL`, and
+  `src/architecture.test.ts` pins the TypeScript union, both locale tables and the
+  set of `(rule, situation)` pairs to the same source.
+- A message-table key may not contain a dot, because the locale test walks a table
+  by splitting a leaf path on dots. `B1.1` therefore lives in the tables as `B11`,
+  and `hygieneRuleKey` in `src/format.ts` is the only place the two spellings are
+  mapped. The wire format keeps the dot: that is what the policy document calls the
+  rule, and the front end must not invent a different name for it.
 - `src/types.ts` matches the Rust structs field for field. A change on either side
   must be mirrored on the other side within the same commit, and
   `src/architecture.test.ts` now enforces it mechanically: it reads the field names
   out of both sources and fails when they disagree, for `ProjectSnapshot`,
   `WorktreeRecord`, `ArtifactRecord`, `CleanupPlan`, `ResultEntry`, `HistoryEntry`,
-  `ScanOptions`, `ExecutionOutcome`, `Reason` and `SafetyAssessment`, and compares
-  the `wt.*` / `af.*` code lists the same way. The Rust side additionally asserts a
+  `ScanOptions`, `ExecutionOutcome`, `Reason`, `SafetyAssessment`,
+  `HygieneFinding`, `HygieneRuleStatus` and `HygieneReport`, and compares the
+  `wt.*` / `af.*` code lists the same way. The Rust side additionally asserts a
   serialise/deserialise round trip on a sample.
+- **Adding a field to `ProjectSnapshot` bumps `SNAPSHOT_SCHEMA_VERSION`** (D20).
+  It is 3 since `hygiene` was added, and the constant is defined twice on purpose —
+  the Rust core owns the format, the front end reads it — with a test that fails
+  when the two numbers drift.
 - Optional numbers use `Option<u64>` (front end: `number | null`):
   **"cannot be measured" must be distinguishable from "0"**, and the UI shows
   `unknown` and `0 B` respectively.
@@ -298,7 +318,10 @@ cleanup plan as JSON.
 5. the exported cleanup plan JSON matches the plan object and is accepted by the CLI
    directly;
 6. `src/mock/` is no longer referenced by production code, `vue-tsc --noEmit` is at
-   zero errors, and the build passes.
+   zero errors, and the build passes;
+7. the disk-hygiene page reads the same snapshot, calls a rule met only where a check
+   ran, and reports the rules no scan can observe as "not checked" with the audit's
+   reason — never as met (D24).
 
 ### P4 · Local cleanup execution and logging (the execution side of Form A)
 
@@ -363,7 +386,7 @@ guarantee is named next to it.
 
 | Stage | Criterion | Status |
 |---|---|---|
-| P0 | 1 · `cargo test` green | Met — 141 unit tests plus four integration files (8 + 5 + 3 + 4) |
+| P0 | 1 · `cargo test` green | Met — 228 unit tests plus four integration files (11 + 5 + 5 + 4) |
 | P0 | 2 · every `wt.*` reason code has a test case | Met — all 15 codes in the decision table have a positive and a negative case, every reason asserts non-empty `text` and `evidence`, and `wt.stash` — retained for old audit logs, no longer emitted — has a test asserting it cannot reach a record |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 86 entries. The floor is set to the current count rather than left at 60, so the corpus cannot shrink unnoticed; a generated property test covers 20,000 random paths on top |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
@@ -381,6 +404,7 @@ guarantee is named next to it.
 | P3 | 4 · a higher `schema_version` produces an upgrade message | Blocked — the gate belongs with P2's reader |
 | P3 | 5 · the exported plan is accepted by the CLI directly | Blocked — no CLI yet |
 | P3 | 6 · `src/mock/` is not referenced by production code | **Renegotiated** — the preview is part of the shipped bundle, so `mock/` stays by design and its pages are labelled as sample data; `vue-tsc --noEmit` is at zero errors and the build passes (decision 7) |
+| P3 | 7 · the hygiene page calls a rule met only where a check ran, and reports what it cannot see as not checked (D24) | Met — the audit's rule list, its situations and its copy are pinned to `docs/DISK_HYGIENE.md` by a Rust test that compiles the document in and a front-end test that walks both locale tables; the seven rules no scan can observe report `not checked` with the audit's own reason; `cleanup.rs` does not read the report, and a plan is unchanged by it |
 | P4 | 1 · macOS: the item is found in the Trash afterwards (D5) | Met — an integration test moves a real directory through the real Trash and takes it back out |
 | P4 | 2 · no leftovers after `git worktree remove`, with `prune` as a follow-up (D6) | Met |
 | P4 | 3 · untracked files force confirmation, then `--force` | Met — `--force` is re-derived from the re-check and never parsed out of the plan, and the plan page shows the file list line by line before it lets the run start |
@@ -405,7 +429,7 @@ naming, log wording, style details, and how unit tests are organised.
 **Documentation change required first** (with the justification stated in the commit
 message):
 
-- any of D1–D23 in section 1;
+- any of D1–D24 in section 1;
 - any field addition, removal, or type change in `src/types.ts` or the Rust structs
   (including `schema_version`);
 - reason-code semantics (adding a code belongs here, and requires updating the
@@ -417,7 +441,10 @@ message):
 
 - providing any deletion path that bypasses the Trash;
 - moving decision logic into the front end;
-- turning `cannot_verify` / `uncertain` into `Safe`;
+- turning `cannot_verify` / `uncertain` into `Safe`, and equally into `Ok` in the
+  hygiene report;
+- letting a hygiene finding move a cleanup verdict, or letting the cleanup path
+  read the hygiene report (D24);
 - removing the `evidence` field from a reason;
 - letting the scanning stage write anything other than the log;
 - committing non-English content outside the locale tables under `src/i18n/` (D23).
@@ -596,6 +623,42 @@ arbitrary later.
     the UI follows the system language: a check that clicks a button labelled
     "Settings" breaks on a Chinese machine, and this repository runs on one. A
     selector is the only thing about a button that a translation cannot change.
+
+**Decided (2026-10-24)**
+
+1. **The disk-hygiene policy is checked from inside the repository, and the report
+   never moves a deletion (D24).** `docs/DISK_HYGIENE.md` was a document; it is now
+   also a pass over the scan's own worktree and artifact records, plus two more
+   questions to Git (`git check-ignore -v`, the volume's free space) and one walk per
+   cache slot. Fifteen of the twenty-two rules are observable that way. The other
+   seven — a second clone, `git clean` that already ran, editor indexes, a session's
+   exit, shared-versus-isolated dependencies, "disposable by construction", admission
+   before creation — are reported as `not checked` with the audit's own reason.
+   Reporting them as met would be D3's failure with a friendlier face: an
+   unobservable rule is unknown, and unknown is not a pass.
+2. **A rule's level is its worst finding, and a waiver is visible rather than
+   absent.** `Ok` means a check ran and found nothing, never a default. A path
+   accepted by `.worktree-keep` keeps its record, its evidence and the date its waiver
+   expires, and turns `Ok`; hiding it would make a written exception look like
+   compliance. The page is a list page like the other four — same row anatomy, same
+   `reason` chips — and gained one tone, `reason--neutral`, for `unknown`: tinting an
+   unmeasured rule green or red would each be a claim the audit did not make.
+3. **`git check-ignore` exit status 1 is an answer, not a failure.** It is how the
+   command says "no rule matches this path", which is precisely the finding the
+   ignore rule is about. Only a fatal error (128 — not a repository, an unusable
+   index) leaves the question unanswered, and only that becomes a scan warning. The
+   first version treated every non-zero exit as a failure and turned a clean
+   repository's "no ignore entry yet" into two warnings.
+4. **The Trash checks learned two things about the Trash itself.** macOS renames on a
+   name collision instead of overwriting, so a second `node_modules` arrives as
+   `node_modules 2` — a test that looks for the exact name finds nothing and reports
+   "the directory should have landed in the Trash; found []". And a marker shared by
+   every fixture in a test binary (`std::process::id()` alone) is a marker that one
+   test's cleanup can use to take another test's fixture, which is what made
+   `cleanup_execution_real_repo` fail three runs in six. The marker now carries the
+   fixture name inside brackets — brackets because the match is a substring test and
+   `bundled` is a prefix of `bundled-orphan` — and the lookup accepts the suffixed
+   spelling.
 
 **Proposals (reviewed, and settled)**
 
