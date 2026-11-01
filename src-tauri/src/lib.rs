@@ -166,6 +166,58 @@ async fn read_activity() -> Result<Vec<ActivityEvent>, String> {
     .map_err(|error| format!("the activity read did not finish: {error}"))
 }
 
+/// The accent colour the operating system is using, as `#rrggbb`.
+///
+/// The stylesheet cannot ask for this itself. Both keywords that look like they
+/// answer it — `-apple-system-control-accent` and `AccentColor` — parse in WebKit
+/// and both resolve to the default blue even when the user has chosen another
+/// accent: measured in a bare WKWebView on a machine where `NSColor.controlAccentColor`
+/// reports `#F7821B`. Chromium does honour `AccentColor` for the Windows accent, so
+/// the stylesheet keeps that as its own fallback and this command is what makes
+/// macOS follow the setting.
+///
+/// The value is read through `osascript` rather than `NSColor` directly: reaching
+/// AppKit from Rust means Objective-C message sends, and this crate denies
+/// `unsafe_code` (see the workspace lints). One process, about 120 ms, on the
+/// blocking pool. `None` means the caller keeps its own accent.
+#[tauri::command]
+async fn system_accent() -> Option<String> {
+    tauri::async_runtime::spawn_blocking(accent_from_system)
+        .await
+        .ok()
+        .flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn accent_from_system() -> Option<String> {
+    const SCRIPT: &str = r#"ObjC.import("AppKit"); var c = $.NSColor.controlAccentColor; var s = c.colorUsingColorSpace($.NSColorSpace.sRGBColorSpace); [Math.round(s.redComponent * 255), Math.round(s.greenComponent * 255), Math.round(s.blueComponent * 255)].join(",")"#;
+    let output = std::process::Command::new("osascript")
+        .args(["-l", "JavaScript", "-e", SCRIPT])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let channels = text
+        .trim()
+        .split(',')
+        .map(|channel| channel.trim().parse::<u8>().ok())
+        .collect::<Option<Vec<u8>>>()?;
+    match channels.as_slice() {
+        [red, green, blue] => Some(format!("#{red:02X}{green:02X}{blue:02X}")),
+        _ => None,
+    }
+}
+
+/// Windows takes its accent through the stylesheet's `AccentColor`, so there is
+/// nothing to ask the host for. Kept as a named function rather than an inline
+/// `None` so the two platforms read the same at the call site.
+#[cfg(not(target_os = "macos"))]
+fn accent_from_system() -> Option<String> {
+    None
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -178,7 +230,8 @@ pub fn run() {
             read_history,
             clear_log,
             log_activity,
-            read_activity
+            read_activity,
+            system_accent
         ])
         .run(tauri::generate_context!())
         .expect("error while running Worktree Cleaner");

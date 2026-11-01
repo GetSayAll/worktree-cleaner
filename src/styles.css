@@ -18,31 +18,101 @@
      after a declaration. The theme test parses these blocks with a plain
      regex, and such a comment is read as part of the next declaration name. */
 
+/* ---------- typefaces ----------
+   Two files, both SIL OFL 1.1, both subset to Latin: 48 KB and 40 KB.
+
+   Why ship a font at all. The system stack renders three different products - SF
+   Pro on macOS, Segoe UI on Windows, and whatever a Linux build would pick - and
+   this interface is mostly paths, branch names and figures, which is exactly the
+   text where those three differ most. Inter's figures are drawn to sit in a
+   column, so a size or a byte count stops shifting between rows; JetBrains Mono
+   keeps 0/O and 1/l/I apart, which is the difference between reading a short SHA
+   and guessing at one.
+
+   Chinese is deliberately not bundled. PingFang SC / Hiragino Sans GB / Microsoft
+   YaHei stay in the fallback list: on macOS that is the face the system would
+   pick anyway, and a CJK family would add megabytes to the repository to fix a
+   problem only Windows has.
+
+   `public/fonts/` rather than an import from `src/`: the browser preview inlines
+   the whole bundle into one HTML file that opens straight off the file system,
+   and only a path Vite leaves alone survives that. The licences sit beside the
+   files and are copied into the build with them. */
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- palette ----------
+   Two rules decide every colour here.
+
+   First, the interface is monochrome until a verdict needs a colour. The
+   structure - shell, cards, rows, dividers - is carried by three greys and a
+   hairline; `--safe`/`--review`/`--unsafe` are spent only on the marks, the dots
+   and the words that actually make a claim. A row that tints its own background
+   competes with the verdict beside it, and a page of tinted rows has no way left
+   to say "look here".
+
+   Second, the shell is the frame and the surface is the sheet. `--bg` is what
+   sits behind everything, `--surface` is what a card and the sidebar are made
+   of, and the difference between them - about four points of lightness - is what
+   separates a panel from the page without a shadow doing it. Both themes keep
+   that relationship in the same direction, so a card reads as a card in either.
+
+   Every token below is declared in this block and, where it is palette rather
+   than layout, restated in the two dark blocks. `src/theme.test.ts` fails if the
+   two dark copies drift or if one overrides a layout token. */
 :root {
-  --bg: #f4f5f7;
+  --bg: #f5f6f8;
   --surface: #ffffff;
   --surface-2: #fafbfc;
-  --surface-3: #f1f2f5;
-  --border: #e4e6ea;
-  --border-strong: #d2d6dd;
-  --text: #1a1d21;
-  --text-2: #5b6371;
-  --text-3: #8d95a3;
-  --accent: #2f5bd7;
-  --accent-weak: #eef2fd;
-  --accent-border: #c6d4f6;
-  --safe: #14713f;
-  --safe-bg: #e8f6ee;
-  --safe-border: #bfe3cf;
-  --review: #8a5a06;
-  --review-bg: #fdf4e3;
-  --review-border: #f0d9a8;
-  --unsafe: #a92622;
-  --unsafe-bg: #fdecea;
-  --unsafe-border: #f2c8c5;
-  --radius-sm: 6px;
+  --surface-3: #f0f2f5;
+  --border: #e5e7eb;
+  --border-strong: #d4d8de;
+  --text: #111418;
+  --text-2: #59616e;
+  --text-3: #747c8a;
+  /* One accent, and everything else mixed from it. The three shades used to be
+     picked by hand in the light block and again in each dark block, which is why
+     the accent could not follow the operating system: there was no single value
+     to change. `--accent` is now the only statement of hue, the system overrides
+     it where it can (see the @supports blocks below), and these are computed from
+     whatever it ends up being. */
+  --accent: #3a57d6;
+  --accent-weak: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  --accent-border: color-mix(in srgb, var(--accent) 36%, var(--border));
+  /* The accent as *text*. A fill can carry white or sit under a 12% wash at any
+     saturation, but a label drawn in the accent has to clear its own tinted
+     background: macOS orange (#F7821B) on its own 12% wash is about 2.7:1, which
+     is why this is pulled towards black for text and towards white in the dark
+     theme. Fills keep `--accent`; only the letters move. */
+  --accent-text: color-mix(in srgb, var(--accent) 78%, black);
+  --safe: #0d7a49;
+  --safe-bg: #e9f6ef;
+  --safe-border: #c4e6d5;
+  --review: #8d5a08;
+  --review-bg: #fdf5e5;
+  --review-border: #efdcb2;
+  --unsafe: #ad2a26;
+  --unsafe-bg: #fdeeed;
+  --unsafe-border: #f2cfcc;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.03);
+  --shadow-lift: 0 2px 4px rgba(16, 24, 40, 0.06), 0 6px 14px rgba(16, 24, 40, 0.06);
+  --ring: color-mix(in srgb, var(--accent) 20%, transparent);
+  --inset: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --radius-sm: 7px;
   --radius: 10px;
-  --radius-lg: 14px;
+  --radius-lg: 13px;
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -50,90 +120,180 @@
   --sp-5: 20px;
   --sp-6: 24px;
   --sp-7: 32px;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  /* ---------- type scale ----------
+     Eight steps, and no ninth. Every size in this file is one of these; a
+     `font-size` written as a number is a size that escaped the scale, and
+     `src/typography.test.ts` fails the build when one appears.
+
+     The scale is two regimes. Up to 16px the steps are 1px apart, because a data
+     tool needs a caption, a control and a paragraph that are close but distinct,
+     and the difference between 12 and 13 is what lets a 12px row meta sit under a
+     13px row name without either looking wrong. From 16px up the steps are 4px
+     apart - a page title, a figure and a hero are not read side by side, so they
+     can take a real jump.
+
+     12  caption   metadata, chips, evidence, table headers, sidebar fine print
+     13  ui        nav, buttons, inputs, table cells, row names
+     14  body      prose, banners, notices, key/value lists
+     16  title     card headings
+     18  lead      the welcome screen's one paragraph
+     22  page      page headings
+     26  metric    the figure on a stat card
+     28  hero      the welcome screen's title
+
+     12 rather than 10 is deliberate: below 12 the Chinese fallback stops holding
+     its shape, and most of this interface is read as text, not scanned as labels. */
+  --fs-caption: 12px;
+  --fs-ui: 13px;
+  --fs-body: 14px;
+  --fs-title: 16px;
+  --fs-lead: 18px;
+  --fs-page: 22px;
+  --fs-metric: 26px;
+  --fs-hero: 28px;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #16181c;
-    --surface: #1e2127;
-    --surface-2: #23272e;
-    --surface-3: #2a2e36;
-    --border: #313640;
-    --border-strong: #414852;
-    --text: #e9ebef;
-    --text-2: #a3abb8;
-    --text-3: #78808e;
-    --accent: #7d9cf5;
-    --accent-weak: #222c44;
-    --accent-border: #35446b;
-    --safe: #6ecf9a;
-    --safe-bg: #1b2f24;
-    --safe-border: #2c4a38;
-    --review: #e0b25e;
-    --review-bg: #332a17;
-    --review-border: #4d4023;
-    --unsafe: #f08b85;
-    --unsafe-bg: #36211f;
-    --unsafe-border: #552f2c;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --bg: #0e1013;
+    --surface: #15181d;
+    --surface-2: #1a1e24;
+    --surface-3: #232830;
+    --border: #262b33;
+    --border-strong: #363d47;
+    --text: #e7eaee;
+    --text-2: #99a2af;
+    --text-3: #7c8492;
+    --accent: #7d93fb;
+    --accent-text: color-mix(in srgb, var(--accent) 85%, white);
+    --safe: #4fce9b;
+    --safe-bg: #10241b;
+    --safe-border: #1e3b2c;
+    --review: #e6b96b;
+    --review-bg: #2a2114;
+    --review-border: #463616;
+    --unsafe: #f0847d;
+    --unsafe-bg: #2c1a19;
+    --unsafe-border: #4a2b28;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 20px rgba(0, 0, 0, 0.35);
+    --inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #16181c;
-  --surface: #1e2127;
-  --surface-2: #23272e;
-  --surface-3: #2a2e36;
-  --border: #313640;
-  --border-strong: #414852;
-  --text: #e9ebef;
-  --text-2: #a3abb8;
-  --text-3: #78808e;
-  --accent: #7d9cf5;
-  --accent-weak: #222c44;
-  --accent-border: #35446b;
-  --safe: #6ecf9a;
-  --safe-bg: #1b2f24;
-  --safe-border: #2c4a38;
-  --review: #e0b25e;
-  --review-bg: #332a17;
-  --review-border: #4d4023;
-  --unsafe: #f08b85;
-  --unsafe-bg: #36211f;
-  --unsafe-border: #552f2c;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --bg: #0e1013;
+  --surface: #15181d;
+  --surface-2: #1a1e24;
+  --surface-3: #232830;
+  --border: #262b33;
+  --border-strong: #363d47;
+  --text: #e7eaee;
+  --text-2: #99a2af;
+  --text-3: #7c8492;
+  --accent: #7d93fb;
+  --accent-text: color-mix(in srgb, var(--accent) 85%, white);
+  --safe: #4fce9b;
+  --safe-bg: #10241b;
+  --safe-border: #1e3b2c;
+  --review: #e6b96b;
+  --review-bg: #2a2114;
+  --review-border: #463616;
+  --unsafe: #f0847d;
+  --unsafe-bg: #2c1a19;
+  --unsafe-border: #4a2b28;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 20px rgba(0, 0, 0, 0.35);
+  --inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   color-scheme: dark;
+}
+
+/* ---------- the accent follows the operating system ----------
+   The two system colours below are the ones each engine actually paints with: WebKit
+   exposes the macOS accent as `-apple-system-control-accent`, Chromium exposes the
+   Windows accent as `AccentColor` (CSS Color 4). Neither engine knows the other's
+   keyword, and an engine that knows neither — a browser preview in Firefox, say —
+   keeps the fixed indigo above.
+
+   Two rules decide the shape of this block.
+
+   First, `@supports` rather than a cascade of three `--accent` declarations. Custom
+   properties do not drop an unknown value at parse time: `--accent: AccentColor`
+   would be stored verbatim, and the failure would surface where the value is used,
+   as an invalid paint rather than as a fallback. `@supports` asks the engine the
+   question at parse time instead.
+
+   Second, the selector list. These rules have to outrank the dark blocks that come
+   before them, and `:root` alone (0,1,0) loses to `:root[data-theme="dark"]` (0,2,0).
+   Naming all three states keeps the accent identical in every theme, which is what
+   "the same colour as the system" means — macOS does not switch accents for dark
+   mode either.
+
+   The derived shades above (`color-mix` on `--accent`) need no help: they are
+   computed from whatever this ends up being. */
+@supports (color: AccentColor) {
+  :root,
+  :root:not([data-theme="light"]),
+  :root[data-theme="dark"] {
+    --accent: AccentColor;
+  }
+}
+
+@supports (color: -apple-system-control-accent) {
+  :root,
+  :root:not([data-theme="light"]),
+  :root[data-theme="dark"] {
+    --accent: -apple-system-control-accent;
+  }
 }
 
 * { box-sizing: border-box; }
 
 /* The window is the frame, and only its content area scrolls. The app is a fixed
-   layout — sidebar beside a scrolling pane — so the page itself has nothing to
+   layout - sidebar beside a scrolling pane - so the page itself has nothing to
    scroll: a document-level scrollbar would drag the sidebar and the top bar off
    with it. `overflow: hidden` is what keeps the shell anchored. */
 html, body, #app { height: 100%; overflow: hidden; }
 
+/* 14px rather than 15: this is a data tool, and its longest line is a path
+   beside six short facts. One point down buys the row a column of breathing
+   room without making the prose pages feel small - the headings carry the
+   hierarchy, not the body text. */
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
-  font-size: 15px;
-  line-height: 1.55;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: var(--fs-body);
+  line-height: 1.6;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1;
 }
 
-h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
-h1 { font-size: 24px; }
-h2 { font-size: 19px; }
-h3 { font-size: 15px; }
+/* One type scale, three levels. Sizes are close together on purpose: the weight
+   and the tracking do the separating, so a card heading does not have to shout to
+   sit above the line under it. */
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.02em; }
+h1 { font-size: var(--fs-page); line-height: 1.3; }
+h2 { font-size: var(--fs-title); line-height: 1.4; letter-spacing: -0.01em; }
+h3 { font-size: var(--fs-ui); line-height: 1.4; letter-spacing: 0; }
 p { margin: 0; }
 button, input, select, textarea { font: inherit; color: inherit; }
-a { color: var(--accent); }
+button { -webkit-tap-highlight-color: transparent; }
+a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+/* Keyboard focus, once, for everything that can hold it. The inputs below add a
+   soft ring of their own; this is the fallback for every other control, and it
+   has to survive on top of a tinted row. */
+:where(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
 
 /* `minmax(0, 1fr)` rather than `1fr`: a grid track defaults to `min-height: auto`,
    which lets a long page push the row taller than the window and brings the
@@ -141,7 +301,7 @@ a { color: var(--accent); }
    fixed and hands the scrolling to `.content` alone. */
 .app {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-columns: 176px minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
 }
@@ -152,7 +312,7 @@ a { color: var(--accent); }
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: var(--sp-4) var(--sp-3);
+  padding: var(--sp-4) 10px var(--sp-4);
   gap: var(--sp-5);
   /* The nav is the long list here. It scrolls inside the column rather than
      stretching the column, which would push the whole shell past the window. */
@@ -160,21 +320,46 @@ a { color: var(--accent); }
   overflow-y: auto;
 }
 
+/* The wordmark, and only the wordmark. It carried a gradient tile beside it while
+   the rail was 208px and had room to spare; at this width the tile took 36px of a
+   column that the labels need, and a name set on its own reads just as anchored.
+   If it ever needs a mark again, give the rail the width back first. */
 .brand { padding: 0 var(--sp-2); }
-.brand__name { font-size: 16px; font-weight: 600; }
-.brand__sub { color: var(--text-3); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
+/* The version sits under the name because that is what it qualifies: the window is
+   this product at this release. In the foot it read as one more item of fine print
+   beside the read-only advisory. */
+.brand__ver {
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+  line-height: 1.4;
+  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+.brand__name {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brand__sub { color: var(--text-3); font-size: var(--fs-caption); letter-spacing: 0.1em; text-transform: uppercase; line-height: 1.4; }
 
-.nav { display: flex; flex-direction: column; gap: var(--sp-1); }
+.nav { display: flex; flex-direction: column; gap: 1px; }
 
-/* The sidebar carries a single word per row and nothing else to look at, so it
-   reads at a size above the body's. A label that has to be hunted for costs more
-   here than it would in a paragraph. */
+/* A row is 30px: tall enough to be a target, short enough that nine of them stay
+   one block. The active row is marked twice - a wash and a 2px rule at the
+   leading edge - because the wash alone disappears against a hovered neighbour
+   in the light theme. */
 .nav__item {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-2);
+  height: 30px;
+  padding: 0 10px;
   border-radius: var(--radius-sm);
   border: 0;
   background: transparent;
@@ -182,22 +367,54 @@ a { color: var(--accent); }
   cursor: pointer;
   text-align: left;
   width: 100%;
-  font-size: 15.5px;
-  line-height: 1.4;
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  line-height: 1;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.nav__item > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav__item::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
 }
 .nav__item:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
-.nav__item.is-active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
-.nav__item:disabled { opacity: 0.4; cursor: not-allowed; }
+.nav__item.is-active { background: var(--accent-weak); color: var(--accent-text); font-weight: 600; }
+.nav__item.is-active::before { background: var(--accent); }
+.nav__item:disabled { opacity: 0.38; cursor: not-allowed; }
 
 .nav__count {
   font-variant-numeric: tabular-nums;
-  font-size: 13.5px;
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--text-3);
 }
-.nav__item.is-active .nav__count { color: var(--accent); }
+.nav__item.is-active .nav__count { color: var(--accent-text); }
 
-.sidebar__foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
-.sidebar__note { color: var(--text-3); font-size: 13.5px; padding: 0 var(--sp-2); line-height: 1.5; }
+/* Fine print, separated by a rule rather than by whitespace: four grey lines
+   floating at the bottom of a column read as leftover text. */
+.sidebar__foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-2) 0;
+  border-top: 1px solid var(--border);
+}
+.sidebar__note { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.55; }
+
+/* The window has no title bar on macOS (`titleBarStyle: Overlay`), so the traffic
+   lights float over the top of this column instead of sitting in a strip above it.
+   The rail reserves the space they occupy; without it the wordmark lands under the
+   close button. Only the desktop shell sets `data-host`, so the browser preview -
+   which has no lights - keeps the ordinary padding. */
+:root[data-host="macos"] .sidebar { padding-top: 46px; }
 
 /* ---------- main ---------- */
 /* `min-height: 0` for the same reason as the grid track above: a flex item
@@ -205,19 +422,23 @@ a { color: var(--accent); }
    is exactly what would make the page taller than the window. */
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 
+/* The bar sits on the canvas, not on a sheet: a second white band under the title
+   bar competes with the cards, and the only thing it has to say is a path. */
 .topbar {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-6);
+  gap: var(--sp-2);
+  padding: 0 var(--sp-6);
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  min-height: 58px;
+  background: var(--bg);
+  min-height: 52px;
+  flex-shrink: 0;
 }
 
 .topbar__path {
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: var(--fs-ui);
+  letter-spacing: -0.01em;
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -226,36 +447,65 @@ a { color: var(--accent); }
   min-width: 0;
 }
 
-.topbar__group { display: flex; align-items: center; gap: var(--sp-2); }
+.topbar__group { display: flex; align-items: center; gap: 6px; }
+
+/* In the bar the badges are a count, not a verdict: four saturated pills across
+   the top of every page turned the header into the loudest thing on screen. They
+   keep their dot and drop the tint, so the number still reads at a glance. */
+.topbar .badge {
+  background: var(--surface-3);
+  border-color: var(--border);
+  color: var(--text-2);
+  font-weight: 500;
+}
+.topbar .btn { height: 28px; font-size: var(--fs-ui); }
 
 /* The one place that scrolls. `min-height: 0` lets this actually shrink below
    its content, which is what turns the flex child above into the scroll container. */
 .content { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--sp-6); }
+
 /* ---------- page columns ----------
    One width for every page: the full content pane, so the text starts and ends
    at the same place whichever page the user is on. The content pane's padding is
    the margin, and it is the same margin the worktree page has always had.
    Reading pages used to be capped at 860px and centred, which put their left and
-   right edges 56px in from the pane instead of 24px — the settings page and the
+   right edges 56px in from the pane instead of 24px - the settings page and the
    welcome screen jumped sideways every time the user changed view. */
 .page--wide { width: 100%; }
 .stack { display: flex; flex-direction: column; gap: var(--sp-4); }
-.stack--tight { gap: var(--sp-3); }
+.stack--tight { gap: var(--sp-2); }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+/* A page's title and the one line under it are one block: the subtitle names the
+   repository or the rule the page is about, and set flush against the baseline of
+   a 22px heading it read as a second heading. */
+.spread > div > h1 + p { margin-top: 3px; }
 .row-wrap { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .muted { color: var(--text-2); }
 .faint { color: var(--text-3); }
-.mono { font-family: var(--mono); font-size: 14px; }
-.tiny { font-size: 13px; }
+.mono { font-family: var(--mono); font-size: var(--fs-caption); letter-spacing: -0.01em; }
+.tiny { font-size: var(--fs-caption); line-height: 1.55; }
 .nowrap { white-space: nowrap; }
 .numeric { font-variant-numeric: tabular-nums; }
 
 /* ---------- card ---------- */
+/* A card is a sheet of paper on the canvas: a hairline, one shadow step, and the
+   inner top highlight that keeps a dark surface from looking like a hole. */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow), var(--inset);
+}
+/* Not `overflow: hidden`. Clipping the corners here is what a rounded card
+   usually costs, and the cost is the table header: an ancestor with a non-visible
+   overflow becomes the sticky element's scrolling container, so the header of the
+   cleanup plan's table stopped pinning itself to the top of the pane and scrolled
+   away with its rows. The two children that can reach a corner are rounded
+   instead, which is the whole job the clip was doing. */
+.card > .group-head:first-child,
+.card > .card__body--flush:first-child > .group-head:first-child,
+.card > .card__body--flush:first-child > .select-all:first-child {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 .card__head {
   padding: var(--sp-3) var(--sp-4);
@@ -264,6 +514,7 @@ a { color: var(--accent); }
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
+  min-height: 44px;
 }
 .card__body { padding: var(--sp-4); }
 .card__body--flush { padding: 0; }
@@ -271,62 +522,104 @@ a { color: var(--accent); }
   padding: var(--sp-3) var(--sp-4);
   border-top: 1px solid var(--border);
   background: var(--surface-2);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
-/* ---------- stats ---------- */
-.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-4); }
+/* ---------- stats ----------
+   The figure is the only thing with weight here; the label above it is a caption
+   and the line below it is a footnote. The old 3px colour bar down the left edge
+   is gone - it drew a box around a number that is already coloured, and four of
+   them in a row read as a chart legend rather than four facts. */
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
 .stat-grid--4 { grid-template-columns: repeat(4, 1fr); }
+/* The overview puts one line of commentary inside the grid, under the cards it
+   qualifies. As a grid item it took the first cell of a new row - half a card's
+   width, in a box that looked like a fifth stat with no figure in it. */
+.stat-grid > p { grid-column: 1 / -1; margin: 0; }
 
 .stat {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--sp-3) var(--sp-4);
-  box-shadow: var(--shadow);
+  padding: 13px var(--sp-4) 14px;
+  box-shadow: var(--shadow), var(--inset);
+  min-width: 0;
 }
-.stat--safe { border-left: 3px solid var(--safe); }
-.stat--review { border-left: 3px solid var(--review); }
-.stat--unsafe { border-left: 3px solid var(--unsafe); }
-.stat--accent { border-left: 3px solid var(--accent); }
-.stat__label { color: var(--text-2); font-size: 14px; }
-.stat__value { font-size: 28px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-.stat__sub { color: var(--text-3); font-size: 13px; }
+.stat__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+.stat__label::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  flex-shrink: 0;
+}
+.stat--safe .stat__label::before { background: var(--safe); }
+.stat--review .stat__label::before { background: var(--review); }
+.stat--unsafe .stat__label::before { background: var(--unsafe); }
+.stat--accent .stat__label::before { background: var(--accent); }
+.stat__value {
+  font-size: var(--fs-metric);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.stat__sub { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; margin-top: 4px; }
 .stat__value--safe { color: var(--safe); }
 .stat__value--review { color: var(--review); }
 .stat__value--unsafe { color: var(--unsafe); }
+.stat__value--accent { color: var(--accent-text); }
 
 /* ---------- badge / chip / pill ---------- */
+/* Squared-off at 5px rather than a full pill: a pill is a button's shape, and
+   these are labels. The dot carries the hue, the field stays quiet. */
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-1);
-  padding: 1px var(--sp-2);
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
+  gap: 5px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 5px;
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  line-height: 1.6;
   border: 1px solid transparent;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .badge--safe { color: var(--safe); background: var(--safe-bg); border-color: var(--safe-border); }
 .badge--review { color: var(--review); background: var(--review-bg); border-color: var(--review-border); }
 .badge--unsafe { color: var(--unsafe); background: var(--unsafe-bg); border-color: var(--unsafe-border); }
 .badge--neutral { color: var(--text-2); background: var(--surface-3); border-color: var(--border); }
-.badge--accent { color: var(--accent); background: var(--accent-weak); border-color: var(--accent-border); }
+.badge--accent { color: var(--accent-text); background: var(--accent-weak); border-color: var(--accent-border); }
 
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .dot--safe { background: var(--safe); }
 .dot--review { background: var(--review); }
 .dot--unsafe { background: var(--unsafe); }
 
 .chip {
   font-family: var(--mono);
-  font-size: 13px;
-  padding: 1px var(--sp-2);
-  border-radius: var(--radius-sm);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  padding: 0 6px;
+  border-radius: 5px;
   background: var(--surface-3);
   color: var(--text-2);
   border: 1px solid var(--border);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* A worktree of the chosen repository that lives somewhere else. Visible, not
    alarming: it is an ordinary result whose path needs a word of explanation. */
@@ -337,65 +630,109 @@ a { color: var(--accent); }
   border-style: dashed;
 }
 
-/* ---------- buttons ---------- */
+/* ---------- buttons ----------
+   30px tall and 12.5px: a button is chrome, and the row it sits on carries the
+   content. The primary one gets the highlight and the lift; everything else gets
+   a hover state and nothing more. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-2);
-  height: 34px;
-  padding: 0 var(--sp-3);
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  line-height: 1;
+  box-shadow: 0 1px 1px rgba(16, 24, 40, 0.03);
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
 }
-.btn:hover:not(:disabled) { background: var(--surface-3); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
-.btn--danger { background: var(--unsafe); border-color: var(--unsafe); color: #fff; }
-.btn--danger:hover:not(:disabled) { filter: brightness(1.08); background: var(--unsafe); }
-.btn--ghost { border-color: transparent; background: transparent; color: var(--text-2); }
-.btn--ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
-.btn--lg { height: 42px; padding: 0 var(--sp-5); font-size: 15px; }
-.btn--link { border: 0; background: none; color: var(--accent); padding: 0; height: auto; }
+.btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
+.btn:active:not(:disabled) { transform: translateY(0.5px); }
+.btn:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; }
+.btn--primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white) 0%, var(--accent) 100%);
+  border-color: color-mix(in srgb, var(--accent) 82%, black);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 2px rgba(16, 24, 40, 0.18);
+}
+.btn--primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 80%, white) 0%, color-mix(in srgb, var(--accent) 92%, white) 100%);
+}
+.btn--danger {
+  background: linear-gradient(180deg, #b83430 0%, #a72a26 100%);
+  border-color: #942420;
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 2px rgba(16, 24, 40, 0.18);
+}
+.btn--danger:hover:not(:disabled) { background: linear-gradient(180deg, #c43c37 0%, #b1302b 100%); }
+.btn--ghost { border-color: transparent; background: transparent; color: var(--text-2); box-shadow: none; }
+.btn--ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text); border-color: transparent; }
+.btn--lg { height: 34px; padding: 0 var(--sp-4); font-size: var(--fs-ui); }
+/* The cleanup button sets this while the executor is working. The spinner inside
+   it already says so; the cursor says it to the pointer that is still resting on
+   the button, which is where the click came from. */
+.btn.is-busy { cursor: progress; }
+.btn--link { border: 0; background: none; color: var(--accent-text); padding: 0; height: auto; box-shadow: none; }
 
 /* ---------- form ---------- */
-.field { display: flex; flex-direction: column; gap: var(--sp-2); }
-.field__label { font-size: 14px; color: var(--text-2); }
-.field__hint { font-size: 13px; color: var(--text-3); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field__label { font-size: var(--fs-ui); color: var(--text-2); }
+.field__hint { font-size: var(--fs-caption); color: var(--text-3); line-height: 1.55; }
+/* Was an unstyled class in the markup: the picker's failure and the scan's
+   failure were rendered as ordinary grey prose, which is how a click that did
+   nothing looked like a working button. */
+.field__hint--warn { color: var(--review); }
 
 .input, .select {
-  height: 38px;
-  padding: 0 10px;
+  height: 32px;
+  padding: 0 9px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--surface);
   width: 100%;
+  font-size: var(--fs-ui);
+  box-shadow: inset 0 1px 1px rgba(16, 24, 40, 0.03);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.input:focus, .select:focus { outline: 2px solid var(--accent-border); outline-offset: 0; border-color: var(--accent); }
-.input--mono { font-family: var(--mono); font-size: 14px; }
-.input--sm { height: 32px; }
+.input:hover:not(:disabled), .select:hover:not(:disabled) { border-color: #b9bfc9; }
+.select { appearance: none; padding-right: 26px; background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%); background-position: calc(100% - 13px) 14px, calc(100% - 9px) 14px; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; }
+.select:disabled { color: var(--text-2); background-color: var(--surface-2); }
+.input:focus, .select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.input::placeholder { color: var(--text-3); }
+.input--mono { font-family: var(--mono); font-size: var(--fs-ui); letter-spacing: -0.01em; }
+.input--sm { height: 30px; font-size: var(--fs-ui); }
+.input[readonly] { background: var(--surface-2); color: var(--text-2); }
 .textarea {
-  min-height: 88px;
-  padding: var(--sp-2) var(--sp-3);
+  min-height: 84px;
+  padding: 7px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--surface);
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: var(--fs-ui);
+  line-height: 1.6;
   width: 100%;
   resize: vertical;
+  box-shadow: inset 0 1px 1px rgba(16, 24, 40, 0.03);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
+.textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 
 .check {
   appearance: none;
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   border: 1px solid var(--border-strong);
   border-radius: 4px;
   background: var(--surface);
@@ -403,60 +740,86 @@ a { color: var(--accent); }
   flex-shrink: 0;
   position: relative;
   margin: 0;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
 }
+.check:hover:not(:disabled) { border-color: var(--accent); }
 .check:checked { background: var(--accent); border-color: var(--accent); }
 .check:checked::after {
   content: "";
   position: absolute;
   left: 4px;
   top: 1px;
-  width: 4px;
-  height: 8px;
+  width: 3px;
+  height: 7px;
   border: solid #fff;
-  border-width: 0 2px 2px 0;
+  border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
 }
-.check:disabled { opacity: 0.35; cursor: not-allowed; }
+.check:disabled { opacity: 0.32; cursor: not-allowed; }
 
+/* A switch is a track and a knob, so it needs its own shadow to read as raised
+   in the dark theme; without it the checked state is a flat blue rectangle. */
 .switch {
   appearance: none;
-  width: 34px;
-  height: 20px;
+  width: 32px;
+  height: 19px;
   border-radius: 999px;
   background: var(--border-strong);
   position: relative;
   cursor: pointer;
   border: 0;
   flex-shrink: 0;
+  transition: background-color 0.16s ease;
 }
 .switch::after {
   content: "";
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   background: #fff;
-  transition: transform 0.14s ease;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.3);
+  transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 .switch:checked { background: var(--accent); }
-.switch:checked::after { transform: translateX(14px); }
+.switch:checked::after { transform: translateX(13px); }
 
-.slider { width: 100%; accent-color: var(--accent); }
+.slider { width: 100%; accent-color: var(--accent); height: 20px; }
 
-.segmented { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
+/* Segmented control: a recessed track with a raised active tab, instead of three
+   bordered cells sharing a box. The divider lines are what made it look like a
+   form control from another decade. */
+.segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 1px rgba(16, 24, 40, 0.03);
+}
 .segmented button {
   border: 0;
-  background: var(--surface);
+  background: transparent;
   color: var(--text-2);
-  padding: 0 var(--sp-3);
-  height: 32px;
+  padding: 0 10px;
+  height: 26px;
+  border-radius: 6px;
   cursor: pointer;
-  border-right: 1px solid var(--border);
+  font-size: var(--fs-ui);
+  white-space: nowrap;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
-.segmented button:last-child { border-right: 0; }
-.segmented button.is-active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+.segmented button:hover { color: var(--text); }
+.segmented button.is-active {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: var(--shadow), var(--inset);
+}
 
 /* ---------- table ----------
    Two tables left (the cleanup plan and the execution result); the three list pages
@@ -476,16 +839,18 @@ a { color: var(--accent); }
 }
 .table th {
   text-align: left;
-  font-size: 13px;
+  font-size: var(--fs-caption);
   font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--text-3);
-  padding: var(--sp-2) var(--sp-3);
+  padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
   white-space: nowrap;
 }
-.table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; }
+.table td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; font-size: var(--fs-ui); }
 .table tbody tr:last-child td { border-bottom: 0; }
+.table tbody tr { transition: background-color 0.12s ease; }
 .table tbody tr:hover { background: var(--surface-2); }
 .table .cell-size, .table .cell-outcome { text-align: right; white-space: nowrap; }
 .table td.nowrap { text-overflow: ellipsis; }
@@ -506,7 +871,7 @@ a { color: var(--accent); }
 .table .cell-directory > div, .table .cell-target { overflow-wrap: anywhere; }
 
 /* ---------- item row ----------
-   One item on three lines — what it is, what the scanner found, why — instead of
+   One item on three lines - what it is, what the scanner found, why - instead of
    seven columns on one horizontal axis. A path is the one value that cannot be
    shortened without becoming ambiguous, and as a column it had to share that axis
    with six short fields: it was the column that broke into five lines while three
@@ -525,88 +890,106 @@ a { color: var(--accent); }
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  padding: 13px var(--sp-4);
   border-bottom: 1px solid var(--border);
+  transition: background-color 0.1s ease;
 }
 .item-row:last-child { border-bottom: 0; }
 .item-row:hover { background: var(--surface-2); }
-.item-row.is-bundled { opacity: 0.62; }
+.item-row.is-bundled { opacity: 0.58; }
 /* The overview's rows are a reading list, not a selection: nothing to tick. */
 .item-row--plain { grid-template-columns: minmax(0, 1fr) auto; }
-.item-row__check { padding-top: 3px; }
-.item-row__main { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.item-row__check { padding-top: 2px; }
+.item-row__main { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .item-row__head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 /* One line, always. The name is what the reader recognises the row by, so it gets
    the width rather than the other fields, and a path too long for the window is
    ellipsized instead of wrapping into a paragraph. */
-.item-row__name { font-family: var(--mono); font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item-row__meta { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; color: var(--text-2); font-size: 13px; }
+.item-row__name {
+  font-family: var(--mono);
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 20px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+/* The separator is drawn by the metadata itself, so a fact that is missing does
+   not leave a stray dot behind the one next to it. */
+.item-row__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; }
 .item-row__figures { display: flex; align-items: center; gap: var(--sp-3); padding-top: 1px; }
-.item-row__size { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.item-row__foot { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.item-row__size { font-size: var(--fs-ui); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); }
+/* Top-aligned, not centred: a row with two reasons is two lines tall, and a
+   button centred against them floats in the middle of the row with nothing beside
+   it. On the first line it reads as belonging to the row it acts on. */
+.item-row__foot { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
+.item-row__foot .btn { margin-top: -3px; }
 .item-row__reasons { flex: 1; min-width: 0; }
 .item-row__foot .btn { flex-shrink: 0; }
 /* The worktree page's own path, on the metadata line. It is a fact about the item,
-   not its name — the branch above is what the reader recognises the row by — so it
+   not its name - the branch above is what the reader recognises the row by - so it
    gives way first when the window is narrow. */
-.item-row__where { font-family: var(--mono); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-row__where { font-family: var(--mono); font-size: var(--fs-caption); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* What the table's header row used to hold, since there is no header row now. */
 .select-all {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-4);
+  padding: 7px var(--sp-4);
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
-  color: var(--text-2);
-  font-size: 13px;
+  color: var(--text-3);
+  font-size: var(--fs-caption);
 }
 
+/* A group header is a caption for the rows under it: recessed, small, and the one
+   place a rule between two groups is drawn. */
 .group-head {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--surface-3);
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-  width: 100%;
-  border: 0;
+  padding: 8px var(--sp-3);
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   text-align: left;
   color: var(--text);
+  min-height: 40px;
 }
-.group-head__path { font-family: var(--mono); font-size: 14px; }
+.group-head__path { font-family: var(--mono); font-size: var(--fs-caption); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- reasons ----------
-   A chip on one line: the verdict's own words, then the evidence that backs it. It
-   was a card with the evidence on a second line, which only worked as a column; on
-   a row it is one line of tinted text beside the item it explains. Evidence is
-   often one unbreakable run — a path, a SHA, a sentence with a number in it — so it
-   is allowed to break, and the chip then takes a second line rather than pushing
-   the width of the row. */
-.reasons { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
+   A line of text, not a box. Two bordered chips per row put four coloured frames
+   into every row of the list, and the verdict they were repeating is already
+   sitting at the right edge of that same row. What is left is what carried the
+   claim: the mark, the sentence, and the evidence behind it, in that order of
+   weight. Evidence is often one unbreakable run - a path, a SHA, a sentence with
+   a number in it - so it is allowed to break, and the line then takes a second
+   line rather than pushing the width of the row. */
+.reasons { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+/* Flowed as one paragraph rather than laid out as three flex cells. An evidence
+   string can be a whole sentence - "declared root: /Users/.../worktree" - and as a
+   flex sibling it was pushed into a narrow column at the right of the sentence it
+   belongs to, wrapping every eight characters. In flow it simply follows the
+   words, and only the first line starts with a mark. */
 .reason {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--sp-1);
+  display: block;
   max-width: 100%;
-  padding: 2px var(--sp-2);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  font-size: 13px;
-  line-height: 1.5;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--fs-caption);
+  line-height: 1.65;
+  color: var(--text-2);
 }
-.reason__mark { flex-shrink: 0; font-size: 12px; }
+.reason__mark { font-size: var(--fs-caption); font-weight: 600; margin-right: 4px; }
 .reason__text { min-width: 0; overflow-wrap: anywhere; }
-.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: var(--fs-caption); overflow-wrap: anywhere; }
 .reason__evidence::before { content: "· "; }
-.reason--safe { border-color: var(--safe-border); background: var(--safe-bg); }
 .reason--safe .reason__mark { color: var(--safe); }
-.reason--review { border-color: var(--review-border); background: var(--review-bg); }
 .reason--review .reason__mark { color: var(--review); }
-.reason--unsafe { border-color: var(--unsafe-border); background: var(--unsafe-bg); }
 .reason--unsafe .reason__mark { color: var(--unsafe); }
 /* The base chip is the neutral one: an "unknown" finding is neither a warning nor a
    reassurance, and colouring it either way would be a claim the audit did not make. */
@@ -615,32 +998,52 @@ a { color: var(--accent); }
 /* ---------- misc blocks ---------- */
 .banner {
   display: flex;
-  gap: var(--sp-3);
+  gap: 10px;
   align-items: flex-start;
-  padding: var(--sp-3) var(--sp-4);
+  padding: 10px var(--sp-3);
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface-2);
-  font-size: 14px;
+  font-size: var(--fs-ui);
+  line-height: 1.6;
 }
 .banner--warn { border-color: var(--review-border); background: var(--review-bg); color: var(--review); }
 .banner--danger { border-color: var(--unsafe-border); background: var(--unsafe-bg); color: var(--unsafe); }
-.banner--info { border-color: var(--accent-border); background: var(--accent-weak); color: var(--accent); }
-.banner__title { font-weight: 600; }
+.banner--info { border-color: var(--accent-border); background: var(--accent-weak); color: var(--accent-text); }
+.banner__title { font-weight: 600; margin-right: 4px; }
+.banner .btn--ghost { color: inherit; }
+
+/* A page-level message under the header: the preview notice, a failed scan, a
+   log that could not be written. Was an unstyled class in the markup. */
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  padding: 9px var(--sp-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--fs-ui);
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.notice--unsafe { border-color: var(--unsafe-border); background: var(--unsafe-bg); color: var(--unsafe); }
 
 .code {
   font-family: var(--mono);
-  font-size: 14px;
-  background: var(--surface-3);
+  font-size: var(--fs-caption);
+  line-height: 1.65;
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: var(--sp-2) var(--sp-3);
+  padding: 8px 11px;
   overflow-x: auto;
   white-space: pre;
-  color: var(--text);
+  color: var(--text-2);
 }
 
-.kv { display: grid; grid-template-columns: 148px 1fr; gap: var(--sp-2) var(--sp-3); font-size: 14px; }
+.kv { display: grid; grid-template-columns: 132px 1fr; gap: 7px var(--sp-3); font-size: var(--fs-ui); align-items: baseline; }
 .kv dt { color: var(--text-3); }
 .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
 
@@ -648,72 +1051,107 @@ a { color: var(--accent); }
   padding: var(--sp-7) var(--sp-5);
   text-align: center;
   color: var(--text-3);
-  font-size: 14px;
+  font-size: var(--fs-ui);
 }
 
 .divider { height: 1px; background: var(--border); border: 0; margin: 0; }
 
 /* ---------- welcome ---------- */
 /* The full content pane like every other page, and the same stack rhythm. It used
-   to be its own layout — 860px wide and centred — which is why the welcome screen
+   to be its own layout - 860px wide and centred - which is why the welcome screen
    and the page after it had two different left and right margins. */
-.welcome { width: 100%; padding: var(--sp-6) 0; display: flex; flex-direction: column; gap: var(--sp-5); }
-.welcome__hero { display: flex; flex-direction: column; gap: var(--sp-3); }
-.welcome__title { font-size: 32px; letter-spacing: -0.03em; }
-.welcome__lede { color: var(--text-2); max-width: 60ch; }
+.welcome { width: 100%; padding: var(--sp-4) 0 var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-5); }
+.welcome__hero { display: flex; flex-direction: column; gap: 10px; max-width: 74ch; }
+.welcome__hero .faint { letter-spacing: 0.1em; text-transform: uppercase; font-size: var(--fs-caption); }
+.welcome__title { font-size: var(--fs-hero); line-height: 1.2; letter-spacing: -0.035em; }
+.welcome__lede { color: var(--text-2); font-size: var(--fs-lead); line-height: 1.55; letter-spacing: -0.01em; }
+
+/* A panel, not a drop target drawn in dashes: the input inside it is the way in,
+   dropping is the shortcut. The dashed edge was the loudest border on the page
+   and it promised a behaviour most users never reach for. The inline style the
+   view applies while dragging still lands, because the border is here to colour. */
 .dropzone {
-  border: 1px dashed var(--border-strong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--surface);
-  padding: var(--sp-4);
+  padding: var(--sp-3);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: 9px;
+  box-shadow: var(--shadow), var(--inset);
+  transition: border-color 0.14s ease, background-color 0.14s ease;
 }
 .pick-row { display: flex; gap: var(--sp-2); }
 .pick-row .input { flex: 1; }
-.promise-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-4); }
+.pick-row .input, .pick-row .btn { height: 36px; }
+
+.promise-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
 .promise {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: var(--sp-3) var(--sp-4);
+  padding: 13px var(--sp-4) var(--sp-4);
+  box-shadow: var(--shadow), var(--inset);
 }
-.promise__k { font-weight: 600; font-size: 14px; margin-bottom: 3px; }
-.promise__v { color: var(--text-3); font-size: 13px; line-height: 1.5; }
+/* No accent rule across the top of these. It was tried: three 2px gradients that
+   faded out mid-card read as three progress bars that had each stopped in the same
+   place, which is a claim about state that these panels do not make. The three
+   terms are told apart by their headings, and they share the page's one surface. */
+.promise__k { font-weight: 600; font-size: var(--fs-ui); letter-spacing: -0.01em; margin-bottom: 3px; }
+.promise__v { color: var(--text-3); font-size: var(--fs-ui); line-height: 1.65; }
 
-.recent-list { display: flex; flex-direction: column; gap: var(--sp-2); }
+.recent-list { display: flex; flex-direction: column; gap: 6px; }
 .recent {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   text-align: left;
-  padding: var(--sp-3);
+  padding: 9px 11px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
   cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
 }
 .recent:hover { border-color: var(--accent-border); background: var(--accent-weak); }
-.recent__path { font-family: var(--mono); font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent__path { font-family: var(--mono); font-size: var(--fs-ui); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- scanning ---------- */
 /* The full content pane like every other page. */
-.scan { width: 100%; padding: var(--sp-6) 0; display: flex; flex-direction: column; gap: var(--sp-5); }
-.stage-list { display: flex; flex-direction: column; gap: var(--sp-1); }
-.stage { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); }
-.stage.is-active { background: var(--accent-weak); }
+.scan { width: 100%; padding: var(--sp-4) 0 var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-5); }
+.stage-list { display: flex; flex-direction: column; gap: 1px; }
+.stage {
+  position: relative;
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: 7px var(--sp-3);
+  border-radius: var(--radius-sm);
+  transition: background-color 0.18s ease;
+}
+.stage.is-active { background: var(--surface-2); }
+.stage.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
 .stage.is-done { color: var(--text-2); }
-.stage__mark { width: 16px; flex-shrink: 0; text-align: center; font-size: 14px; color: var(--text-3); }
+.stage__mark { width: 14px; flex-shrink: 0; text-align: center; font-size: var(--fs-caption); line-height: 22px; color: var(--text-3); }
 .stage.is-done .stage__mark { color: var(--safe); }
-.stage.is-active .stage__mark { color: var(--accent); }
-.stage__label { font-weight: 500; }
-.stage__detail { color: var(--text-3); font-size: 13px; font-family: var(--mono); }
+.stage.is-active .stage__mark { color: var(--accent-text); }
+.stage__label { font-weight: 500; font-size: var(--fs-ui); line-height: 22px; }
+.stage__detail { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; font-family: var(--mono); }
 
 .trace {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: var(--fs-caption);
+  line-height: 1.7;
   color: var(--text-3);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -723,7 +1161,7 @@ a { color: var(--accent); }
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  gap: var(--sp-1);
+  gap: 2px;
   overflow: hidden;
 }
 .trace__line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -731,8 +1169,8 @@ a { color: var(--accent); }
 /* ---------- detail panel ---------- */
 .detail { background: var(--surface-2); border-top: 1px solid var(--border); }
 /* `minmax(0, 1fr)` on both tracks, and not `1fr`: a grid track defaults to
-   `min-width: auto`, so one long path or one long commit hash — both of which
-   this panel is full of — widens its column past the window and the row runs off
+   `min-width: auto`, so one long path or one long commit hash - both of which
+   this panel is full of - widens its column past the window and the row runs off
    the right edge with no way to scroll to it. Zeroing the minimum is what keeps
    the overflow inside the column, where the path wraps and the hash ellipses. */
 .detail__grid {
@@ -745,33 +1183,43 @@ a { color: var(--accent); }
    characters, so it needs somewhere to go when it does not fit. */
 .detail__grid .kv dd { min-width: 0; overflow-wrap: anywhere; }
 
-/* ---------- action bar ---------- */
-.actionbar {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 -1px 2px rgba(16, 24, 40, 0.06);
-}
-
-/* Back on the left, forward on the right, summary in the middle — the same three
+/* ---------- action bar ----------
+   Back on the left, forward on the right, summary in the middle - the same three
    slots on every page, so the buttons are in the same place each time rather than
    wherever that page's layout left room.
 
+   It docks over the scrolling pane, so it has to separate itself from what passes
+   under it. That was tried as a blurred, 82%-opaque surface first, and what it
+   produced was ghost lettering: a row's evidence line showed through the bar, mid
+   word, which reads as a broken paint rather than as depth. The bar is opaque and
+   the lift comes from the shadow above it, which is also what makes the covered
+   row read as scrolled past instead of clipped.
+
    `align-items: center` puts the row on one axis, but the buttons inside it came out
    looking low: the summary is a line of text at `line-height: 1.55`, and a `.btn--lg`
-   is 42px tall, so a stretch-aligned child sat with its text below the button's
+   is 34px tall, so a stretch-aligned child sat with its text below the button's
    midpoint. `align-items: center` on the groups plus a line-height of 1 on the
    summary puts every child on the same visual centre. */
+.actionbar {
+  position: sticky;
+  /* Not `0`. A sticky inset resolves against the scroll container's content box,
+     which sits inside the pane's 24px padding - so `bottom: 0` parked the bar 24px
+     above the window edge and the row underneath it showed through that strip.
+     Cancelling the padding is what puts it flush. */
+  bottom: calc(-1 * var(--sp-6));
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 9px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lift), var(--inset);
+}
 .actionbar__side {
   flex: 0 0 auto;
   display: flex;
-  gap: var(--sp-2);
+  gap: 6px;
   align-items: center;
 }
 .actionbar__side--end { margin-left: auto; }
@@ -780,22 +1228,24 @@ a { color: var(--accent); }
   flex: 1;
   text-align: center;
   line-height: 1.2;
+  font-size: var(--fs-ui);
 }
+.actionbar__summary strong { font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* ---------- busy state ---------- */
 
 /* The executor works through the plan item by item behind a single call, so the
-   page cannot show a percentage — but a button that says "running" and then sits
+   page cannot show a percentage - but a button that says "running" and then sits
    still for several seconds is indistinguishable from a hung app, which is exactly
    what it looked like. An indeterminate bar and a spinner say "working" without
    claiming to know how far along it is. */
 
 .spinner {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   flex-shrink: 0;
   border-radius: 50%;
-  border: 2px solid currentColor;
+  border: 1.5px solid currentColor;
   border-top-color: transparent;
   animation: spin 0.7s linear infinite;
 }
@@ -810,7 +1260,7 @@ a { color: var(--accent); }
 }
 .busy-strip__bar {
   flex: 1;
-  height: 3px;
+  height: 2px;
   border-radius: 999px;
   background: var(--border);
   overflow: hidden;
@@ -830,11 +1280,12 @@ a { color: var(--accent); }
   100% { transform: translateX(250%); }
 }
 
-.busy-strip__label { flex: 0 0 auto; color: var(--text-2); font-size: 13px; }
+.busy-strip__label { flex: 0 0 auto; color: var(--text-3); font-size: var(--fs-caption); }
 
 /* One motion preference, respected everywhere. The busy indicators are the whole
    reason the app has animation, so honouring this matters more here than usual. */
 @media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; }
   .spinner,
   .busy-strip__bar::after {
     animation: none;
@@ -847,60 +1298,72 @@ a { color: var(--accent); }
 .plan-item {
   display: flex;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--surface-2);
 }
 .plan-item--force { border-color: var(--review-border); background: var(--review-bg); }
-.plan-item__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.plan-item__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+/* The command sits on the panel it belongs to, so it takes the page canvas as its
+   ground: on `--surface-2` inside a `--surface-2` card the code block and the card
+   it explains were the same shade and the block had only its border to place it. */
+.plan-item .code { background: var(--surface); }
 .untracked-list {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: var(--fs-caption);
+  line-height: 1.7;
   color: var(--text-2);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: var(--sp-2) var(--sp-3);
-  max-height: 132px;
+  padding: 6px 10px;
+  max-height: 128px;
   overflow-y: auto;
 }
 .untracked-list div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.gate { display: flex; flex-direction: column; gap: var(--sp-2); }
-.gate__item { display: flex; gap: var(--sp-2); align-items: flex-start; font-size: 14px; }
-.gate__mark { flex-shrink: 0; width: 14px; text-align: center; }
+.gate { display: flex; flex-direction: column; gap: 6px; }
+.gate__item { display: flex; gap: 9px; align-items: baseline; font-size: var(--fs-ui); line-height: 1.6; }
+.gate__mark { flex-shrink: 0; width: 13px; text-align: center; font-size: var(--fs-caption); font-weight: 600; color: var(--text-3); }
 .gate__mark--ok { color: var(--safe); }
 .gate__mark--bad { color: var(--unsafe); }
 
 /* ---------- result ---------- */
-.outcome { font-size: 14px; font-weight: 500; }
+.outcome { font-size: var(--fs-ui); font-weight: 500; }
 .outcome--ok { color: var(--safe); }
 .outcome--skipped { color: var(--review); }
 .outcome--failed { color: var(--unsafe); }
 
-/* ---------- history ---------- */
+/* ---------- history ----------
+   A timeline is read down its left edge, so the time column is set in the mono
+   face at the same size as the rows it stamps and never in bold. */
 .timeline { display: flex; flex-direction: column; }
-.timeline__row { display: flex; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
+.timeline__row { display: flex; gap: var(--sp-3); padding: 11px var(--sp-4); border-bottom: 1px solid var(--border); transition: background-color 0.1s ease; }
+.timeline__row:hover { background: var(--surface-2); }
 .timeline__row:last-child { border-bottom: 0; }
-.timeline__time { width: 128px; flex-shrink: 0; color: var(--text-3); font-size: 13px; font-variant-numeric: tabular-nums; }
-.timeline__body { flex: 1; min-width: 0; }
+.timeline__time { width: 132px; flex-shrink: 0; color: var(--text-3); font-size: var(--fs-caption); font-family: var(--mono); padding-top: 2px; }
+.timeline__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 
-/* ---------- settings ---------- */
-.setting-row { display: flex; gap: var(--sp-4); align-items: flex-start; padding: var(--sp-4); border-bottom: 1px solid var(--border); }
+/* ---------- settings ----------
+   Two columns, a label and its control, one rule between rows. The label column is
+   a fixed 216px so every control starts on the same x; that alignment is most of
+   what makes a settings page look deliberate. */
+.setting-row { display: flex; gap: var(--sp-5); align-items: flex-start; padding: 14px var(--sp-4); border-bottom: 1px solid var(--border); }
 .setting-row:last-child { border-bottom: 0; }
 .setting-row__label { width: 216px; flex-shrink: 0; }
-.setting-row__name { font-weight: 500; font-size: 14.5px; }
-.setting-row__hint { color: var(--text-3); font-size: 13px; line-height: 1.5; }
+.setting-row__name { font-weight: 500; font-size: var(--fs-ui); line-height: 1.5; }
+.setting-row__hint { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.6; margin-top: 2px; }
 .setting-row__control { flex: 1; min-width: 0; }
 .setting-row__control--narrow { max-width: 320px; }
 
 @media (max-width: 900px) {
-  /* `minmax(0, 1fr)` for the same reason as above — a bare `1fr` would reset the
+  /* `minmax(0, 1fr)` for the same reason as above - a bare `1fr` would reset the
      track's minimum to `auto` and let a long page scroll the document again. */
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
   .stat-grid, .stat-grid--4, .promise-grid, .detail__grid { grid-template-columns: 1fr; }
+  .actionbar { flex-wrap: wrap; }
 }
 
 /* ---------- scrolling ---------- */
@@ -908,7 +1371,7 @@ a { color: var(--accent); }
 /* The window does not scroll; `.content` and the sidebar do. What this hides is
    only the scrollbar's own strip: on macOS it overlays the content, and on Windows
    it takes width from a window that is already narrow. The wheel, the trackpad and
-   the keyboard are untouched — this removes an indicator, not the ability to
+   the keyboard are untouched - this removes an indicator, not the ability to
    scroll. */
 * {
   scrollbar-width: none;
@@ -917,4 +1380,3 @@ a { color: var(--accent); }
 *::-webkit-scrollbar {
   display: none;
 }
-

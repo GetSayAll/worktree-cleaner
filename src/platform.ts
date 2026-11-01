@@ -211,6 +211,25 @@ export async function openTrash(): Promise<void> {
   await openPath(trash);
 }
 
+/**
+ * The accent colour the operating system is using, as `#rrggbb`, or `null` where
+ * there is nothing to ask.
+ *
+ * Only macOS answers: WebKit resolves both system-colour keywords to its default
+ * blue whatever the user picked, so the host reads `NSColor.controlAccentColor`
+ * and hands the value over. Windows needs no counterpart — Chromium honours the
+ * `AccentColor` keyword in the stylesheet — and a browser preview has no host at
+ * all, which keeps the accent the stylesheet declares.
+ */
+export async function systemAccent(): Promise<string | null> {
+  if (!isDesktop()) return null;
+  try {
+    return await invoke<string | null>("system_accent", {});
+  } catch {
+    return null;
+  }
+}
+
 /** The user's home directory, used to show `~` in paths. */
 export async function homeDir(): Promise<string | null> {
   if (!isDesktop()) return null;

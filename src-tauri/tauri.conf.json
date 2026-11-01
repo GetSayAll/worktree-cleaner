@@ -18,7 +18,13 @@
         "minWidth": 900,
         "minHeight": 600,
         "resizable": true,
-        "center": true
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 20
+        }
       }
     ],
     "security": {
@@ -27,9 +33,16 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": [
+      "app"
+    ],
     "category": "DeveloperTool",
     "shortDescription": "Audit and clean Git worktrees and build artifacts safely",
-    "icon": ["icons/icon.png", "icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"]
+    "icon": [
+      "icons/icon.png",
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png"
+    ]
   }
 }

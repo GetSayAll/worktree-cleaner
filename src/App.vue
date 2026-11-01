@@ -103,10 +103,18 @@ function rescan() {
 
 <template>
   <div class="app">
-    <aside class="sidebar">
+    <!-- `data-tauri-drag-region`: the window has no title bar on macOS, so the
+         chrome that is left — this column and the header — is what a drag grabs.
+         Children without the attribute keep their own clicks; the handler only
+         looks at the element the mouse went down on. -->
+    <aside class="sidebar" data-tauri-drag-region>
       <div class="brand">
         <div class="brand__name">{{ messages.app.name }}</div>
         <div v-if="messages.app.tagline" class="brand__sub">{{ messages.app.tagline }}</div>
+        <!-- The version belongs to the name, not to the fine print at the bottom:
+             it identifies what this window is, and at the foot it read as one more
+             note beside the read-only advisory. -->
+        <div class="brand__ver">{{ messages.app.versionNote }}</div>
       </div>
 
       <nav class="nav">
@@ -127,12 +135,11 @@ function rescan() {
       <div class="sidebar__foot">
         <p class="sidebar__note">{{ messages.app.readOnlyNote }}</p>
         <p v-if="!desktop" class="sidebar__note">{{ messages.app.previewNote }}</p>
-        <p class="sidebar__note">{{ messages.app.versionNote }}</p>
       </div>
     </aside>
 
     <main class="main">
-      <header class="topbar">
+      <header class="topbar" data-tauri-drag-region>
         <!-- The path is shown whenever there is one, including *during* a scan:
              `projectPath` is set before the scan starts, and a bar that says "no
              project selected" while the app is visibly scanning that project

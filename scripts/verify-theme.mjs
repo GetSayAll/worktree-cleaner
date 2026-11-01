@@ -37,20 +37,20 @@ const SEND_TIMEOUT_MS = 15_000;
 // `canvas`/`surface`/`ink` are the painted rgb() values a browser reports for the
 // elements that carry them: body (--bg), .sidebar (--surface) and its text (--text).
 const LIGHT = {
-  bg: "#f4f5f7",
+  bg: "#f5f6f8",
   surface: "#ffffff",
-  text: "#1a1d21",
-  canvas: "rgb(244, 245, 247)",
+  text: "#111418",
+  canvas: "rgb(245, 246, 248)",
   surfaceRgb: "rgb(255, 255, 255)",
-  ink: "rgb(26, 29, 33)"
+  ink: "rgb(17, 20, 24)"
 };
 const DARK = {
-  bg: "#16181c",
-  surface: "#1e2127",
-  text: "#e9ebef",
-  canvas: "rgb(22, 24, 28)",
-  surfaceRgb: "rgb(30, 33, 39)",
-  ink: "rgb(233, 235, 239)"
+  bg: "#0e1013",
+  surface: "#15181d",
+  text: "#e7eaee",
+  canvas: "rgb(14, 16, 19)",
+  surfaceRgb: "rgb(21, 24, 29)",
+  ink: "rgb(231, 234, 238)"
 };
 
 /** [OS preference, in-app choice, expected data-theme, expected palette] */

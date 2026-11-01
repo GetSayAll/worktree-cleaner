@@ -18,7 +18,13 @@ if (!jsName || !cssName) {
 }
 
 const js = readFileSync(join(dist, "assets", jsName), "utf8").replaceAll("</script", "<\\/script");
-const css = readFileSync(join(dist, "assets", cssName), "utf8").replaceAll("</style", "<\\/style");
+// Asset URLs in the stylesheet were rewritten relative to the file it was built
+// into (`dist/assets/`), and that stylesheet is about to sit at the document root.
+// One level up from the root is outside the build, so every such URL loses its
+// `../` on the way in - the fonts in `dist/fonts/` are the ones that matter here.
+const css = readFileSync(join(dist, "assets", cssName), "utf8")
+  .replaceAll("url(../", "url(./")
+  .replaceAll("</style", "<\\/style");
 
 // Two things to watch out for:
 // 1) The replacement must be a function. A string replacement treats $& / $` / $' in the JS

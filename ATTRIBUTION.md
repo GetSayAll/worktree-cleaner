@@ -1,5 +1,25 @@
 # Sources and attribution
 
+## Bundled typefaces
+
+Both are subset to the Latin range, shipped as WOFF2 under `public/fonts/`, and
+accompanied by their licence text in the same directory. Neither is modified, so
+the reserved names stay as published; the SIL Open Font License 1.1 permits
+redistribution inside another work as long as the licence travels with it, which
+is what those two files are for.
+
+- **Inter** — `public/fonts/inter-latin.woff2`
+  - Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+  - SIL Open Font License 1.1 — see `public/fonts/LICENSE-Inter.txt`
+  - Carries the interface text, including Chinese through the system fallback.
+- **JetBrains Mono** — `public/fonts/jetbrains-mono-latin.woff2`
+  - Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+  - SIL Open Font License 1.1 — see `public/fonts/LICENSE-JetBrainsMono.txt`
+  - Carries paths, branch names, commit SHAs and command lines.
+
+The Chinese UI is not bundled: it renders in PingFang SC on macOS, Microsoft YaHei
+on Windows, and Hiragino Sans GB where neither exists.
+
 ## Tech-stack references
 
 - GetSayAll/remote-mic-app-windows
