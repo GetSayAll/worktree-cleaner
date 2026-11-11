@@ -304,10 +304,12 @@ fn the_scanner_reads_a_real_repository_end_to_end() {
         .find(|record| record.is_detached)
         .expect("detached record");
     assert!(detached.branch.is_none());
-    assert!(has(detached, ReasonCode::WtDetached));
+    // The commit is already in the default branch, so the detached HEAD holds no
+    // work that the worktree deletion could lose.
+    assert!(!has(detached, ReasonCode::WtDetached));
     assert_eq!(detached.merged_into_default, Some(true));
     assert!(has(detached, ReasonCode::WtMerged));
-    assert_eq!(detached.safety.status, SafetyStatus::Review);
+    assert_eq!(detached.safety.status, SafetyStatus::Safe);
 
     // ---- a prunable worktree ----
     let gone = by_branch(&records, "gone-branch");

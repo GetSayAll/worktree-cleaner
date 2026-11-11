@@ -50,10 +50,12 @@ applied*, not that it is still there: apply a change, revert it, and the patch-i
 the applying commit still matches while the default branch no longer holds the code.
 So B also compares content — `git diff <head> <target> -- <the files this branch
 touched>` — and requires the two sides to agree. A revert makes them disagree and the
-branch stays `Review`. The comparison only covers the branch's own files, so unrelated
-work on the default branch cannot make it fail, and it is strict on purpose: if the
-default branch changed one of those files again after the merge, the answer is "cannot
-confirm", which costs a re-read rather than a silent deletion.
+branch stays `Review` as `wt.absorbed_content_changed`; the reason says "cannot
+confirm", not "reverted", because a later revert and an ordinary edit after the merge
+look the same to a tree comparison. The comparison only covers the branch's own
+files, so unrelated work on the default branch cannot make it fail, and it is strict
+on purpose: if the default branch changed one of those files again after the merge,
+the answer is "cannot confirm", which costs a re-read rather than a silent deletion.
 
 Measured cost of getting this wrong: of 22 branches that survived A and B, **19
 carried real code**. A stamp-only tail is the exception, not the rule. Tier C is
@@ -139,8 +141,10 @@ Always compare against `origin/<default>`. Never against a bare branch name.
 - **A branch pushed nowhere reachable.** Reconciled by requiring the default branch
   to be a real remote-tracking ref; a fork nobody can reach is not covered.
 - **Ignored files that matter.** Credentials and local configuration are usually
-  ignored by Git, which is why the artifact scanner has a separate `af.credentials`
-  code and the triage above says nothing about them.
+  ignored by Git. The artifact scanner has `af.credentials` for artifact directories,
+  and the worktree verdict runs the same bounded name-table walk at the worktree root
+  (skipping the build and cache directories) as `wt.credentials`. A secret whose name
+  gives nothing away, such as a `config.json` holding a key, is still not covered.
 - **Unmerged work that the user still wants.** No command answers this. It is the
   reason `Review` is a real category and not a failure of the tool.
 

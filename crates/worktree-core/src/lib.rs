@@ -431,8 +431,9 @@ pub struct WorktreeRecord {
     /// `None` means undetermined, and **must not** be treated as merged.
     pub merged_into_default: Option<bool>,
     /// Every commit on this branch has an equivalent patch in the default branch,
-    /// although the commits themselves are not ancestors of it — the squash-merge
-    /// answer, from `git cherry`'s patch-id comparison.
+    /// and the default branch still holds the content the branch produced — the
+    /// squash-merge answer, from `git cherry`'s patch-id comparison plus the tree
+    /// comparison over the files the branch touched.
     ///
     /// Separate from `merged_into_default` rather than folded into it: the two are
     /// different facts, and a reader who wants "is the work in the default branch"
@@ -613,6 +614,7 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
             now,
             size_bytes,
             repository_stash_count,
+            credential_scan_timeout: per_dir_timeout.min(Duration::from_secs(5)),
         };
         worktrees.push(check_worktree(
             &runner,

@@ -332,3 +332,41 @@ fn a_scan_of_a_real_repository_changes_nothing() {
     assert!(repo.root.join("node_modules/left-pad/index.js").exists());
     assert!(repo.root.join("dist/generated.js").exists());
 }
+
+#[test]
+fn a_credential_at_the_worktree_root_is_caught_by_the_worktree_check() {
+    // The end-to-end counterpart of the unit test: a real ignored `.env` at the
+    // root of a clean, merged, old linked worktree. `git status` says nothing
+    // about it, and `git worktree remove` would delete it, so the worktree verdict
+    // has to be Unsafe on its own — the artifact scanner never sees this path
+    // because `.env` is not an artifact directory name.
+    let repo = Repo::new("worktree-credential-root");
+    std::fs::write(repo.root.join(".gitignore"), ".env\n").expect("write .gitignore");
+    repo.git(&["add", ".gitignore"]);
+    repo.git(&["commit", "--quiet", "-m", "ignore the local env"]);
+
+    let linked = repo.add_worktree("wt-credential", "credential/x");
+    std::fs::write(linked.join(".env"), "API_KEY=live\n").expect("write the secret");
+    backdate_tree(&repo.root, 30);
+    backdate_tree(&linked, 30);
+
+    let snapshot = scan_project(&repo.root.display().to_string(), &options()).expect("scan");
+    let record = snapshot
+        .worktrees
+        .iter()
+        .find(|record| record.path.ends_with("wt-credential"))
+        .expect("the linked worktree");
+    assert_eq!(
+        record.safety.status,
+        SafetyStatus::Unsafe,
+        "{:?}",
+        record.safety.reasons
+    );
+    let reason = record
+        .safety
+        .reasons
+        .iter()
+        .find(|reason| reason.code == ReasonCode::WtCredentials)
+        .expect("wt.credentials");
+    assert!(reason.evidence.contains(".env"), "{}", reason.evidence);
+}

@@ -813,6 +813,49 @@ was checked to fail without the fix:
    deletion — and it refuses to confirm past 200 touched files rather than build a
    command line it cannot reason about.
 
+**Decided (2026-11-11)**
+
+1. **A recent commit on a clean, already-merged worktree is attention, not a
+   verdict.** `last_updated_at` still carries the HEAD time to the detail panel, but
+   `wt.recent_activity` is emitted only when something could still be lost: the
+   worktree is dirty, untracked, or its work is not in the default branch. Measuring
+   the previous rule on one machine put 47 clean-and-merged worktrees in `Review`
+   for no reason beyond a commit inside the three-day window.
+
+2. **Unpushed commits are a branch fact, not a worktree fact.** `git worktree remove`
+   keeps every branch ref, and the product never runs `git branch -d`, so `ahead > 0`
+   cannot make the directory unsafe. `wt.unpushed` is now `Review`, is not emitted at
+   all when the work is already merged or absorbed, and its evidence names the
+   upstream and says the ref is kept. This is the same reasoning that removed
+   `wt.stash` from the verdict: the thing that could be lost lives outside the
+   directory being deleted.
+
+3. **A deleted upstream does not hide the file counts.** Git omits `# branch.ab` when
+   the upstream ref is gone, but still prints the changed and untracked entries. The
+   old code skipped the whole status block, so a dirty worktree became a `Review`
+   `cannot_verify` with `dirty_files: 0` — the wrong direction. The counts are now
+   read from the same output; only the ahead/behind answer is unknown, and it adds
+   `wt.cannot_verify` only when the work is not already merged or absorbed.
+
+4. **Absorption is patch-id plus content, and a content change has its own code.**
+   `wt.absorbed` requires the content comparison to agree. When the patch-id matches
+   but the files changed afterwards, the reason is `wt.absorbed_content_changed` at
+   `Review` — not `wt.unmerged`, which claimed something the check did not establish,
+   and not a revert, which a tree comparison cannot distinguish from an ordinary edit.
+
+5. **The worktree verdict checks credentials too.** `git worktree remove` deletes
+   ignored files, so a clean worktree can still contain the one thing that must not be
+   destroyed silently. The root is walked with the same name table as
+   `af.credentials`, skipping the build and cache directories (the artifact scanner
+   checks those). A hit is `wt.credentials` / `Unsafe`; a partial walk is `Review`; a
+   credential-looking file Git tracks does not block, because it is in the repository,
+   not in the directory being deleted.
+
+6. **A default branch containing `/` is still asked as `origin/<name>`.** The prefix
+   test was `contains('/')`, which read `release/2.0` as if it were already
+   remote-qualified. Both the ancestry and the patch check now use
+   `starts_with("origin/")`, so `release/2.0` is asked as `origin/release/2.0` first.
+
 **Open**
 
 1. **How to verify the Windows Recycle Bin path**: D16 requires separate verification

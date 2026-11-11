@@ -799,7 +799,7 @@ fn credential_budget(opts: &ArtifactScanOptions) -> Duration {
 
 /// The outcome of looking for credential files in a directory.
 #[derive(Debug, PartialEq, Eq)]
-enum CredentialScan {
+pub(crate) enum CredentialScan {
     /// The whole directory was walked; `name` is the hit, relative to the directory.
     Complete(Option<String>),
     /// The walk hit its ceiling, so the rest of the tree was never looked at.
@@ -828,6 +828,55 @@ enum CredentialScan {
 /// deadline, which is what the caller really controls: `per_dir_timeout` is the
 /// budget the user set for one directory.
 fn credential_in_within(dir: &Path, limit: usize, budget: Duration) -> CredentialScan {
+    credential_walk(dir, limit, budget, false)
+}
+
+/// The worktree-level credential check: the same walk, but past the build and
+/// cache directories instead of through them.
+///
+/// `git worktree remove` deletes ignored files, so a `.env` at the root of an
+/// otherwise clean worktree is exactly the file the Safe verdict must not miss.
+/// Walking `node_modules` or `target` here would make every scan pay for the
+/// dependency tree twice; those directories are artifact candidates and the
+/// artifact scanner already checks them for credentials when it visits them.
+pub(crate) fn credential_in_worktree(dir: &Path, budget: Duration) -> CredentialScan {
+    credential_walk(dir, CREDENTIAL_SCAN_LIMIT, budget, true)
+}
+
+/// Directories the worktree credential walk does not descend into.
+///
+/// This is broader than the artifact deletion table on purpose. The artifact table
+/// answers "may this directory be deleted"; the credential walk answers "does this
+/// worktree hold a secret that Git cannot restore". Dependency checkouts and build
+/// caches are reproducible — a Sparkle test key under `.build/checkouts` is the
+/// measured example — and walking them would mark most Swift worktrees Unsafe for a
+/// public test fixture. The recognized artifact names still apply; the extra names
+/// are the ecosystem directories that are not deletion candidates but are still
+/// generated. `.worktrees` is skipped because a nested worktree is judged on its own.
+fn is_worktree_generated_dir(name: &str) -> bool {
+    lookup_kind(name).is_some()
+        || matches!(
+            name,
+            ".build"
+                | ".swiftpm"
+                | "Pods"
+                | "Carthage"
+                | "SourcePackages"
+                | "checkouts"
+                | ".worktrees"
+                | ".cargo"
+                | ".m2"
+        )
+        || name.starts_with(".derivedData")
+        || name.starts_with("DerivedData")
+}
+
+fn credential_walk(
+    dir: &Path,
+    limit: usize,
+    budget: Duration,
+    skip_artifacts: bool,
+) -> CredentialScan {
     let started = Instant::now();
     let mut visited = 0usize;
     let mut stack = vec![dir.to_path_buf()];
@@ -859,6 +908,9 @@ fn credential_in_within(dir: &Path, limit: usize, budget: Duration) -> Credentia
                 return CredentialScan::Complete(Some(relative.display().to_string()));
             }
             if name != ".git" && entry.metadata().is_ok_and(|meta| meta.is_dir()) {
+                if skip_artifacts && is_worktree_generated_dir(&name) {
+                    continue;
+                }
                 stack.push(entry.path());
             }
         }

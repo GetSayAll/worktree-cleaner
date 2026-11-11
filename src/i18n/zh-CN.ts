@@ -72,11 +72,12 @@ export const zhCN = {
       main: "这是主工作树",
       locked: "已被 Git 锁定",
       dirty: "有未提交的改动",
-      unpushed: "有从未推送过的提交",
+      unpushed: "有未推送到上游分支的提交",
       detached: "HEAD 处于游离状态",
       no_upstream: "没有上游分支，且尚未合并",
       unmerged: "未合并进默认分支",
       untracked: "含有未跟踪文件",
+      credentials: "含有疑似凭据文件",
       // 扫描不再产生：stash 属于仓库而不属于被判定 worktree。保留只为让旧审计日志仍能渲染。
       stash: "存在 stash 条目",
       recent_activity: "活动时间窗口内有过提交",
@@ -86,6 +87,7 @@ export const zhCN = {
       prunable: "工作目录已不存在",
       merged: "已合并进默认分支",
       absorbed: "所有提交的改动都已在默认分支中",
+      absorbed_content_changed: "补丁已在默认分支中，但它触及的文件此后又被改过",
       clean: "工作区干净"
     },
     af: {

@@ -265,6 +265,7 @@ All data sources are read-only Git commands; the `.git` file format is never par
 - `git -C <root> stash list --format=%gd` — stash count, read **once per scan** from the repository root. A stash is a repository fact, not a worktree one: `refs/stash` lives in the common Git directory, so every worktree answers with the same list, and `git worktree remove` never touches it. It is carried on the record as a fact and contributes no reason (see §5.1 note).
 - The **HEAD commit time** is taken as "last activity". The directory mtime is *not* part of the signal: it moves only when a top-level entry is created, deleted or renamed, not when a file deeper inside is edited, so a bulk touch (indexer, backup, cleanup script) marks a worktree "recent" that nobody worked in — measured: 22 clean-and-merged worktrees with an 8-10-day-old HEAD were downgraded by one such touch. Genuine recent work is already covered by `wt.dirty` / `wt.untracked` / `wt.agent_active`. If the HEAD time cannot be read, `wt.cannot_verify` holds the verdict at Review and `last_updated_at` stays empty.
 - `git -C <wt> ls-files --others --exclude-standard` — list of untracked files (shown when `--force`).
+- A bounded walk of the worktree root for credential-looking file names, skipping the recognised build and cache directories. Those directories are artifact candidates and §5.2's `af.credentials` checks them when it visits them. Passing the walk's time bound produces `wt.cannot_verify`, never a silent pass.
 
 Decision table:
 
@@ -273,13 +274,15 @@ Decision table:
 | `wt.main` | is the main working tree | Unsafe | first entry of `git worktree list` |
 | `wt.locked` | has `locked` in porcelain | Unsafe | lock reason (if any) |
 | `wt.dirty` | uncommitted changes > 0 | Unsafe | `N files with uncommitted changes` |
-| `wt.unpushed` | ahead > 0 | Unsafe | `N commits not pushed` |
-| `wt.detached` | detached HEAD with no upstream | Review | `HEAD is detached` |
+| `wt.unpushed` | ahead > 0 **and** not merged/absorbed | Review | `N commits not pushed to <upstream>; the branch ref is kept when the worktree is removed` |
+| `wt.detached` | detached HEAD with no upstream **and** not merged/absorbed | Review | `HEAD is detached` |
 | `wt.no_upstream` | no upstream and not merged | Review | `branch has no upstream and is not merged into main` |
 | `wt.unmerged` | not merged into the default branch | Review | `not merged into main` |
-| `wt.absorbed` | every commit already has an equivalent patch in the default branch, though the commits are not ancestors of it | Safe (positive) | `2 commits have an equivalent patch in origin/main` |
+| `wt.absorbed` | every commit already has an equivalent patch in the default branch **and** the default branch still holds the content this branch produced | Safe (positive) | `2 commits have an equivalent patch in origin/main` |
+| `wt.absorbed_content_changed` | the patch-id matches, but files the branch touched changed afterwards | Review | `N touched files changed after the merge; the content this branch produced is no longer identical` |
 | `wt.untracked` | untracked files > 0 | Review (configurable to Unsafe) | `N untracked files` |
-| `wt.recent_activity` | the HEAD commit is newer than the activity window (default 3 days) | Review | `last activity: 2 days ago` |
+| `wt.credentials` | a credential-looking file sits in the worktree outside the build and cache directories, and Git does not track it | Unsafe | `<relative path> is inside; deleting the worktree would delete it too` |
+| `wt.recent_activity` | the HEAD commit is newer than the activity window (default 3 days) **and** the worktree is not clean-and-already-in-the-default-branch | Review | `last activity: 2 days ago` |
 | `wt.agent_active` | a `.git/index.lock` exists in the directory | Review | `index.lock present, possibly in use` |
 | `wt.cannot_verify` | any check timed out / no permission / command failed | Review | `cannot read status: <reason>` |
 | `wt.whitelisted` | matches the user whitelist | Unsafe | `matches whitelist: <rule>` |
@@ -287,9 +290,17 @@ Decision table:
 | `wt.merged` | merged into the default branch | Safe (positive) | `merged into main` |
 | `wt.clean` | no changes, no untracked files | Safe (positive) | `working tree clean` |
 
-The necessary and sufficient condition for **Safe**: not the main working tree, not locked, no uncommitted changes, ahead = 0, merged into the default branch (`merged_into_default == Some(true)`, or `absorbed_into_default` when a squash merge rewrote the commit), no sign of activity, no `cannot_verify`. If any one is not satisfied, downgrade.
+The necessary and sufficient condition for **Safe**: not the main working tree, not locked, no uncommitted changes, no untracked files, the work is in the default branch (`merged_into_default == Some(true)`, or `absorbed_into_default` when a squash merge rewrote the commit), no untracked credential, and no `cannot_verify`. If any one is not satisfied, downgrade.
 
-**Merged and absorbed are two facts, not one.** `merged_into_default` answers "is this commit an ancestor of the default branch"; `absorbed_into_default` answers "does every commit here have an equivalent patch there", which is `git cherry`'s patch-id comparison. Both are Safe evidence because both are a command's answer rather than a judgement about a diff. A branch that is an ancestor is never also reported as absorbed. What absorption cannot see: a commit applied and then reverted still matches its patch-id, so a reverted change reads as absorbed. Measured when the check was added: 11 of 33 branches reported `wt.unmerged` were fully absorbed.
+**Ahead of the upstream is a branch fact, not a worktree fact.** `git worktree remove` deletes the directory and keeps every branch ref; the product never runs `git branch -d`. `ahead > 0` therefore says nothing about whether this directory can go. When the work is not in the default branch it is a `Review` — the reader should see the commits, and the branch remains — and when the work is already merged or absorbed it is not emitted at all. This is the same distinction that removed the stash count from the verdict; the stash lives in the common Git directory, and an unpushed commit lives on the branch ref.
+
+**A recent commit on a clean, already-merged worktree is attention, not risk.** The HEAD time remains the only activity signal (the directory mtime is not used, for the reason above), and `last_updated_at` still carries it to the detail panel. It only becomes a `Review` reason when the worktree is dirty, untracked, or not already in the default branch — the states in which something could still be lost.
+
+**Merged and absorbed are two facts, not one.** `merged_into_default` answers "is this commit an ancestor of the default branch"; `absorbed_into_default` answers "does every commit here have an equivalent patch there **and** is the content still present", which pairs `git cherry`'s patch-id comparison with a tree comparison over the files the branch touched. Both are Safe evidence because both are commands' answers rather than a judgement about a diff. A branch that is an ancestor is never also reported as absorbed. When the patch-id matches but the files changed after the merge — a later revert and an ordinary edit look the same to a tree comparison — the answer is `wt.absorbed_content_changed` at `Review`, and `absorbed_into_default` stays `false`. Measured when the check was added: 11 of 33 branches reported `wt.unmerged` were fully absorbed.
+
+**Ignored files are deleted too.** A clean worktree can still hold a `.env`, a signing key, or a local configuration file that Git ignores; `git worktree remove` deletes the directory and those files with it. The artifact channel has `af.credentials` for exactly this reason, so the worktree channel runs the same name table at the root, bounded by time and skipping the build and cache directories (the artifact scanner checks those separately). A hit is `Unsafe`; a partial walk is `Review`. An absent file after a full walk is the only pass. A credential-looking file that Git tracks is not a worktree loss — it is in the repository — so it does not block the directory removal.
+
+**A deleted upstream does not hide the file counts.** Git omits `# branch.ab` when the upstream ref is gone, and ahead/behind are then unknown; the changed and untracked entries are still printed. The check reads those counts and reports `wt.dirty` / `wt.untracked` from them. The unknown ahead/behind adds `wt.cannot_verify` only when the work is not already merged or absorbed; a clean worktree whose work is in the default branch is not downgraded for an upstream that no longer exists.
 
 **Stash is deliberately absent from this table.** It was a Review row (`wt.stash`), and it was wrong: `refs/stash` lives in the common Git directory, so all worktrees of a repository report the same list, and `git worktree remove` never touches it. One stash in a repository therefore downgraded every clean worktree it had — measured on a 109-worktree repository, 48 of 48 clean-and-merged worktrees, none of which would have lost anything. The count stays on the record as a fact the detail panel shows; it can no longer move a verdict. The code `wt.stash` is no longer emitted and must not be reused for another meaning (audit logs written before this change still render it).
 

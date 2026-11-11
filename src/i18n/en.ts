@@ -81,11 +81,12 @@ export const en = {
       main: "this is the main worktree",
       locked: "locked by Git",
       dirty: "has uncommitted changes",
-      unpushed: "has commits that were never pushed",
+      unpushed: "has commits not pushed to the upstream branch",
       detached: "HEAD is detached",
       no_upstream: "has no upstream branch and is not merged",
       unmerged: "not merged into the default branch",
       untracked: "has untracked files",
+      credentials: "contains what looks like a credential file",
       // No longer produced by a scan: a stash belongs to the repository, not to the
       // worktree being judged. Kept so that audit logs written before it was withdrawn
       // still render.
@@ -97,6 +98,8 @@ export const en = {
       prunable: "the working directory no longer exists",
       merged: "merged into the default branch",
       absorbed: "every commit has an equivalent patch in the default branch",
+      absorbed_content_changed:
+        "the patch is in the default branch, but the files it touched changed afterwards",
       clean: "clean working tree"
     },
     af: {

@@ -52,11 +52,27 @@ pub enum ReasonCode {
     ///
     /// It is `Safe` because it is a command's answer, not a judgement about a diff.
     /// What it cannot see: a commit applied and then reverted still matches its
-    /// patch-id, so a reverted change reads as absorbed.
+    /// patch-id, so the content comparison is a separate answer
+    /// ([`Self::WtAbsorbedContentChanged`]).
     #[serde(rename = "wt.absorbed")]
     WtAbsorbed,
+    /// The patch is in the default branch, but the files it touched no longer hold
+    /// the content this branch produced.
+    ///
+    /// Separate from [`Self::WtAbsorbed`] because the two answers differ: `git
+    /// cherry` says the patch-id is upstream, while the content comparison says
+    /// whether the effect is still there. A later revert and an ordinary edit after
+    /// the merge look the same to the comparison, so this reason says "cannot
+    /// confirm" rather than asserting a revert. It is `Review`, never `Safe`.
+    #[serde(rename = "wt.absorbed_content_changed")]
+    WtAbsorbedContentChanged,
     #[serde(rename = "wt.untracked")]
     WtUntracked,
+    /// A credential-looking file sits in the worktree outside the build and cache
+    /// directories. `git worktree remove` deletes ignored files too, so this is the
+    /// worktree-level counterpart of [`Self::AfCredentials`].
+    #[serde(rename = "wt.credentials")]
+    WtCredentials,
     /// **No longer emitted.** A stash lives in the common Git directory, so it belongs
     /// to the repository and not to the worktree being judged; reporting it per
     /// worktree downgraded every clean worktree of a repository holding one stash.
@@ -110,7 +126,7 @@ pub enum ReasonCode {
 impl ReasonCode {
     /// All reason codes. Used by the contract-drift test (the serialised value must
     /// match [`Self::as_str`]).
-    pub const ALL: [ReasonCode; 28] = [
+    pub const ALL: [ReasonCode; 30] = [
         ReasonCode::WtMain,
         ReasonCode::WtLocked,
         ReasonCode::WtDirty,
@@ -119,7 +135,9 @@ impl ReasonCode {
         ReasonCode::WtNoUpstream,
         ReasonCode::WtUnmerged,
         ReasonCode::WtAbsorbed,
+        ReasonCode::WtAbsorbedContentChanged,
         ReasonCode::WtUntracked,
+        ReasonCode::WtCredentials,
         ReasonCode::WtStash,
         ReasonCode::WtRecentActivity,
         ReasonCode::WtAgentActive,
@@ -152,7 +170,9 @@ impl ReasonCode {
             ReasonCode::WtNoUpstream => "wt.no_upstream",
             ReasonCode::WtUnmerged => "wt.unmerged",
             ReasonCode::WtAbsorbed => "wt.absorbed",
+            ReasonCode::WtAbsorbedContentChanged => "wt.absorbed_content_changed",
             ReasonCode::WtUntracked => "wt.untracked",
+            ReasonCode::WtCredentials => "wt.credentials",
             ReasonCode::WtStash => "wt.stash",
             ReasonCode::WtRecentActivity => "wt.recent_activity",
             ReasonCode::WtAgentActive => "wt.agent_active",
@@ -402,7 +422,7 @@ mod tests {
                 "reason code must carry a wt. / af. prefix: {s}"
             );
         }
-        assert_eq!(ReasonCode::ALL.len(), 28);
+        assert_eq!(ReasonCode::ALL.len(), 30);
     }
 
     #[test]

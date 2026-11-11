@@ -161,6 +161,7 @@ pub fn execute_plan(
                 // fact and no longer feeds the verdict, so re-reading it here would only
                 // invent a difference for a field the decision does not use.
                 repository_stash_count: Some(record.stash_count),
+                credential_scan_timeout: Duration::from_secs(5),
             },
         );
         if let Some(change) = worktree_change(record, &rechecked) {
