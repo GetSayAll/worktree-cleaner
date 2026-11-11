@@ -431,14 +431,15 @@ pub struct WorktreeRecord {
     /// `None` means undetermined, and **must not** be treated as merged.
     pub merged_into_default: Option<bool>,
     /// Every commit on this branch has an equivalent patch in the default branch,
-    /// and the default branch still holds the content the branch produced — the
-    /// squash-merge answer, from `git cherry`'s patch-id comparison plus the tree
-    /// comparison over the files the branch touched.
+    /// although the commits themselves are not ancestors of it — the squash-merge
+    /// answer, from `git cherry`'s patch-id comparison.
     ///
     /// Separate from `merged_into_default` rather than folded into it: the two are
     /// different facts, and a reader who wants "is the work in the default branch"
     /// has to see which of the two answered. `false` means "not established", never
-    /// "known not to be absorbed".
+    /// "known not to be absorbed". The content answer is separate: a matching patch
+    /// whose files changed afterwards keeps this `true` and emits
+    /// `wt.absorbed_content_changed` at `Review` beside `wt.absorbed`.
     #[serde(default)]
     pub absorbed_into_default: bool,
     pub stash_count: u32,

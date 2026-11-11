@@ -279,7 +279,7 @@ fn the_scanner_reads_a_real_repository_end_to_end() {
     assert!(feature.has_upstream);
     assert!(has(feature, ReasonCode::WtDirty));
     assert!(has(feature, ReasonCode::WtUntracked));
-    assert!(has(feature, ReasonCode::WtUnpushed));
+    assert!(has(feature, ReasonCode::WtUnpushedBranch));
     assert_eq!(feature.safety.status, SafetyStatus::Unsafe);
     // Not merged: its commit is not an ancestor of main.
     assert_eq!(feature.merged_into_default, Some(false));
@@ -294,7 +294,7 @@ fn the_scanner_reads_a_real_repository_end_to_end() {
     assert!(has(spike, ReasonCode::WtClean));
     assert_eq!(spike.safety.status, SafetyStatus::Review);
     assert!(
-        !has(spike, ReasonCode::WtUnpushed),
+        !has(spike, ReasonCode::WtUnpushedBranch),
         "no upstream means no ahead"
     );
 

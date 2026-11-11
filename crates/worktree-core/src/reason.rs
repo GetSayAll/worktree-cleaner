@@ -33,8 +33,19 @@ pub enum ReasonCode {
     WtLocked,
     #[serde(rename = "wt.dirty")]
     WtDirty,
+    /// **No longer emitted.** The old code meant "ahead > 0" at `Unsafe`: the
+    /// commits existed only on the branch and the verdict treated that as a reason
+    /// the directory could not go. `git worktree remove` keeps the branch ref, so
+    /// that was a branch fact, not a worktree fact. The new code is
+    /// [`Self::WtUnpushedBranch`]; this one stays for audit logs written before the
+    /// change and is never reused for another meaning.
     #[serde(rename = "wt.unpushed")]
     WtUnpushed,
+    /// The branch is ahead of its upstream, and the work is not already in the
+    /// default branch. `Review`: removing the worktree keeps the ref, so the commit
+    /// is not lost, but the reader should see that the upstream is behind.
+    #[serde(rename = "wt.unpushed_branch")]
+    WtUnpushedBranch,
     #[serde(rename = "wt.detached")]
     WtDetached,
     #[serde(rename = "wt.no_upstream")]
@@ -51,19 +62,20 @@ pub enum ReasonCode {
     /// `git cherry`, which compares patch-ids rather than ancestry.
     ///
     /// It is `Safe` because it is a command's answer, not a judgement about a diff.
-    /// What it cannot see: a commit applied and then reverted still matches its
-    /// patch-id, so the content comparison is a separate answer
-    /// ([`Self::WtAbsorbedContentChanged`]).
+    /// The code keeps its original meaning: the patch-id is upstream. A commit
+    /// applied and then reverted still matches its patch-id, so the content question
+    /// is a separate reason ([`Self::WtAbsorbedContentChanged`]) emitted beside this
+    /// one; that reason is `Review` and is what keeps the verdict from `Safe`.
     #[serde(rename = "wt.absorbed")]
     WtAbsorbed,
     /// The patch is in the default branch, but the files it touched no longer hold
     /// the content this branch produced.
     ///
-    /// Separate from [`Self::WtAbsorbed`] because the two answers differ: `git
-    /// cherry` says the patch-id is upstream, while the content comparison says
-    /// whether the effect is still there. A later revert and an ordinary edit after
-    /// the merge look the same to the comparison, so this reason says "cannot
-    /// confirm" rather than asserting a revert. It is `Review`, never `Safe`.
+    /// Emitted **beside** [`Self::WtAbsorbed`], not instead of it: the patch answer
+    /// and the content answer are two facts. A later revert and an ordinary edit
+    /// after the merge look the same to the comparison, so this reason says "cannot
+    /// confirm" rather than asserting a revert. It is `Review`, never `Safe`, and
+    /// its presence is what keeps the overall verdict out of `Safe`.
     #[serde(rename = "wt.absorbed_content_changed")]
     WtAbsorbedContentChanged,
     #[serde(rename = "wt.untracked")]
@@ -126,11 +138,12 @@ pub enum ReasonCode {
 impl ReasonCode {
     /// All reason codes. Used by the contract-drift test (the serialised value must
     /// match [`Self::as_str`]).
-    pub const ALL: [ReasonCode; 30] = [
+    pub const ALL: [ReasonCode; 31] = [
         ReasonCode::WtMain,
         ReasonCode::WtLocked,
         ReasonCode::WtDirty,
         ReasonCode::WtUnpushed,
+        ReasonCode::WtUnpushedBranch,
         ReasonCode::WtDetached,
         ReasonCode::WtNoUpstream,
         ReasonCode::WtUnmerged,
@@ -166,6 +179,7 @@ impl ReasonCode {
             ReasonCode::WtLocked => "wt.locked",
             ReasonCode::WtDirty => "wt.dirty",
             ReasonCode::WtUnpushed => "wt.unpushed",
+            ReasonCode::WtUnpushedBranch => "wt.unpushed_branch",
             ReasonCode::WtDetached => "wt.detached",
             ReasonCode::WtNoUpstream => "wt.no_upstream",
             ReasonCode::WtUnmerged => "wt.unmerged",
@@ -422,7 +436,7 @@ mod tests {
                 "reason code must carry a wt. / af. prefix: {s}"
             );
         }
-        assert_eq!(ReasonCode::ALL.len(), 30);
+        assert_eq!(ReasonCode::ALL.len(), 31);
     }
 
     #[test]

@@ -386,17 +386,17 @@ guarantee is named next to it.
 
 | Stage | Criterion | Status |
 |---|---|---|
-| P0 | 1 · `cargo test` green | Met — 228 unit tests plus four integration files (11 + 5 + 5 + 4) |
-| P0 | 2 · every `wt.*` reason code has a test case | Met — all 15 codes in the decision table have a positive and a negative case, every reason asserts non-empty `text` and `evidence`, and `wt.stash` — retained for old audit logs, no longer emitted — has a test asserting it cannot reach a record |
+| P0 | 1 · `cargo test` green | Met — 242 unit tests plus five integration files (11 + 2 + 5 + 6 + 4) |
+| P0 | 2 · every `wt.*` reason code has a test case | Met — all 18 emitted codes in the decision table have a positive and a negative case, every reason asserts non-empty `text` and `evidence`, and `wt.stash` — retained for old audit logs, no longer emitted — has a test asserting it cannot reach a record |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 86 entries. The floor is set to the current count rather than left at 60, so the corpus cannot shrink unnoticed; a generated property test covers 20,000 random paths on top |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
 | P0 | 5 · `cargo clippy -- -D warnings` | Met, and widened into a real gate: `pnpm lint:rust` runs the format check and `cargo clippy --workspace --all-targets`, with `clippy::all`, `clippy::pedantic`, the rustc `unused` group and `unsafe_code` denied in `[workspace.lints]`. `clippy::nursery` stays a warning because those lints are experimental. The ten `pedantic` lints that remain allowed each carry their reason in `Cargo.toml` |
 | P1 | 1 · a tracked `build/` is `Unsafe`, evidence naming the match count | Met — unit, plus a real repository where `dist/` is committed despite an ignore rule |
 | P1 | 2 · `node_modules` is not recognised as a project root | Met — the walk never descends into a directory it has recognised as an artifact, and a real scan reports one record per worktree |
-| P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met — `.git` through `af.nested_git`, credentials through `af.credentials`. Credentials needed a code of their own: they are usually Git-*ignored*, which is precisely the case `af.authored_content` cannot see |
+| P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met — `.git` through `af.nested_git`, credentials through `af.credentials`. Credentials needed a code of their own: they are usually Git-*ignored*, which is precisely the case `af.authored_content` cannot see. The worktree root has its own bounded `wt.credentials` check, because `git worktree remove` deletes ignored files too |
 | P1 | 4 · an escaping symlink is `Unsafe` with the target in evidence | Met |
 | P1 | 5 · a size-measurement timeout is reported honestly | **Renegotiated** — the criterion asked for `Review`; the verdict is now left alone and the size is recorded as `null` with a warning (decision 5) |
-| P1 | 6 · every `af.*` reason code has a test case | Met — all 10 codes |
+| P1 | 6 · every `af.*` reason code has a test case | Met — all 11 codes |
 | P2 | CLI and snapshot contract criteria | Blocked — P2 not started |
 | P3 | 1 · offline over `file://`, a full review can be completed (D22) | Met for the sample data. Dropping in a snapshot file waits on P2, which has no output to drop |
 | P3 | 2 · the page matches the JSON item for item | Blocked — nothing to compare against until P2 |
@@ -767,9 +767,11 @@ was checked to fail without the fix:
    `WorktreeRecord.absorbed_into_default` carries the fact separately from
    `merged_into_default` because they are different facts, and `wt.no_upstream` treats
    an absorbed branch as merged. §5's decision table gained the row, and every locale
-   table gained the message. The revert hole was accepted rather than closed: a commit
-   applied and then reverted still matches its patch-id, so the detail shows the count
-   and the ref it was compared against, not a claimed commit.
+   table gained the message. The revert hole was initially accepted rather than
+   closed: a commit applied and then reverted still matches its patch-id, so the detail
+   shows the count and the ref it was compared against, not a claimed commit. Decision
+   3 below closes it with the content comparison, and the 2026-11-11 decision gives
+   the content-changed case its own reason code.
 
    Tiers C and D of `docs/WORKTREE_TRIAGE.md` stay out of the core: they are
    judgements about a diff's value, and 19 of the 22 branches that survived the
@@ -786,7 +788,7 @@ was checked to fail without the fix:
    page and the nav badge count — and the banner decides nothing about deletion; it
    only says why the pile will come back.
 
-3. **The activity window is three days, and a reverted change is no longer absorbed.**
+3. **The activity window is three days, and a reverted change is no longer called safe.**
    Two follow-ups to the decision above, both chosen after measuring what the tool
    would and would not have selected on a real machine.
 
@@ -805,13 +807,14 @@ was checked to fail without the fix:
    undoes it — so matching the patch proved only that the patch *had been* applied.
    `content_still_present` now asks whether the default branch holds the same content
    for the files the branch touched (`git diff <head> <target> -- <that file list>`,
-   the list coming from `<target>...<head>`). A revert makes the two sides differ and
-   the branch stays `Review`; the reason carries both halves so the reader can see
-   that the patch matched and the content did not. The comparison is deliberately
-   strict — if the default branch changed one of those files again after the merge,
-   the answer is "cannot confirm", which costs a re-read instead of a silent
-   deletion — and it refuses to confirm past 200 touched files rather than build a
-   command line it cannot reason about.
+   the list coming from `<target>...<head>`). A revert makes the two sides differ; the
+   patch answer remains `wt.absorbed`, the content answer is
+   `wt.absorbed_content_changed` at `Review`, and the overall verdict is `Review`.
+   The reason carries both halves so the reader can see that the patch matched and the
+   content did not. The comparison is deliberately strict — if the default branch
+   changed one of those files again after the merge, the answer is "cannot confirm",
+   which costs a re-read instead of a silent deletion — and it refuses to confirm past
+   200 touched files rather than build a command line it cannot reason about.
 
 **Decided (2026-11-11)**
 
@@ -824,9 +827,11 @@ was checked to fail without the fix:
 
 2. **Unpushed commits are a branch fact, not a worktree fact.** `git worktree remove`
    keeps every branch ref, and the product never runs `git branch -d`, so `ahead > 0`
-   cannot make the directory unsafe. `wt.unpushed` is now `Review`, is not emitted at
-   all when the work is already merged or absorbed, and its evidence names the
-   upstream and says the ref is kept. This is the same reasoning that removed
+   cannot make the directory unsafe. The append-only rule forbids changing the old
+   `wt.unpushed` code from `Unsafe` to `Review`, so `wt.unpushed` is deprecated and no
+   longer emitted, and the new `wt.unpushed_branch` is the `Review` code: it is not
+   emitted at all when the work is already merged or absorbed, and its evidence names
+   the upstream and says the ref is kept. This is the same reasoning that removed
    `wt.stash` from the verdict: the thing that could be lost lives outside the
    directory being deleted.
 
@@ -837,19 +842,24 @@ was checked to fail without the fix:
    read from the same output; only the ahead/behind answer is unknown, and it adds
    `wt.cannot_verify` only when the work is not already merged or absorbed.
 
-4. **Absorption is patch-id plus content, and a content change has its own code.**
-   `wt.absorbed` requires the content comparison to agree. When the patch-id matches
-   but the files changed afterwards, the reason is `wt.absorbed_content_changed` at
-   `Review` — not `wt.unmerged`, which claimed something the check did not establish,
-   and not a revert, which a tree comparison cannot distinguish from an ordinary edit.
+4. **Absorption keeps its patch-id meaning, and a content change has its own code.**
+   `wt.absorbed` still means "every commit has an equivalent patch in the default
+   branch" and stays `Safe`; the append-only rule forbids redefining it as "patch and
+   content". When the patch-id matches but the files changed afterwards,
+   `absorbed_into_default` stays `true`, `wt.absorbed` is emitted, and
+   `wt.absorbed_content_changed` is emitted beside it at `Review`. The Review reason
+   is what keeps the overall verdict out of `Safe`. It is not `wt.unmerged`, which
+   claimed something the check did not establish, and not a revert, which a tree
+   comparison cannot distinguish from an ordinary edit.
 
 5. **The worktree verdict checks credentials too.** `git worktree remove` deletes
    ignored files, so a clean worktree can still contain the one thing that must not be
-   destroyed silently. The root is walked with the same name table as
-   `af.credentials`, skipping the build and cache directories (the artifact scanner
-   checks those). A hit is `wt.credentials` / `Unsafe`; a partial walk is `Review`; a
-   credential-looking file Git tracks does not block, because it is in the repository,
-   not in the directory being deleted.
+   destroyed silently. When the tracked files are clean, the root is walked with the
+   same name table as `af.credentials`, skipping the recognised artifact directories
+   (the artifact scanner checks those) and the reproducible dependency and build trees
+   such as `.build/checkouts` and `SourcePackages`. A hit is `wt.credentials` /
+   `Unsafe`; a partial walk is `Review`; a credential-looking file Git tracks does not
+   block, because it is in the repository, not in the directory being deleted.
 
 6. **A default branch containing `/` is still asked as `origin/<name>`.** The prefix
    test was `contains('/')`, which read `release/2.0` as if it were already

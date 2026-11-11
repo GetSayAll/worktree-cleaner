@@ -81,7 +81,10 @@ export const en = {
       main: "this is the main worktree",
       locked: "locked by Git",
       dirty: "has uncommitted changes",
-      unpushed: "has commits not pushed to the upstream branch",
+      unpushed: "has commits that were never pushed",
+      // The append-only replacement: the old `unpushed` code was Unsafe and is
+      // retained only so audit logs written before the change still render.
+      unpushed_branch: "has commits not pushed to the upstream branch",
       detached: "HEAD is detached",
       no_upstream: "has no upstream branch and is not merged",
       unmerged: "not merged into the default branch",

@@ -277,7 +277,7 @@ export const mockSnapshot: ProjectSnapshot = {
       size_bytes: 1_100_000_000,
       safety: assess([
         { code: "wt.dirty", severity: "Unsafe", text: "uncommitted changes", evidence: "3 files have uncommitted changes" },
-        { code: "wt.unpushed", severity: "Review", text: "commits not pushed to the upstream branch", evidence: "2 commits not pushed to origin/feature; the branch ref is kept when the worktree is removed" },
+        { code: "wt.unpushed_branch", severity: "Review", text: "commits not pushed to the upstream branch", evidence: "2 commits not pushed to origin/feature; the branch ref is kept when the worktree is removed" },
         { code: "wt.unmerged", severity: "Review", text: "not merged into main", evidence: "merge-base determines it is not an ancestor" }
       ])
     },

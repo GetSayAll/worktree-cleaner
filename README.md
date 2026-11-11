@@ -15,9 +15,9 @@ License: GPL-3.0-only
 - Provide verifiable reasons before deletion; read-only by default;
 - Use the system Trash or Recycle Bin for deletion and clean up Git worktree metadata.
 
-## Initial state
+## Status
 
-The current commit contains only the cross-platform project skeleton and the scanner interface. No dependencies were installed, no build cache was generated, and no builds or tests were run.
+The scanner, cleanup planner and executor, audit log, disk-hygiene audit, and the Tauri desktop shell are implemented. The browser preview reads sample data from `src/mock/`; the desktop build reads real scan results over Tauri IPC. The local gates are `pnpm lint:rust` for the Rust workspace, `pnpm test` for the front end, and `pnpm build` for the type check and bundle. `docs/DEV_CONTRACT.md` records the acceptance matrix and the open items.
 
 ## Directory structure
 

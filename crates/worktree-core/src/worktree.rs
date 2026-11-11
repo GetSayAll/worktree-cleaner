@@ -645,12 +645,14 @@ pub fn check_worktree(
                 Ok((false, evidence)) => {
                     // Not an ancestor, which is what a squash merge looks like: the
                     // change is in the default branch but as a different commit. Ask
-                    // the patch question before falling back to "unmerged".
-                    // The `if let` is the whole decision: either every commit already
-                    // has an equivalent patch upstream and the default branch still
-                    // holds that content, or the ancestry answer stands. A patch check
-                    // that could not run is not an upgrade — it must never make a
-                    // worktree look safer than it did (D3).
+                    // the patch question before falling back to "unmerged". The three
+                    // answers are distinct: the patch is there and so is the content
+                    // (`wt.absorbed`, Safe); the patch is there but the content
+                    // changed (`wt.absorbed` plus `wt.absorbed_content_changed`,
+                    // Review); or at least one commit has no equivalent patch
+                    // (`wt.unmerged`, Review). A patch check that could not run is not
+                    // an upgrade — it must never make a worktree look safer than it
+                    // did (D3).
                     match commits_absorbed(runner, repo, head, default_branch) {
                         Ok(AbsorbedAnswer::Absorbed(absorbed_evidence)) => {
                             absorbed = true;
@@ -661,15 +663,26 @@ pub fn check_worktree(
                             ));
                         }
                         // The patch-id matched, but the files it touched no longer
-                        // hold the content this branch produced. A later revert and
-                        // an ordinary edit after the merge look the same here, so the
-                        // reason says what was observed and leaves the verdict at
-                        // Review instead of claiming a revert.
-                        Ok(AbsorbedAnswer::ContentChanged(why)) => reasons.push(Reason::review(
-                            ReasonCode::WtAbsorbedContentChanged,
-                            "the patch is in the default branch, but the content changed afterwards",
-                            format!("{evidence}; {why}"),
-                        )),
+                        // hold the content this branch produced. The patch answer
+                        // keeps its original meaning and stays Safe; the content
+                        // answer is a second reason at Review, so the overall
+                        // verdict cannot be Safe. A later revert and an ordinary
+                        // edit after the merge look the same here, so the second
+                        // reason says what was observed rather than claiming a
+                        // revert.
+                        Ok(AbsorbedAnswer::ContentChanged(why)) => {
+                            absorbed = true;
+                            reasons.push(Reason::safe(
+                                ReasonCode::WtAbsorbed,
+                                "every commit has an equivalent patch in the default branch",
+                                why.clone(),
+                            ));
+                            reasons.push(Reason::review(
+                                ReasonCode::WtAbsorbedContentChanged,
+                                "the patch is in the default branch, but the content changed afterwards",
+                                format!("{evidence}; {why}"),
+                            ));
+                        }
                         Ok(AbsorbedAnswer::NotAbsorbed(why)) => reasons.push(Reason::review(
                             ReasonCode::WtUnmerged,
                             "not merged into the default branch",
@@ -744,12 +757,14 @@ pub fn check_worktree(
     // remove` keeps the ref. When the work is already in the default branch the
     // upstream being behind says nothing about this directory, so no reason is
     // emitted. Otherwise it is a Review — the reader should see the fact, but the
-    // directory can still be removed without losing the commits.
+    // directory can still be removed without losing the commits. The old
+    // `wt.unpushed` code was Unsafe for this fact and is retained for audit logs;
+    // `wt.unpushed_branch` is the append-only replacement.
     if let Some(info) = &status {
         if !upstream_without_ab && info.ahead > 0 && merged != Some(true) && !absorbed {
             let upstream = info.upstream.as_deref().unwrap_or("its upstream");
             reasons.push(Reason::review(
-                ReasonCode::WtUnpushed,
+                ReasonCode::WtUnpushedBranch,
                 "commits are not pushed to the upstream branch",
                 format!(
                     "{} commits not pushed to {upstream}; the branch ref is kept when the worktree is removed",
@@ -1644,7 +1659,11 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             false,
             &default_options(),
         );
-        assert!(has(&record, ReasonCode::WtUnpushed));
+        assert!(has(&record, ReasonCode::WtUnpushedBranch));
+        assert!(
+            !has(&record, ReasonCode::WtUnpushed),
+            "the old Unsafe code is retained for audit logs and must not be emitted"
+        );
         assert_eq!(record.safety.status, SafetyStatus::Review);
         assert_eq!(record.ahead, 2);
         assert_eq!(record.behind, 1);
@@ -1653,7 +1672,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             .safety
             .reasons
             .iter()
-            .find(|reason| reason.code == ReasonCode::WtUnpushed)
+            .find(|reason| reason.code == ReasonCode::WtUnpushedBranch)
             .expect("unpushed reason");
         assert!(
             reason.evidence.contains("origin/feature/x")
@@ -1673,7 +1692,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             false,
             &default_options(),
         );
-        assert!(!has(&record, ReasonCode::WtUnpushed));
+        assert!(!has(&record, ReasonCode::WtUnpushedBranch));
         assert_eq!(record.safety.status, SafetyStatus::Safe);
 
         let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
@@ -1684,7 +1703,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             false,
             &default_options(),
         );
-        assert!(!has(&record, ReasonCode::WtUnpushed));
+        assert!(!has(&record, ReasonCode::WtUnpushedBranch));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1949,12 +1968,14 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
-    fn a_content_change_after_the_merge_is_not_called_absorbed() {
+    fn a_content_change_after_the_merge_is_review_but_the_patch_is_absorbed() {
         // The hole that `git cherry` alone leaves open: the commit that applied the
         // change still matches its patch-id after the content changed, so the patch
-        // check reports "absorbed" while the default branch no longer holds the same
-        // content. The reason must say both halves and must not claim a revert: a
-        // later revert and an ordinary edit look the same to a tree comparison.
+        // answer is still "absorbed" while the default branch no longer holds the
+        // same content. The patch reason keeps its original meaning; a second reason
+        // at Review carries the content answer and keeps the verdict out of Safe. It
+        // must not claim a revert: a later revert and an ordinary edit look the same
+        // to a tree comparison.
         let dir = temp_dir("absorbed-then-changed");
         backdate(&dir, 30 * 86_400);
         let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
@@ -2006,11 +2027,11 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         );
         assert_eq!(record.merged_into_default, Some(false));
         assert!(
-            !record.absorbed_into_default,
-            "an unconfirmed content change must not be called absorbed"
+            record.absorbed_into_default,
+            "the patch-id is upstream; the content answer is separate"
         );
+        assert!(has(&record, ReasonCode::WtAbsorbed));
         assert!(has(&record, ReasonCode::WtAbsorbedContentChanged));
-        assert!(!has(&record, ReasonCode::WtAbsorbed));
         assert!(!has(&record, ReasonCode::WtUnmerged));
         assert_eq!(record.safety.status, SafetyStatus::Review);
         let reason = record
@@ -2988,7 +3009,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             .expect("cannot verify reason");
         assert!(reason.evidence.contains("upstream branch no longer exists"));
         assert!(has(&record, ReasonCode::WtClean));
-        assert!(!has(&record, ReasonCode::WtUnpushed));
+        assert!(!has(&record, ReasonCode::WtUnpushedBranch));
         assert_eq!(record.ahead, 0);
         assert_eq!(record.safety.status, SafetyStatus::Review);
 
@@ -3540,7 +3561,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 "wt.agent_active",
                 "wt.unmerged",
                 "wt.recent_activity",
-                "wt.unpushed",
+                "wt.unpushed_branch",
             ]
         );
         for reason in &record.safety.reasons {

@@ -49,12 +49,14 @@ and a judgement must never reach `Safe` on its own — that is D2/D3 read plainl
 applied*, not that it is still there: apply a change, revert it, and the patch-id of
 the applying commit still matches while the default branch no longer holds the code.
 So B also compares content — `git diff <head> <target> -- <the files this branch
-touched>` — and requires the two sides to agree. A revert makes them disagree and the
-branch stays `Review` as `wt.absorbed_content_changed`; the reason says "cannot
-confirm", not "reverted", because a later revert and an ordinary edit after the merge
-look the same to a tree comparison. The comparison only covers the branch's own
-files, so unrelated work on the default branch cannot make it fail, and it is strict
-on purpose: if the default branch changed one of those files again after the merge,
+touched>` — and requires the two sides to agree. A revert makes them disagree; the
+patch answer stays `wt.absorbed`, the content answer is
+`wt.absorbed_content_changed` at `Review`, and the overall verdict is `Review`. The
+second reason says "cannot confirm", not "reverted", because a later revert and an
+ordinary edit after the merge look the same to a tree comparison. The comparison only
+covers the branch's own files, so unrelated work on the default branch cannot make it
+fail, and it is strict on purpose: if the default branch changed one of those files
+again after the merge,
 the answer is "cannot confirm", which costs a re-read rather than a silent deletion.
 
 Measured cost of getting this wrong: of 22 branches that survived A and B, **19
@@ -136,15 +138,16 @@ Always compare against `origin/<default>`. Never against a bare branch name.
 - **Applied then reverted.** The patch-id still matches while the default branch no
   longer contains the change, which is why tier B pairs the patch question with the
   content comparison above. A branch that was merged and then had its file rewritten
-  afterwards also fails that comparison and stays `Review` — the cost of never calling
-  something absorbed that is not.
+  afterwards also fails that comparison; it stays `Review` because the content answer
+  is unconfirmed — the cost of never calling the removal safe when the content is not.
 - **A branch pushed nowhere reachable.** Reconciled by requiring the default branch
   to be a real remote-tracking ref; a fork nobody can reach is not covered.
 - **Ignored files that matter.** Credentials and local configuration are usually
   ignored by Git. The artifact scanner has `af.credentials` for artifact directories,
   and the worktree verdict runs the same bounded name-table walk at the worktree root
-  (skipping the build and cache directories) as `wt.credentials`. A secret whose name
-  gives nothing away, such as a `config.json` holding a key, is still not covered.
+  as `wt.credentials` when the tracked files are clean, skipping the recognised
+  artifact directories and the reproducible dependency and build trees. A secret whose
+  name gives nothing away, such as a `config.json` holding a key, is still not covered.
 - **Unmerged work that the user still wants.** No command answers this. It is the
   reason `Review` is a real category and not a failure of the tool.
 

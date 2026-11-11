@@ -8,6 +8,7 @@ export type ReasonCode =
   | "wt.locked"
   | "wt.dirty"
   | "wt.unpushed"
+  | "wt.unpushed_branch"
   | "wt.detached"
   | "wt.no_upstream"
   | "wt.unmerged"
@@ -66,9 +67,11 @@ export interface WorktreeRecord {
   /**
    * Every commit here already has an equivalent patch in the default branch,
    * though the commits are not ancestors of it — the squash-merge answer from
-   * `git cherry`, confirmed by the content comparison over the files the branch
-   * touched. Separate from `merged_into_default` because the two are different
-   * facts; `false` means "not established", never "known not to be".
+   * `git cherry`. Separate from `merged_into_default` because the two are
+   * different facts; `false` means "not established", never "known not to be".
+   * The content answer is separate: a matching patch whose files changed
+   * afterwards keeps this `true` and emits `wt.absorbed_content_changed` at
+   * `Review` beside `wt.absorbed`.
    */
   absorbed_into_default: boolean;
   stash_count: number;
