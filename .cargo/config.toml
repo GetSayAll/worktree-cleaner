@@ -1,0 +1,7 @@
+# macOS names a GUI process once, when it registers with LaunchServices, and
+# reads that name from the .app bundle's Info.plist. `tauri dev` runs the bare
+# binary, so the Dock falls back to the executable's file name
+# ("worktree-cleaner"). This runner wraps `cargo run` in a minimal .app bundle
+# built next to the binary, so development shows the product name too.
+[target.'cfg(target_os = "macos")']
+runner = "./scripts/macos-dev-runner.sh"
