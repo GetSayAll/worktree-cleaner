@@ -84,8 +84,10 @@ function scannedAt(iso: string): string {
 <template>
   <div class="welcome">
     <div class="welcome__hero">
-      <p class="faint tiny">{{ messages.welcome.eyebrow }}</p>
-      <h1 class="welcome__title">{{ messages.welcome.title }}</h1>
+      <!-- The page identity is already in the sidebar and the top bar. Keep a
+           heading for assistive technology, but do not repeat the brand and the
+           page name over the one paragraph that explains the tool. -->
+      <h1 class="visually-hidden">{{ messages.welcome.title }}</h1>
       <p class="welcome__lede">{{ " " + messages.welcome.lede + " " }}</p>
     </div>
 
@@ -145,6 +147,8 @@ function scannedAt(iso: string): string {
         <div class="promise__v">{{ messages.welcome.promises.trashBody }}</div>
       </div>
     </div>
+
+    <p class="rules-summary"><strong>{{ messages.rules.shortLabel }}</strong>{{ messages.rules.welcomeSummary }}</p>
 
     <div class="card">
       <div class="card__head">

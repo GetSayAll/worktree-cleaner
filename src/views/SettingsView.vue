@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { history, projectPath, refreshHistory, settings } from "../state";
+import { history, refreshHistory, settings } from "../state";
 import { homePath } from "../format";
 import { LOCALES, messages } from "../i18n";
 import type { LocaleChoice } from "../i18n";
@@ -108,7 +108,6 @@ async function onClearLog() {
     <div class="spread">
       <div>
         <h1>{{ messages.settings.title }}</h1>
-        <p class="faint tiny">{{ messages.settings.currentProject }} <span class="mono">{{ projectPath || messages.common.none }}</span></p>
       </div>
     </div>
 

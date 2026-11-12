@@ -657,6 +657,31 @@ describe("primaryReason", () => {
   });
 });
 
+describe("the execution lock", () => {
+  it("refuses navigation, a reset, and a new scan while cleanup is running", async () => {
+    // Navigation is disabled in the shell, but the guard also lives here: a
+    // disabled button is a visual state, not a security boundary, and a second
+    // scan or a project switch during `execute_plan` would race the deletions.
+    const state = await freshState();
+    state.snapshot.value = mockSnapshot;
+    state.executing.value = true;
+
+    state.goTo("overview");
+    expect(state.view.value, "navigation is ignored").toBe("welcome");
+
+    state.resetToWelcome();
+    expect(state.snapshot.value, "the snapshot is still there").toEqual(mockSnapshot);
+
+    await state.startScan("/tmp/another-project");
+    expect(state.projectPath.value, "no second scan starts").toBe("");
+    expect(state.scanState.running).toBe(false);
+
+    state.executing.value = false;
+    state.goTo("overview");
+    expect(state.view.value, "navigation resumes when execution ends").toBe("overview");
+  });
+});
+
 describe("canOpen", () => {
   it("gates each view on the data it needs", async () => {
     const state = await freshState();

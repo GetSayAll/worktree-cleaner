@@ -4,6 +4,7 @@ import {
   artifacts,
   canOpen,
   counts,
+  executing,
   goTo,
   history,
   isDemoData,
@@ -124,7 +125,7 @@ function rescan() {
           :data-view="item.key"
           class="nav__item"
           :class="view === item.key ? 'is-active' : ''"
-          :disabled="!canOpen(item.key)"
+          :disabled="executing || !canOpen(item.key)"
           @click="goTo(item.key)"
         >
           <span>{{ messages.nav[item.label] }}</span>
@@ -153,8 +154,8 @@ function rescan() {
             <span class="badge badge--review">{{ messages.status.short.Review }} {{ totals.review }}</span>
             <span class="badge badge--unsafe">{{ messages.status.short.Unsafe }} {{ totals.unsafe }}</span>
           </div>
-          <button v-if="hasSnapshot" class="btn" @click="rescan">{{ messages.common.rescan }}</button>
-          <button v-if="hasSnapshot" class="btn" @click="resetToWelcome">{{ messages.app.switchProject }}</button>
+          <button v-if="hasSnapshot" class="btn" :disabled="executing" @click="rescan">{{ messages.common.rescan }}</button>
+          <button v-if="hasSnapshot" class="btn" :disabled="executing" @click="resetToWelcome">{{ messages.app.switchProject }}</button>
         </template>
         <template v-else>
           <span class="topbar__path">{{ messages.app.noProject }}</span>

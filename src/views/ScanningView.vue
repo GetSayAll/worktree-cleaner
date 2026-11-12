@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { cancelScan, projectPath, scanState, SCAN_STAGES } from "../state";
+import { cancelScan, scanState, SCAN_STAGES } from "../state";
 import { scanTrace } from "../mock/snapshot";
 import { formatClock } from "../format";
 import { isDesktop } from "../platform";
@@ -53,7 +53,6 @@ const scannedTrace = desktop ? [] : scanTrace;
   <div class="scan">
     <div class="stack stack--tight">
       <h1>{{ messages.scan.title }}</h1>
-      <p class="mono faint">{{ projectPath }}</p>
     </div>
 
     <div class="card">

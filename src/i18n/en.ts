@@ -67,6 +67,31 @@ export const en = {
       Unsafe: "Blocked"
     }
   },
+  // The rules behind the three verdicts, stated once on the overview and in
+  // shortened form where the reader acts on them. The full decision tables live
+  // in docs/PRODUCT_PLAN.md section 5; this is the reader-facing summary.
+  rules: {
+    title: "Cleanup rules",
+    shortLabel: "Rule:",
+    hint: "Every row follows the same rules; only Safe items are selected by default.",
+    safeBody:
+      "The worktree is clean and its work is in the default branch; or the artifact is rebuildable or empty, and free of protected content.",
+    reviewBody:
+      "Work is unmerged, files are untracked, recent activity could still be lost, or a check did not finish.",
+    unsafeBody: "Main worktree, uncommitted changes, credentials, a lock, tracked files, or the whitelist.",
+    defaultSelected: "Selected by default",
+    defaultUnselected: "Not selected",
+    defaultDisabled: "Cannot be selected",
+    footer:
+      "Worktrees are permanently deleted, but their branch refs are kept; build artifacts go to the system {{trash}} and can be restored. Every item is checked again before execution, and every decision carries a command, a count, or a path as evidence.",
+    worktreesSummary:
+      "Only Safe items are selected by default; Review items must be selected one by one; Unsafe items cannot be selected.",
+    artifactsSummary:
+      "Only rebuildable or empty artifacts with no protected content are deleted. Recent writes or an unfinished check move an item to Review.",
+    welcomeSummary:
+      "After a scan, every item is Safe to delete, Needs review, or Must not delete; only Safe items are selected by default.",
+    planSummary: "Only selected items that pass the re-check run."
+  },
   // One entry per ReasonCode, in the order `src/types.ts` declares them. The core
   // ships the same codes, so a verdict can be rendered in the reader's language
   // instead of the language of the process that found it. `evidence` is not here:
@@ -222,7 +247,6 @@ export const en = {
     emDash: "—",
     detached: "(detached)",
     detachedHead: "(detached HEAD)",
-    unknownAgent: "unknown agent",
     defaultBranch: "default branch",
     unsafeTooltip: "Must not delete items cannot be selected",
     mainWorktree: (name: string) => `${name} (main worktree)`,
@@ -286,7 +310,6 @@ export const en = {
     }
   },
   welcome: {
-    eyebrow: "Worktree Cleaner",
     title: "Project cleanup audit",
     lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted. Scanning is read-only by default. Artifact directories go to the system {{trash}}; worktrees are permanently removed with git worktree remove.",
     pathPlaceholder: "/path/to/your-repo",
@@ -317,7 +340,7 @@ export const en = {
   },
   overview: {
     title: "Overview",
-    subtitle: (root: string, branch: string) => `${root} · default branch ${branch}`,
+    subtitle: (branch: string) => `default branch ${branch}`,
     viewWorktrees: "View Worktree",
     viewArtifacts: "View build artifacts",
     stats: {
@@ -354,6 +377,9 @@ export const en = {
   },
   worktrees: {
     title: "Worktree",
+    mainWorkspaceBadge: "Main workspace · Protected",
+    mainWorkspaceHint: (branch: string) =>
+      `The main workspace is the repository itself. It cannot be deleted and never enters the cleanup plan. The merge check is against ${branch ? `the default branch ${branch}` : "the default branch"}, not the branch checked out in the main workspace.`,
     dataSource:
       "Data source: git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
     // `git worktree add` takes any path, so a worktree of the repository the user
@@ -665,7 +691,7 @@ export const en = {
   },
   plan: {
     title: "Cleanup plan",
-    lede: "Review each item before executing; this page only describes what will happen — nothing has been executed yet. Artifact directories go to the {{trash}}; worktrees are permanently removed with git worktree remove.",
+    lede: "Review each item before executing; this page only describes what will happen — nothing has been executed yet.",
     backToAdjustSelection: "Back to adjust selection",
     stats: {
       removeWorktree: "Remove Worktree",
@@ -748,7 +774,14 @@ export const en = {
     permanenceNote:
       "Worktrees are permanently removed with git and cannot be recovered from the {{trash}}. Only artifact directories go to the {{trash}}.",
     ackConfirm: (n: number) =>
-      `I have reviewed the items listed above, including the untracked files force-deleted in ${n} worktrees, and I understand that worktree removal is permanent`,
+      n > 0
+        ? `I have reviewed the items listed above, including the untracked files force-deleted in ${n} worktrees, and I understand that worktree removal is permanent`
+        : "I have reviewed the items listed above and I understand that worktree removal is permanent",
+    confirmRequired: "Required confirmation",
+    confirmed: "Checked",
+    confirmHint: "Check this box to enable cleanup",
+    confirmRules:
+      "When confirmed: worktrees are permanently deleted and their branch refs are kept; build artifact directories go to the system {{trash}} and can be restored.",
     typeNameBefore: "Type the project directory name",
     typeNameAfter: "to proceed",
     exportTitle: "Plan export (JSON)",
@@ -832,7 +865,6 @@ export const en = {
   },
   settings: {
     title: "Settings",
-    currentProject: "Current project:",
     scanScopeTitle: "Scan scope",
     extraScanPaths: "Extra scan paths",
     extraScanPathsHint:

@@ -34,6 +34,13 @@
    pick anyway, and a CJK family would add megabytes to the repository to fix a
    problem only Windows has.
 
+   Where the CJK family sits matters. It is listed immediately after Inter, before
+   the Latin system faces, because font fallback is per character: Inter covers
+   Latin and digits, so Han and CJK punctuation are then drawn by the same CJK
+   face instead of being split between PingFang and SF Pro (macOS) or between
+   Segoe UI and Microsoft YaHei (Windows). One script, one voice; the mixed line
+   keeps the reader's eye instead of switching shape halfway through.
+
    `public/fonts/` rather than an import from `src/`: the browser preview inlines
    the whole bundle into one HTML file that opens straight off the file system,
    and only a path Vite leaves alone survives that. The licences sit beside the
@@ -81,7 +88,7 @@
   --border-strong: #d4d8de;
   --text: #111418;
   --text-2: #59616e;
-  --text-3: #747c8a;
+  --text-3: #646c78;
   /* One accent, and everything else mixed from it. The three shades used to be
      picked by hand in the light block and again in each dark block, which is why
      the accent could not follow the operating system: there was no single value
@@ -121,7 +128,7 @@
   --sp-6: 24px;
   --sp-7: 32px;
   /* ---------- type scale ----------
-     Eight steps, and no ninth. Every size in this file is one of these; a
+     Seven steps, and no eighth. Every size in this file is one of these; a
      `font-size` written as a number is a size that escaped the scale, and
      `src/typography.test.ts` fails the build when one appears.
 
@@ -129,8 +136,8 @@
      tool needs a caption, a control and a paragraph that are close but distinct,
      and the difference between 12 and 13 is what lets a 12px row meta sit under a
      13px row name without either looking wrong. From 16px up the steps are 4px
-     apart - a page title, a figure and a hero are not read side by side, so they
-     can take a real jump.
+     apart - a page title and a figure are not read side by side, so they can take
+     a real jump.
 
      12  caption   metadata, chips, evidence, table headers, sidebar fine print
      13  ui        nav, buttons, inputs, table cells, row names
@@ -139,7 +146,6 @@
      18  lead      the welcome screen's one paragraph
      22  page      page headings
      26  metric    the figure on a stat card
-     28  hero      the welcome screen's title
 
      12 rather than 10 is deliberate: below 12 the Chinese fallback stops holding
      its shape, and most of this interface is read as text, not scanned as labels. */
@@ -150,8 +156,13 @@
   --fs-lead: 18px;
   --fs-page: 22px;
   --fs-metric: 26px;
-  --fs-hero: 28px;
-  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  /* Two families, one rule each. `--font-ui` is Inter first for Latin and digits,
+     then the CJK face that draws Han and Chinese punctuation, then the native UI
+     face for anything neither of them covers. `--font-mono` is JetBrains Mono for
+     machine text, with the same CJK fallbacks so a Chinese directory name inside
+     a path does not drop into an unnamed default. */
+  --font-ui: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Cascadia Mono", "PingFang SC", "Microsoft YaHei UI", monospace;
   color-scheme: light;
 }
 
@@ -165,7 +176,7 @@
     --border-strong: #363d47;
     --text: #e7eaee;
     --text-2: #99a2af;
-    --text-3: #7c8492;
+    --text-3: #8a93a2;
     --accent: #7d93fb;
     --accent-text: color-mix(in srgb, var(--accent) 85%, white);
     --safe: #4fce9b;
@@ -193,7 +204,7 @@
   --border-strong: #363d47;
   --text: #e7eaee;
   --text-2: #99a2af;
-  --text-3: #7c8492;
+  --text-3: #8a93a2;
   --accent: #7d93fb;
   --accent-text: color-mix(in srgb, var(--accent) 85%, white);
   --safe: #4fce9b;
@@ -264,7 +275,7 @@ html, body, #app { height: 100%; overflow: hidden; }
    hierarchy, not the body text. */
 body {
   margin: 0;
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-ui);
   font-size: var(--fs-body);
   line-height: 1.6;
   color: var(--text);
@@ -276,15 +287,30 @@ body {
 
 /* One type scale, three levels. Sizes are close together on purpose: the weight
    and the tracking do the separating, so a card heading does not have to shout to
-   sit above the line under it. */
-h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.02em; }
+   sit above the line under it.
+
+   Tracking is a property of the script, not of the size. Latin display type is
+   drawn a touch loose at large sizes and tightened here; CJK ideographs are
+   full-width by design, so the same negative tracking only crowds their
+   sidebearings. The negative values therefore live under `:lang(en)`, and every
+   other locale gets the zero the glyphs were designed for. */
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: 0; }
 h1 { font-size: var(--fs-page); line-height: 1.3; }
-h2 { font-size: var(--fs-title); line-height: 1.4; letter-spacing: -0.01em; }
+h2 { font-size: var(--fs-title); line-height: 1.4; letter-spacing: 0; }
 h3 { font-size: var(--fs-ui); line-height: 1.4; letter-spacing: 0; }
+:lang(en) h1 { letter-spacing: -0.02em; }
+:lang(en) h2 { letter-spacing: -0.01em; }
+:lang(zh-CN) h1 { line-height: 1.35; }
 p { margin: 0; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+/* Short headings take a balanced break; running prose takes a prettier last line.
+   Both are progressive: an engine that does not know the value ignores it and
+   keeps the ordinary greedy wrap. */
+h1, h2 { text-wrap: balance; }
+.banner, .notice, .welcome__lede, .promise__v, .field__hint, .setting-row__hint, .sidebar__note, .reason__text { text-wrap: pretty; }
 
 /* Keyboard focus, once, for everything that can hold it. The inputs below add a
    soft ring of their own; this is the fallback for every other control, and it
@@ -391,7 +417,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .nav__count {
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-caption);
-  font-weight: 500;
+  font-weight: 400;
   letter-spacing: 0;
   color: var(--text-3);
 }
@@ -407,7 +433,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   padding: var(--sp-3) var(--sp-2) 0;
   border-top: 1px solid var(--border);
 }
-.sidebar__note { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.55; }
+.sidebar__note { color: var(--text-2); font-size: var(--fs-caption); line-height: 1.55; }
 
 /* The window has no title bar on macOS (`titleBarStyle: Overlay`), so the traffic
    lights float over the top of this column instead of sitting in a strip above it.
@@ -438,7 +464,6 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .topbar__path {
   font-family: var(--mono);
   font-size: var(--fs-ui);
-  letter-spacing: -0.01em;
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -482,10 +507,32 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .row-wrap { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .muted { color: var(--text-2); }
 .faint { color: var(--text-3); }
-.mono { font-family: var(--mono); font-size: var(--fs-caption); letter-spacing: -0.01em; }
+/* Machine text has one default size, the UI step, wherever it sits: a path is the
+   same object in a table, a plan row and a sentence, and it should not change size
+   with the paragraph around it. A caption adds `.tiny` (declared below, so it
+   wins) and evidence keeps its own 12px rule. */
+.mono { font-family: var(--mono); font-size: var(--fs-ui); }
 .tiny { font-size: var(--fs-caption); line-height: 1.55; }
+/* A machine string inside a caption is still part of that caption. Without this,
+   a path nested in a 12px sentence rendered a step larger than the words around
+   it, which is the one thing an inline code span must not do. */
+.tiny .mono, .tiny.mono { font-size: var(--fs-caption); }
 .nowrap { white-space: nowrap; }
 .numeric { font-variant-numeric: tabular-nums; }
+/* A page heading that assistive technology can read but the screen does not
+   repeat. The welcome page already shows the product name in the sidebar and the
+   project state in the top bar; its one visible line is the lede. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* ---------- card ---------- */
 /* A card is a sheet of paper on the canvas: a hairline, one shadow step, and the
@@ -523,6 +570,37 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   border-top: 1px solid var(--border);
   background: var(--surface-2);
 }
+
+/* ---------- cleanup rules ----------
+   The three verdicts are the interface's whole argument, so the overview states
+   them once as a legend: a criterion, then what the reader may do about it. The
+   list pages repeat only the line that governs the action on that page. The
+   detailed decision tables stay in docs/PRODUCT_PLAN.md section 5; this is the
+   reader's summary, not a second copy of every reason code. */
+.rules { display: flex; flex-direction: column; gap: var(--sp-3); }
+.rules__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.rules__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-5); }
+.rule {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+.rule__title { display: flex; align-items: center; gap: 6px; font-size: var(--fs-ui); font-weight: 600; line-height: 1.4; }
+.rule__body { color: var(--text-2); font-size: var(--fs-ui); line-height: 1.65; text-wrap: pretty; }
+.rule__default { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; }
+.rules__foot {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+.rules-summary { color: var(--text-2); font-size: var(--fs-ui); line-height: 1.65; text-wrap: pretty; }
+.rules-summary strong { color: var(--text); font-weight: 600; margin-right: 2px; }
 
 /* ---------- stats ----------
    The figure is the only thing with weight here; the label above it is a caption
@@ -574,7 +652,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
-.stat__sub { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; margin-top: 4px; }
+.stat__sub { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .stat__value--safe { color: var(--safe); }
 .stat__value--review { color: var(--review); }
 .stat__value--unsafe { color: var(--unsafe); }
@@ -628,6 +706,21 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   background: transparent;
   color: var(--text-3);
   border-style: dashed;
+}
+/* The main workspace is not a candidate. On the overview strip the chip carries
+   the unsafe red; inside the worktree list it stays neutral, because the row
+   already has a red edge and a red verdict badge and a third red label would
+   compete with the verdict rather than explain it. */
+.chip--protected {
+  background: var(--surface-3);
+  color: var(--text-2);
+  border-color: var(--border);
+  font-weight: 500;
+}
+.main-workspace .chip--protected {
+  background: var(--unsafe-bg);
+  color: var(--unsafe);
+  border-color: var(--unsafe-border);
 }
 
 /* ---------- buttons ----------
@@ -710,7 +803,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   box-shadow: 0 0 0 3px var(--ring);
 }
 .input::placeholder { color: var(--text-3); }
-.input--mono { font-family: var(--mono); font-size: var(--fs-ui); letter-spacing: -0.01em; }
+.input--mono { font-family: var(--mono); font-size: var(--fs-ui); }
 .input--sm { height: 30px; font-size: var(--fs-ui); }
 .input[readonly] { background: var(--surface-2); color: var(--text-2); }
 .textarea {
@@ -842,13 +935,14 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   text-align: left;
   font-size: var(--fs-caption);
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: var(--text-3);
   padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
   white-space: nowrap;
 }
+:lang(en) .table th { letter-spacing: 0.02em; }
 .table td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; font-size: var(--fs-ui); }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr { transition: background-color 0.12s ease; }
@@ -870,6 +964,26 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 /* A path is one unbreakable run of characters, so it needs somewhere to break when
    the column is narrow. Without this it is clipped at the cell edge instead. */
 .table .cell-directory > div, .table .cell-target { overflow-wrap: anywhere; }
+
+/* ---------- main workspace ----------
+   The repository itself, not a deletion candidate. It sits above the rules on
+   the overview and is pinned first on the worktree list; both treatments use the
+   same red edge and the same protected chip, so the reader meets one meaning. */
+.main-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--unsafe);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow), var(--inset);
+}
+.main-workspace__head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.main-workspace__name { font-family: var(--mono); font-size: var(--fs-ui); font-weight: 500; }
+.main-workspace__meta { color: var(--text-3); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.main-workspace__note { color: var(--text-2); font-size: var(--fs-caption); line-height: 1.6; text-wrap: pretty; }
 
 /* ---------- item row ----------
    One item on three lines - what it is, what the scanner found, why - instead of
@@ -896,6 +1010,11 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   transition: background-color 0.1s ease;
 }
 .item-row:last-child { border-bottom: 0; }
+/* The main workspace is pinned first and marked protected. A red inset rule is
+   the same "do not touch" signal as its Unsafe badge, and it survives a hover
+   state that would otherwise flatten the row into the list. */
+.item-row--main { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--unsafe); }
+.item-row--main:hover { background: var(--surface-3); }
 .item-row:hover { background: var(--surface-2); }
 .item-row.is-bundled { opacity: 0.58; }
 /* The overview's rows are a reading list, not a selection: nothing to tick. */
@@ -910,7 +1029,6 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   font-family: var(--mono);
   font-size: var(--fs-ui);
   font-weight: 500;
-  letter-spacing: -0.01em;
   line-height: 20px;
   min-width: 0;
   overflow: hidden;
@@ -920,7 +1038,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 }
 /* The separator is drawn by the metadata itself, so a fact that is missing does
    not leave a stray dot behind the one next to it. */
-.item-row__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; }
+.item-row__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; font-variant-numeric: tabular-nums; }
 .item-row__figures { display: flex; align-items: center; gap: var(--sp-3); padding-top: 1px; }
 .item-row__size { font-size: var(--fs-ui); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); }
 /* Top-aligned, not centred: a row with two reasons is two lines tall, and a
@@ -933,7 +1051,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 /* The worktree page's own path, on the metadata line. It is a fact about the item,
    not its name - the branch above is what the reader recognises the row by - so it
    gives way first when the window is narrow. */
-.item-row__where { font-family: var(--mono); font-size: var(--fs-caption); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-row__where { font-family: var(--mono); font-size: var(--fs-caption); color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* What the table's header row used to hold, since there is no header row now. */
 .select-all {
   display: flex;
@@ -987,7 +1105,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 }
 .reason__mark { font-size: var(--fs-caption); font-weight: 600; margin-right: 4px; }
 .reason__text { min-width: 0; overflow-wrap: anywhere; }
-.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: var(--fs-caption); overflow-wrap: anywhere; }
+.reason__evidence { color: var(--text-2); font-family: var(--mono); font-size: var(--fs-caption); overflow-wrap: anywhere; }
 .reason__evidence::before { content: "· "; }
 .reason--safe .reason__mark { color: var(--safe); }
 .reason--review .reason__mark { color: var(--review); }
@@ -1063,9 +1181,8 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
    and the page after it had two different left and right margins. */
 .welcome { width: 100%; padding: var(--sp-4) 0 var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-5); }
 .welcome__hero { display: flex; flex-direction: column; gap: 10px; max-width: 74ch; }
-.welcome__hero .faint { letter-spacing: 0.1em; text-transform: uppercase; font-size: var(--fs-caption); }
-.welcome__title { font-size: var(--fs-hero); line-height: 1.2; letter-spacing: -0.035em; }
-.welcome__lede { color: var(--text-2); font-size: var(--fs-lead); line-height: 1.55; letter-spacing: -0.01em; }
+.welcome__lede { color: var(--text-2); font-size: var(--fs-lead); line-height: 1.65; letter-spacing: 0; text-wrap: pretty; }
+:lang(en) .welcome__lede { line-height: 1.55; letter-spacing: -0.01em; }
 
 /* A panel, not a drop target drawn in dashes: the input inside it is the way in,
    dropping is the shortcut. The dashed edge was the loudest border on the page
@@ -1098,8 +1215,10 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
    faded out mid-card read as three progress bars that had each stopped in the same
    place, which is a claim about state that these panels do not make. The three
    terms are told apart by their headings, and they share the page's one surface. */
-.promise__k { font-weight: 600; font-size: var(--fs-ui); letter-spacing: -0.01em; margin-bottom: 3px; }
-.promise__v { color: var(--text-3); font-size: var(--fs-ui); line-height: 1.65; }
+/* The three promises are cards, not footnote rows: the title takes the card-heading
+   step so the body below it has something to sit under. */
+.promise__k { font-weight: 600; font-size: var(--fs-title); line-height: 1.4; margin-bottom: 4px; }
+.promise__v { color: var(--text-2); font-size: var(--fs-body); line-height: 1.65; text-wrap: pretty; }
 
 .recent-list { display: flex; flex-direction: column; gap: 6px; }
 .recent {
@@ -1246,13 +1365,34 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 }
 .actionbar--plan .actionbar__confirm {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-2);
+  border: 1px solid var(--accent-border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-weak);
 }
+/* The confirmation is the gate, so it gets the accent surface, a large checkbox
+   and its own hierarchy. The checkbox used to be the same 14px square as a list
+   row's, which made the one control that unlocks execution the easiest thing on
+   the bar to miss. The whole block is a label: clicking the text toggles it. */
+.confirm { display: flex; align-items: flex-start; gap: var(--sp-3); cursor: pointer; min-width: 0; }
+.confirm__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.confirm__eyebrow { color: var(--accent-text); font-size: var(--fs-caption); font-weight: 600; line-height: 1.4; }
+.confirm__text { color: var(--text); font-size: var(--fs-body); font-weight: 500; line-height: 1.5; text-wrap: pretty; }
+.confirm__hint { color: var(--text-2); font-size: var(--fs-caption); line-height: 1.5; }
+.confirm__rules {
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--accent-border);
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+.check--confirm { width: 18px; height: 18px; border-width: 1.5px; }
+.check--confirm:checked::after { left: 5px; top: 1px; width: 4px; height: 9px; border-width: 0 2px 2px 0; }
 .actionbar--plan .actionbar__confirm .row-wrap { flex: 1 1 auto; }
 .actionbar__side--end { margin-left: auto; }
 .actionbar__summary {
@@ -1514,7 +1654,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
      track's minimum to `auto` and let a long page scroll the document again. */
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
-  .stat-grid, .stat-grid--4, .promise-grid, .detail__grid { grid-template-columns: 1fr; }
+  .stat-grid, .stat-grid--4, .promise-grid, .detail__grid, .rules__grid { grid-template-columns: 1fr; }
   .actionbar { flex-wrap: wrap; }
   .actionbar--plan .actionbar__row { flex-wrap: wrap; }
 }

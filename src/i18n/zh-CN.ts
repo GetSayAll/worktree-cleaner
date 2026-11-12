@@ -60,6 +60,28 @@ export const zhCN = {
       Unsafe: "禁止"
     }
   },
+  // 三种判定背后的规则：总览页完整写一次，其他页面只写读者当场要做的那一条。
+  // 完整判定表在 docs/PRODUCT_PLAN.md 第 5 节，这里是面向读者的摘要。
+  rules: {
+    title: "清理规则",
+    shortLabel: "规则：",
+    hint: "每一行按同一套规则判定；默认只勾选「可安全删除」。",
+    safeBody: "工作区干净且工作已在默认分支；或可重建或为空、没有受保护内容的构建产物。",
+    reviewBody: "有未合并的工作、未跟踪文件、可能丢失的近期活动，或检查未完成。",
+    unsafeBody: "主工作树、未提交改动、凭据、锁定、已跟踪文件或白名单。",
+    defaultSelected: "默认勾选",
+    defaultUnselected: "默认不选",
+    defaultDisabled: "不可勾选",
+    footer:
+      "工作树永久删除目录，分支保留；构建产物进系统{{trash}}，可以恢复。执行前逐项复检，每条判定都附有命令、数量或路径作为证据。",
+    worktreesSummary:
+      "默认只勾选「可安全删除」；「需人工确认」必须逐项勾选；「禁止删除」不可选。",
+    artifactsSummary:
+      "只删除可重建或为空的产物，且没有受保护内容；近期写入或检查未完成时转为「需人工确认」。",
+    welcomeSummary:
+      "扫描后，每一项会判为「可安全删除」「需人工确认」或「禁止删除」；默认只勾选「可安全删除」。",
+    planSummary: "只执行已勾选且复检通过的条目。"
+  },
   // 每个 ReasonCode 一条，顺序与 `src/types.ts` 一致。核心送来的判定理由因此
   // 用读者自己的语言显示，而不是送出它那个进程的语言。`evidence` 不在这里：
   // 那是命令、计数或路径，保持原样。
@@ -200,7 +222,6 @@ export const zhCN = {
     emDash: "—",
     detached: "（游离）",
     detachedHead: "（游离 HEAD）",
-    unknownAgent: "未知代理",
     defaultBranch: "默认分支",
     unsafeTooltip: "禁止删除的条目无法勾选",
     mainWorktree: (name: string) => `${name}（主工作树）`,
@@ -265,7 +286,6 @@ export const zhCN = {
     }
   },
   welcome: {
-    eyebrow: "Worktree Cleaner",
     title: "项目清理审计",
     lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删。扫描默认只读。产物目录会进系统{{trash}}；工作树由 git worktree remove 永久删除。",
     pathPlaceholder: "/path/to/your-repo",
@@ -295,7 +315,7 @@ export const zhCN = {
   },
   overview: {
     title: "总览",
-    subtitle: (root: string, branch: string) => `${root} · 默认分支 ${branch}`,
+    subtitle: (branch: string) => `默认分支 ${branch}`,
     viewWorktrees: "查看工作树",
     viewArtifacts: "查看构建产物",
     stats: {
@@ -330,6 +350,9 @@ export const zhCN = {
   },
   worktrees: {
     title: "工作树",
+    mainWorkspaceBadge: "主工作区 · 受保护",
+    mainWorkspaceHint: (branch: string) =>
+      `主工作区是仓库本身，不能删除，也不会进入清理计划。合并判定以${branch ? `默认分支 ${branch}` : "默认分支"}为准，不以主工作区当前检出的分支为准。`,
     dataSource:
       "数据来源：git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
     outsideRoot: "在所选目录之外",
@@ -621,7 +644,7 @@ export const zhCN = {
   },
   plan: {
     title: "清理计划",
-    lede: "执行前逐项复核；本页只说明将要发生什么，尚未执行任何操作。产物目录会进{{trash}}；工作树由 git worktree remove 永久删除。",
+    lede: "执行前逐项复核；本页只说明将要发生什么，尚未执行任何操作。",
     backToAdjustSelection: "返回调整选择",
     stats: {
       removeWorktree: "移除工作树",
@@ -698,7 +721,14 @@ export const zhCN = {
     permanenceNote:
       "工作树由 git 永久删除，不能从{{trash}}恢复；只有产物目录会进{{trash}}。",
     ackConfirm: (n: number) =>
-      `我已逐条看过上面的内容，包括 ${n} 个工作树中被 --force 删除的未跟踪文件，并确认工作树删除是永久的`,
+      n > 0
+        ? `我已逐条看过上面的内容，包括 ${n} 个工作树中被 --force 删除的未跟踪文件，并确认工作树删除是永久的`
+        : "我已逐条看过上面的内容，并确认工作树删除是永久的",
+    confirmRequired: "必须确认",
+    confirmed: "已勾选",
+    confirmHint: "勾选后才能执行清理",
+    confirmRules:
+      "确认后执行：工作树永久删除，分支保留；构建产物目录进系统{{trash}}，可以恢复。",
     typeNameBefore: "请输入项目目录名",
     typeNameAfter: "以继续",
     exportTitle: "计划导出（JSON）",
@@ -781,7 +811,6 @@ export const zhCN = {
   },
   settings: {
     title: "设置",
-    currentProject: "当前项目：",
     scanScopeTitle: "扫描范围",
     extraScanPaths: "额外扫描路径",
     extraScanPathsHint: "每行一条；留空则使用默认值（~/MySrc、~/dev、~/Projects、~/Code）",

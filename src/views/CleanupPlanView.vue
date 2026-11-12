@@ -163,8 +163,10 @@ async function copyPlan() {
         <h1>{{ messages.plan.title }}</h1>
         <p class="faint tiny">{{ messages.plan.lede }}</p>
       </div>
-      <button class="btn" @click="goTo('overview')">{{ messages.plan.backToAdjustSelection }}</button>
+      <button class="btn" :disabled="executing" @click="goTo('overview')">{{ messages.plan.backToAdjustSelection }}</button>
     </div>
+
+    <p class="rules-summary"><strong>{{ messages.rules.shortLabel }}</strong>{{ messages.rules.planSummary }}</p>
 
     <div class="stat-grid stat-grid--4">
       <StatCard :label="messages.plan.stats.removeWorktree" :value="`${plan.worktree_removals.length}`" :sub="messages.plan.stats.removeWorktreeSub" />
@@ -325,7 +327,7 @@ async function copyPlan() {
     <div v-if="showExport" class="card">
       <div class="card__head">
         <h2>{{ messages.plan.exportTitle }}</h2>
-        <button class="btn btn--ghost" @click="copyPlan">{{ copied ? messages.common.copied : messages.plan.copy }}</button>
+        <button class="btn btn--ghost" :disabled="executing" @click="copyPlan">{{ copied ? messages.common.copied : messages.plan.copy }}</button>
       </div>
       <div class="card__body">
         <pre class="code">{{ planJson }}</pre>
@@ -338,20 +340,25 @@ async function copyPlan() {
         <span>{{ messages.plan.checks.recheckNotice }}</span>
       </div>
       <div v-if="needsAck || needsName" class="actionbar__confirm">
-        <label v-if="needsAck" class="row-wrap" style="gap: 8px">
-          <input v-model="acknowledged" class="check" type="checkbox" />
-          <span>{{ messages.plan.ackConfirm(forceItems.length) }}</span>
+        <label v-if="needsAck" class="confirm">
+          <input v-model="acknowledged" class="check check--confirm" type="checkbox" :disabled="executing" />
+          <span class="confirm__body">
+            <span class="confirm__eyebrow">{{ acknowledged ? messages.plan.confirmed : messages.plan.confirmRequired }}</span>
+            <span class="confirm__text">{{ messages.plan.ackConfirm(forceItems.length) }}</span>
+            <span v-if="!acknowledged" class="confirm__hint">{{ messages.plan.confirmHint }}</span>
+          </span>
         </label>
         <div v-if="needsName" class="row-wrap" style="gap: 8px">
           <span class="field__label">
             {{ " " + messages.plan.typeNameBefore }} <span class="mono">{{ projectName }}</span> {{ messages.plan.typeNameAfter + " " }}
           </span>
-          <input v-model="confirmText" class="input input--mono" style="max-width: 240px" />
+          <input v-model="confirmText" class="input input--mono" style="max-width: 240px" :disabled="executing" />
         </div>
+        <p class="confirm__rules">{{ messages.plan.confirmRules }}</p>
       </div>
       <div class="actionbar__row">
         <div class="actionbar__side">
-          <button class="btn" data-nav-back="artifacts" @click="goTo('artifacts')">
+          <button class="btn" data-nav-back="artifacts" :disabled="executing" @click="goTo('artifacts')">
             {{ messages.plan.backToAdjust }}
           </button>
         </div>
@@ -360,7 +367,7 @@ async function copyPlan() {
           <!-- Same height as the button beside it: two buttons of different sizes in
                one row do not read as a pair, and the taller one sets the row height so
                the shorter one floats. -->
-          <button class="btn btn--lg" @click="showExport = !showExport">
+          <button class="btn btn--lg" :disabled="executing" @click="showExport = !showExport">
             {{ showExport ? messages.plan.hideExport : messages.plan.exportPlan }}
           </button>
           <button

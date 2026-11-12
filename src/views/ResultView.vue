@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { executeError, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
+import { executeError, executing, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
 import { detailText, formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
@@ -84,12 +84,11 @@ const logFailure = computed(() => {
     <div class="spread">
       <div>
         <h1>{{ messages.result.title }}</h1>
-        <p class="faint tiny mono">{{ projectPath }}</p>
       </div>
       <div class="row-wrap">
         <button class="btn" @click="openSystemTrash">{{ messages.result.openTrash }}</button>
         <button class="btn" @click="goTo('history')">{{ messages.result.openLog }}</button>
-        <button class="btn btn--primary" @click="startScan(projectPath)">{{ messages.common.rescan }}</button>
+        <button class="btn btn--primary" :disabled="executing" @click="startScan(projectPath)">{{ messages.common.rescan }}</button>
       </div>
     </div>
 

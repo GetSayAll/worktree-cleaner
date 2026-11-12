@@ -80,6 +80,24 @@ const attributeDark = block((selector) => selector === ':root[data-theme="dark"]
 const tokens = (entry: Block) =>
   Object.fromEntries(Object.entries(entry.declarations).filter(([name]) => name.startsWith("--")));
 
+/** WCAG relative luminance of a six-digit hex colour. */
+function luminance(hex: string): number {
+  const channels = hex
+    .replace("#", "")
+    .match(/../g)
+    ?.map((pair) => Number.parseInt(pair, 16) / 255)
+    .map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+  if (!channels || channels.length !== 3) throw new Error(`not a six-digit hex colour: ${hex}`);
+  const [red, green, blue] = channels;
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+/** WCAG contrast ratio between two hex colours. */
+function contrast(foreground: string, background: string): number {
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 describe("theme stylesheet", () => {
   it("declares the same palette in both dark blocks", () => {
     // Same names, same values: the manual choice and the OS preference must
@@ -96,9 +114,40 @@ describe("theme stylesheet", () => {
 
   it("keeps the radius and font tokens out of the dark overrides", () => {
     // Layout tokens are not theme dependent; overriding them would be a mistake.
-    for (const name of ["--radius-sm", "--radius", "--radius-lg", "--mono"]) {
+    for (const name of ["--radius-sm", "--radius", "--radius-lg", "--font-ui", "--mono"]) {
       expect(mediaDark.declarations).not.toHaveProperty(name);
       expect(attributeDark.declarations).not.toHaveProperty(name);
+    }
+  });
+
+  it("keeps secondary text at AA contrast on every surface", () => {
+    // The caption grey carried evidence, metadata and the read-only advisory at
+    // 12px, and light `--text-3` (#747c8a) measured 3.75-4.21:1 on the surfaces it
+    // was used against - below the 4.5:1 AA floor. Small CJK text is the first
+    // thing to look washed out at that ratio, which is exactly what it did.
+    //
+    // Surfaces and tinted verdict backgrounds are both checked because the same
+    // token paints on both. The thresholds are the reason the two greys moved; a
+    // future palette edit has to keep them above the floor.
+    const surfaces = [
+      "--bg",
+      "--surface",
+      "--surface-2",
+      "--surface-3",
+      "--safe-bg",
+      "--review-bg",
+      "--unsafe-bg"
+    ];
+    for (const [name, entry] of [
+      ["light", light],
+      ["dark", attributeDark]
+    ] as const) {
+      for (const ink of ["--text-2", "--text-3"]) {
+        for (const surface of surfaces) {
+          const ratio = contrast(entry.declarations[ink], entry.declarations[surface]);
+          expect(ratio, `${name}: ${ink} on ${surface} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
     }
   });
 

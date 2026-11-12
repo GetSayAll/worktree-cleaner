@@ -106,6 +106,8 @@ function sizeText(item: ArtifactRecord): string {
       <span class="faint tiny">{{ " " + messages.artifacts.caption + " " }}</span>
     </div>
 
+    <p class="rules-summary"><strong>{{ messages.rules.shortLabel }}</strong>{{ messages.rules.artifactsSummary }}</p>
+
     <div class="row-wrap">
       <div class="segmented">
         <button :class="sortMode === 'size' ? 'is-active' : ''" @click="sortMode = 'size'">{{ messages.artifacts.bySize }}</button>

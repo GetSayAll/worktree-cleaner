@@ -13,7 +13,7 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
-import { compareByActionability, compareSizeNullsFirst, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
+import { basename, compareByActionability, compareSizeNullsFirst, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
 type FilterKey = "all" | SafetyStatus;
@@ -23,6 +23,13 @@ const query = ref("");
 const expanded = ref<string[]>([]);
 
 const root = computed(() => snapshot.value?.root ?? "");
+
+/** The remote-tracking ref the merge check actually uses, for the protected hint. */
+const defaultBranchRef = computed(() => {
+  const branch = snapshot.value?.default_branch;
+  if (!branch) return "";
+  return branch.startsWith("origin/") ? branch : `origin/${branch}`;
+});
 
 /**
  * How many disk-hygiene rules the core reported as violated for this repository.
@@ -70,8 +77,11 @@ const filtered = computed<WorktreeRecord[]>(() => {
     return item.path.toLowerCase().includes(q) || (item.branch || "").toLowerCase().includes(q);
   });
   // Copied before sorting: `worktrees` is a computed over the snapshot, and
-  // sorting in place would reorder the array the other pages read.
+  // sorting in place would reorder the array the other pages read. The main
+  // workspace is pinned first: it is protected, and it is the anchor every other
+  // worktree is judged against, so it must not be buried among the Unsafe rows.
   return [...matched].sort((a, b) => {
+    if (a.is_main !== b.is_main) return a.is_main ? -1 : 1;
     const byStatus = compareByActionability(a, b);
     if (byStatus !== 0) return byStatus;
     return compareSizeNullsFirst(a.size_bytes, b.size_bytes);
@@ -103,7 +113,10 @@ function upstreamText(item: WorktreeRecord): string {
 
 function mergeText(item: WorktreeRecord): string {
   if (item.is_main) return messages.worktrees.mergeMain;
-  const branch = snapshot.value?.default_branch || messages.common.defaultBranch;
+  // The merge check uses the remote-tracking default branch (`origin/main`), not
+  // whatever local branch the main workspace has checked out. Show the ref the
+  // command actually used, so the detail panel agrees with the evidence line.
+  const branch = defaultBranchRef.value || messages.common.defaultBranch;
   // Absorption is checked before the ancestry answer: the commit is not an ancestor,
   // so `merged_into_default` is false here, and reporting that alone would hide the
   // one fact that matters — the change is already in the default branch.
@@ -130,6 +143,8 @@ function stateText(item: WorktreeRecord): string {
       <h1>{{ messages.worktrees.title }}</h1>
       <span class="faint tiny">{{ " " + messages.worktrees.dataSource + " " }}</span>
     </div>
+
+    <p class="rules-summary"><strong>{{ messages.rules.shortLabel }}</strong>{{ messages.rules.worktreesSummary }}</p>
 
     <div v-if="hygieneViolations > 0" class="banner banner--warn">
       <span>!</span>
@@ -164,7 +179,7 @@ function stateText(item: WorktreeRecord): string {
           <span>{{ messages.worktrees.selectAll }}</span>
         </div>
         <template v-for="item in filtered" :key="item.path">
-          <div class="item-row">
+          <div class="item-row" :class="{ 'item-row--main': item.is_main }">
             <div class="item-row__check">
               <input
                 class="check"
@@ -178,10 +193,11 @@ function stateText(item: WorktreeRecord): string {
             <div class="item-row__main">
               <div class="item-row__head">
                 <span class="item-row__name">{{ item.branch || messages.common.detachedHead }}</span>
-                <span class="chip">{{ item.agent || messages.common.emDash }}</span>
+                <span v-if="item.is_main" class="chip chip--protected" :title="messages.worktrees.mainWorkspaceHint(defaultBranchRef)">{{ messages.worktrees.mainWorkspaceBadge }}</span>
+                <span v-if="item.agent" class="chip">{{ item.agent }}</span>
               </div>
               <div class="item-row__meta">
-                <span class="item-row__where" :title="item.path">{{ displayPath(item.path, root) }}</span>
+                <span class="item-row__where" :title="item.path">{{ item.is_main ? basename(item.path) : displayPath(item.path, root) }}</span>
                 <span
                   v-if="isOutsideRoot(item.path)"
                   class="chip chip--outside"

@@ -311,6 +311,7 @@ export function recordSettingChange(key: string, before: string, after: string):
 }
 
 export async function startScan(path: string) {
+  if (executing.value) return;
   const target = path.trim();
   if (!target) return;
 
@@ -394,6 +395,7 @@ export function cancelScan() {
 }
 
 export function resetToWelcome() {
+  if (executing.value) return;
   clearTimers();
   scanState.running = false;
   snapshot.value = null;
@@ -408,6 +410,7 @@ export function resetToWelcome() {
 }
 
 export function goTo(next: ViewKey) {
+  if (executing.value) return;
   if (next === "scanning") return;
   if (next === "history") void refreshHistory();
   view.value = next;
