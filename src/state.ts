@@ -21,6 +21,7 @@ import {
   isDesktop,
   logActivity,
   logPath,
+  onExecutionProgress,
   readActivity,
   readHistory,
   scanProject
@@ -112,6 +113,8 @@ export const executeError = ref<string | null>(null);
 /** Set when the executor could not write the audit log: the actions still ran. */
 export const logError = ref<string | null>(null);
 export const executing = ref(false);
+/** Results that have arrived while the execution is still running, in order. */
+export const executionProgress = ref<ResultEntry[]>([]);
 
 /**
  * Whether the pages are showing the sample snapshot.
@@ -732,7 +735,14 @@ export async function executeCleanup() {
     forced: plan.worktree_removals.filter((item) => item.force).length,
     typed_name: confirmText.value.trim() !== ""
   });
+  executionProgress.value = [];
+  let unlisten: (() => void) | null = null;
   try {
+    // The live list is an enhancement, not a condition for running: if the
+    // event channel is unavailable, the final outcome still carries every row.
+    unlisten = await onExecutionProgress((entry) => {
+      executionProgress.value = [...executionProgress.value, entry];
+    }).catch(() => null);
     const outcome = await executePlan(plan, current, {
       recent_activity_days: settings.active_days,
       untracked_as_unsafe: settings.untracked_is_unsafe,
@@ -749,6 +759,7 @@ export async function executeCleanup() {
   } catch (error) {
     executeError.value = error instanceof Error ? error.message : String(error);
   } finally {
+    unlisten?.();
     executing.value = false;
   }
 }

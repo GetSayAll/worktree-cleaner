@@ -714,14 +714,17 @@ export const zhCN = {
   },
   result: {
     title: "执行结果",
+    successTitle: "清理完成",
+    successSummary: (worktrees: number, artifacts: number, size: string) =>
+      `已移除 ${worktrees} 个工作树，将 ${artifacts} 个产物目录移入{{trash}}，释放 ${size}。`,
+    partialTitle: "清理完成，但有跳过项",
+    partialSummary: (worktrees: number, artifacts: number, size: string, failed: number) =>
+      `已移除 ${worktrees} 个工作树，将 ${artifacts} 个产物目录移入{{trash}}，释放 ${size}。有 ${failed} 个已勾选条目未删除，原因见下表。`,
     openTrash: "打开{{trash}}",
     trashNotice:
       "产物目录会进系统{{trash}}，可以从{{trash}}恢复；工作树由 git 永久删除。",
     noTrashNotice:
       "没有任何目录进入{{trash}}：所有产物移动都在复核时被跳过，原因见下表。",
-    skippedNoticeTitle: "有勾选条目没有被删除",
-    skippedNotice: (n: number) =>
-      `有 ${n} 个已勾选条目没有被删除。原因见下表；重试前请重新扫描。`,
     worktreePermanentNotice: (n: number) =>
       `${n} 个工作树已由 git worktree remove 永久删除，不经过{{trash}}。分支引用仍保留在 Git 中；工作目录和其中的未跟踪文件不会保留。`,
     openLog: "打开日志",

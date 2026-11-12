@@ -93,13 +93,30 @@ pub fn execute_plan(
     snapshot: &ProjectSnapshot,
     opts: &ExecuteOptions,
 ) -> ExecutionOutcome {
+    execute_plan_with_progress(plan, snapshot, opts, |_| {})
+}
+
+/// Runs a plan and reports each item as soon as its result is known.
+///
+/// The executor is serial (D14), so one callback per item is enough to drive a
+/// live list. The full [`ExecutionOutcome`] remains the authority; a consumer
+/// that misses an event still gets every row when the call returns.
+pub fn execute_plan_with_progress<F>(
+    plan: &CleanupPlan,
+    snapshot: &ProjectSnapshot,
+    opts: &ExecuteOptions,
+    mut on_entry: F,
+) -> ExecutionOutcome
+where
+    F: FnMut(&ResultEntry),
+{
     let runner = ProcessGitRunner::new(opts.git_timeout);
     let whitelist: Vec<PathBuf> = opts
         .whitelist
         .iter()
         .map(|rule| crate::path::expand_tilde(rule))
         .collect();
-    let mut audit = Audit::new();
+    let mut audit = Audit::with_observer(&mut on_entry);
     let mut any_worktree_removed = false;
     // The worktrees this run actually removed, so a bundled artifact can be reported
     // against a fact rather than against a claim in the plan. Without it, a plan that
@@ -553,16 +570,29 @@ fn move_to_trash(path: &str) -> Result<(), trash::Error> {
 /// Every action produces exactly one of each, and writing them through one
 /// place is what stops the two from drifting apart: the line the user reads in
 /// the result view and the line the audit log keeps come from the same call.
-struct Audit {
+struct Audit<'a> {
     entries: Vec<ResultEntry>,
     history: Vec<HistoryEntry>,
+    observer: Option<&'a mut dyn FnMut(&ResultEntry)>,
 }
 
-impl Audit {
+impl Audit<'_> {
+    #[cfg(test)]
     const fn new() -> Self {
         Self {
             entries: Vec::new(),
             history: Vec::new(),
+            observer: None,
+        }
+    }
+}
+
+impl<'a> Audit<'a> {
+    fn with_observer(observer: &'a mut dyn FnMut(&ResultEntry)) -> Self {
+        Self {
+            entries: Vec::new(),
+            history: Vec::new(),
+            observer: Some(observer),
         }
     }
 }
@@ -582,7 +612,7 @@ fn push(
         .iter()
         .map(|(name, value)| ((*name).to_string(), value.clone()))
         .collect();
-    audit.entries.push(ResultEntry {
+    let entry = ResultEntry {
         action,
         target: target.to_string(),
         result,
@@ -590,7 +620,8 @@ fn push(
         detail_args: detail_args.clone(),
         detail: None,
         size_bytes,
-    });
+    };
+    audit.entries.push(entry.clone());
     audit.history.push(HistoryEntry {
         at: crate::timefmt::format_rfc3339(SystemTime::now()),
         action,
@@ -603,6 +634,9 @@ fn push(
         detail_args,
         detail: None,
     });
+    if let Some(observer) = audit.observer.as_mut() {
+        observer(&entry);
+    }
 }
 
 /// One decision-relevant field that no longer matches the plan.
@@ -947,6 +981,30 @@ mod tests {
     // ---- plan / snapshot agreement -----------------------------------------
 
     #[test]
+    fn progress_reports_every_entry_once_in_execution_order() {
+        // The UI listens to this callback to animate each row while the run is
+        // still going. It must see every entry the final outcome contains, in
+        // the same order, even when the item is skipped before any file is
+        // touched.
+        let snapshot = snapshot_with("/repo", Vec::new(), Vec::new());
+        let mut plan = plan_with_worktree("/repo/missing-worktree");
+        plan.trash_moves = plan_with_trash_move("/repo/missing-artifact", None).trash_moves;
+
+        let mut seen: Vec<(HistoryAction, String, ExecutionResult)> = Vec::new();
+        let outcome = execute_plan_with_progress(&plan, &snapshot, &execute_options(), |entry| {
+            seen.push((entry.action, entry.target.clone(), entry.result));
+        });
+
+        let expected: Vec<_> = outcome
+            .entries
+            .iter()
+            .map(|entry| (entry.action, entry.target.clone(), entry.result))
+            .collect();
+        assert_eq!(seen, expected);
+        assert_eq!(seen.len(), 2);
+    }
+
+    #[test]
     fn a_worktree_missing_from_the_snapshot_is_skipped() {
         // A plan that arrives without its "before" is refused rather than
         // executed blind (D11): the snapshot is the re-check baseline.
@@ -1237,7 +1295,9 @@ mod tests {
             Some(ReasonCode::AfRebuildable),
         );
 
-        let Audit { entries, history } = audit;
+        let Audit {
+            entries, history, ..
+        } = audit;
         assert_eq!(entries.len(), 1);
         assert_eq!(history.len(), 1);
         assert_eq!(entries[0].action, history[0].action);

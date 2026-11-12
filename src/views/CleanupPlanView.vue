@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import {
   acknowledged,
   cleanupPlan,
@@ -7,6 +7,7 @@ import {
   executeCleanup,
   executeError,
   executing,
+  executionProgress,
   goTo,
   projectPath,
   selectedWorktrees,
@@ -44,6 +45,36 @@ const worktreeStatus = computed(
 );
 const artifactStatus = computed(
   () => new Map((snapshot.value?.artifacts ?? []).map((record) => [record.path, record.safety.status]))
+);
+
+type ProgressState = "" | "removed" | "kept";
+
+/** The live result for one row, while the executor is still working. */
+function progressState(path: string, prune = false): ProgressState {
+  const entry = executionProgress.value.find((item) =>
+    prune ? item.action === "prune" : item.target === path
+  );
+  if (!entry) return "";
+  return entry.result === "ok" ? "removed" : "kept";
+}
+
+// Follow the item that just reported. Without this the animation can run on a
+// row far outside the viewport, which tells the reader that something happened
+// but not what. `scrollIntoView` walks up to the pane that actually scrolls.
+watch(
+  () => executionProgress.value.length,
+  async () => {
+    const entry = executionProgress.value.at(-1);
+    if (!entry) return;
+    await nextTick();
+    const row =
+      entry.action === "prune"
+        ? document.querySelector("[data-plan-prune]")
+        : Array.from(document.querySelectorAll("[data-plan-target]")).find(
+            (element) => element.getAttribute("data-plan-target") === entry.target
+          );
+    row?.scrollIntoView({ block: "center" });
+  }
 );
 const needsAck = computed(() => plan.value.ack_reasons.length > 0);
 const needsName = computed(() => settings.require_project_name);
@@ -207,7 +238,13 @@ async function copyPlan() {
             v-for="item in plan.worktree_removals"
             :key="item.path"
             class="plan-item"
-            :class="item.force ? 'plan-item--force' : ''"
+            :class="{
+              'plan-item--force': item.force,
+              'is-removed': progressState(item.path, item.command.startsWith('git worktree prune')) === 'removed',
+              'is-kept': progressState(item.path, item.command.startsWith('git worktree prune')) === 'kept'
+            }"
+            :data-plan-target="item.command.startsWith('git worktree prune') ? undefined : item.path"
+            :data-plan-prune="item.command.startsWith('git worktree prune') ? 'true' : undefined"
           >
             <div class="plan-item__main">
               <div class="row-wrap">
@@ -253,7 +290,16 @@ async function copyPlan() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in plan.trash_moves" :key="item.path" :class="{ 'is-bundled': item.bundled_with_worktree !== null }">
+            <tr
+              v-for="item in plan.trash_moves"
+              :key="item.path"
+              :class="{
+                'is-bundled': item.bundled_with_worktree !== null,
+                'is-removed': progressState(item.path) === 'removed',
+                'is-kept': progressState(item.path) === 'kept'
+              }"
+              :data-plan-target="item.path"
+            >
               <td class="cell-directory">
                 <div class="row-wrap">
                   <span class="chip">{{ item.artifact_kind }}</span>

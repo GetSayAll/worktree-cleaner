@@ -830,12 +830,13 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
    table row to a paragraph tall. */
 .table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .table thead th {
-  /* The header stays while the body scrolls. Without this, a table long enough to
-     scroll loses its column labels on the way down and every row has to be read by
-     position. `top: 0` because the content pane above it is what scrolls. */
+  /* The header stays while the body scrolls. The pane has 24px of padding, and
+     a sticky inset resolves against that padding box, so `top: 0` left a 24px
+     strip above the header where the row being animated showed through. The
+     negative inset cancels that padding and pins the header to the pane edge. */
   position: sticky;
-  top: 0;
-  z-index: 1;
+  top: calc(-1 * var(--sp-6));
+  z-index: 2;
 }
 .table th {
   text-align: left;
@@ -1323,6 +1324,28 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   }
   .spinner { border-top-color: currentColor; opacity: 0.5; }
   .busy-strip__bar::after { width: 100%; opacity: 0.5; }
+  .plan-item.is-removed {
+    animation: none;
+    opacity: 0.55;
+    box-shadow: inset 4px 0 0 var(--safe);
+  }
+  .plan-item.is-kept {
+    animation: none;
+    box-shadow: inset 4px 0 0 var(--review);
+  }
+  .table tbody tr.is-removed,
+  .result-row--removed {
+    animation: none;
+    opacity: 0.55;
+  }
+  .table tbody tr.is-kept,
+  .result-row--kept {
+    animation: none;
+  }
+  .result-hero,
+  .result-hero__mark {
+    animation: none;
+  }
 }
 
 /* ---------- plan ---------- */
@@ -1335,6 +1358,48 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   background: var(--surface-2);
 }
 .plan-item--force { border-color: var(--review-border); background: var(--review-bg); }
+
+/* Per-item execution feedback. A row that left gets a green edge and slides
+   aside; a row that stayed gets an amber edge and a short shake. The row is not
+   removed from the list: the result page still has to explain every item. */
+@keyframes plan-item-removed {
+  0% { opacity: 1; transform: translateX(0); box-shadow: inset 0 0 0 var(--safe); }
+  30% { opacity: 1; transform: translateX(-2px); box-shadow: inset 4px 0 0 var(--safe); }
+  100% { opacity: 0.5; transform: translateX(14px); box-shadow: inset 4px 0 0 var(--safe); }
+}
+@keyframes plan-item-kept {
+  0% { opacity: 1; transform: translateX(0); box-shadow: inset 0 0 0 var(--review); }
+  20% { transform: translateX(-4px); box-shadow: inset 4px 0 0 var(--review); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+  100% { opacity: 1; transform: translateX(0); box-shadow: inset 4px 0 0 var(--review); }
+}
+.plan-item.is-removed {
+  animation: plan-item-removed 700ms ease-out both;
+}
+.plan-item.is-kept {
+  animation: plan-item-kept 650ms ease-in-out both;
+}
+/* Table rows cannot take the transform/shadow treatment: under
+   `border-collapse: collapse` a transformed row paints outside its cell grid and
+   can sit over the sticky header. The colour flash carries the same distinction
+   without moving the row. */
+@keyframes table-row-removed {
+  0% { opacity: 1; background-color: var(--safe-bg); }
+  60% { opacity: 1; background-color: var(--safe-bg); }
+  100% { opacity: 0.55; background-color: transparent; }
+}
+@keyframes table-row-kept {
+  0%, 100% { background-color: transparent; }
+  20%, 60% { background-color: var(--review-bg); }
+}
+.table tbody tr.is-removed {
+  animation: table-row-removed 700ms ease-out both;
+}
+.table tbody tr.is-kept {
+  animation: table-row-kept 650ms ease-in-out both;
+}
 .plan-item__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
 /* The command sits on the panel it belongs to, so it takes the page canvas as its
    ground: on `--surface-2` inside a `--surface-2` card the code block and the card
@@ -1361,6 +1426,62 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .gate__mark--bad { color: var(--unsafe); }
 
 /* ---------- result ---------- */
+/* ---------- result ---------- */
+.result-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--safe-border);
+  border-radius: var(--radius-lg);
+  background: var(--safe-bg);
+  color: var(--safe);
+  box-shadow: var(--shadow), var(--inset);
+  animation: result-hero-in 500ms ease-out both;
+}
+.result-hero--partial { border-color: var(--review-border); background: var(--review-bg); color: var(--review); }
+.result-hero__mark {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: var(--surface);
+  font-size: var(--fs-metric);
+  font-weight: 700;
+  line-height: 1;
+  animation: result-mark-in 650ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.result-hero__copy { min-width: 0; }
+.result-hero__copy h2 { font-size: var(--fs-title); line-height: 1.25; letter-spacing: -0.02em; }
+.result-hero__copy p { margin-top: 3px; color: var(--text-2); font-size: var(--fs-ui); line-height: 1.55; overflow-wrap: anywhere; }
+@keyframes result-hero-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes result-mark-in {
+  0% { opacity: 0; transform: scale(0.4); }
+  60% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes result-row-removed {
+  0% { opacity: 0; background-color: var(--safe-bg); }
+  35% { opacity: 1; background-color: var(--safe-bg); }
+  100% { opacity: 0.55; background-color: transparent; }
+}
+@keyframes result-row-kept {
+  0% { opacity: 0; background-color: var(--review-bg); }
+  25% { opacity: 1; background-color: var(--review-bg); }
+  55% { background-color: transparent; }
+  75% { background-color: var(--review-bg); }
+  100% { background-color: transparent; }
+}
+.result-row--removed { animation: result-row-removed 650ms ease-out both; }
+.result-row--kept { animation: result-row-kept 650ms ease-in-out both; }
+
 .outcome { font-size: var(--fs-ui); font-weight: 500; }
 .outcome--ok { color: var(--safe); }
 .outcome--skipped { color: var(--review); }

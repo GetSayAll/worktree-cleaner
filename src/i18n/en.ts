@@ -765,14 +765,17 @@ export const en = {
   },
   result: {
     title: "Result",
+    successTitle: "Cleanup complete",
+    successSummary: (worktrees: number, artifacts: number, size: string) =>
+      `Removed ${worktrees} worktrees, moved ${artifacts} artifact directories to the {{trash}}, and freed ${size}.`,
+    partialTitle: "Cleanup finished with skipped items",
+    partialSummary: (worktrees: number, artifacts: number, size: string, failed: number) =>
+      `Removed ${worktrees} worktrees, moved ${artifacts} artifact directories to the {{trash}}, and freed ${size}. ${failed} selected items were not deleted; the table below says why.`,
     openTrash: "Open {{trash}}",
     trashNotice:
       "Artifact directories go to the system {{trash}} and are recoverable from there; worktrees are permanently removed with git.",
     noTrashNotice:
       "Nothing reached the {{trash}}: every trash move was skipped on re-check. The table below names the reason for each one.",
-    skippedNoticeTitle: "Some selected items were not deleted",
-    skippedNotice: (n: number) =>
-      `${n} selected items were not deleted. The table below names the reason for each one; rescan before retrying.`,
     worktreePermanentNotice: (n: number) =>
       `${n} worktrees were permanently removed with git worktree remove and do not go to the {{trash}}. Their branch refs remain in Git; their working directories and any untracked files do not.`,
     openLog: "Open log",

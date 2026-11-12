@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { mockRoot, mockSnapshot } from "./mock/snapshot";
 import { assess } from "./types";
-import type { ExecutionOutcome } from "./types";
+import type { ExecutionOutcome, ResultEntry } from "./types";
 import { basename, formatBytes, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
 import { messages } from "./i18n";
 import { primaryReason } from "./state";
@@ -28,10 +28,12 @@ async function freshStateWithExecutor(
   state: typeof import("./state");
   plans: unknown[];
   logActivity: ReturnType<typeof vi.fn>;
+  progressHandlers: Array<(entry: ResultEntry) => void>;
 }> {
   vi.resetModules();
   const plans: unknown[] = [];
   const logActivity = vi.fn(async () => undefined);
+  const progressHandlers: Array<(entry: ResultEntry) => void> = [];
   vi.doMock("./platform", () => ({
     isDesktop: () => true,
     // The message tables resolve their platform wording through this, so a mock
@@ -47,10 +49,14 @@ async function freshStateWithExecutor(
     // The activity log is written fire-and-forget, so a mock that collects it is
     // enough to prove the calls happen without turning every test into a file.
     logActivity,
+    onExecutionProgress: async (handler: (entry: ResultEntry) => void) => {
+      progressHandlers.push(handler);
+      return () => {};
+    },
     readActivity: async () => []
   }));
   const state = await import("./state");
-  return { state, plans, logActivity };
+  return { state, plans, logActivity, progressHandlers };
 }
 
 /** Undoes `freshStateWithExecutor` so the next test sees the real boundary. */
@@ -433,6 +439,34 @@ describe("the snapshot follows the executor", () => {
     expect(state.selectedArtifacts.value).toEqual([]);
     expect(state.cleanupPlan.value.worktree_removals).toHaveLength(0);
     expect(state.cleanupPlan.value.trash_moves).toHaveLength(0);
+  });
+
+  it("collects per-item results while the run is still open", async () => {
+    const entry: ResultEntry = {
+      action: "trash-move",
+      target: dist,
+      result: "ok",
+      detail_code: "artifact.trashed",
+      detail_args: {},
+      detail: null,
+      size_bytes: 1
+    };
+    const { state, progressHandlers } = await freshStateWithExecutor({
+      entries: [entry],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.selectedArtifacts.value = [dist];
+
+    const run = state.executeCleanup();
+    // The listener is registered before the IPC call; the test hands it the
+    // same entry the executor later returns.
+    progressHandlers[0]?.(entry);
+    expect(state.executionProgress.value).toEqual([entry]);
+    await run;
+    unmockPlatform();
+    expect(state.lastResult.value).toEqual([entry]);
   });
 
   it("a prune removes the prunable worktree, not the repository root", async () => {

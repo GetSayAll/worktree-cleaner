@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { executeError, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
 import { detailText, formatBytes, displayPath } from "../format";
@@ -9,6 +9,15 @@ import { openTrash, isDesktop } from "../platform";
 const desktop = isDesktop();
 
 const root = computed(() => snapshot.value?.root ?? "");
+
+// The result page is the success page, so it has to open at its own top. The
+// content pane is shared with the plan page and keeps its scroll position; after
+// a run that followed the live rows that position is somewhere in the table,
+// which would hide the completion summary.
+onMounted(() => {
+  const content = document.querySelector(".content");
+  if (content) content.scrollTop = 0;
+});
 
 // Looked up while rendering: the language can change with this page open.
 function actionLabel(action: string): string {
@@ -91,16 +100,42 @@ const logFailure = computed(() => {
       <strong>{{ messages.result.logFailedTitle }}</strong>
       {{ messages.result.logFailedBody(logFailure.path, logFailure.error) }}
     </p>
-    <p v-if="resultSummary.failed > 0" class="notice notice--unsafe">
-      <strong>{{ messages.result.skippedNoticeTitle }}</strong>
-      {{ messages.result.skippedNotice(resultSummary.failed) }}
-    </p>
     <p v-if="skippedTrashMoves > 0 && resultSummary.trashed === 0" class="notice">
       {{ messages.result.noTrashNotice }}
     </p>
     <p v-if="resultSummary.removed > 0" class="notice">
       {{ messages.result.worktreePermanentNotice(resultSummary.removed) }}
     </p>
+
+    <div
+      v-if="lastResult.length > 0"
+      class="result-hero"
+      :class="resultSummary.failed === 0 ? 'result-hero--success' : 'result-hero--partial'"
+    >
+      <div class="result-hero__mark" aria-hidden="true">{{ resultSummary.failed === 0 ? "✓" : "!" }}</div>
+      <div class="result-hero__copy">
+        <h2>{{ resultSummary.failed === 0 ? messages.result.successTitle : messages.result.partialTitle }}</h2>
+        <p v-if="resultSummary.failed === 0">
+          {{
+            messages.result.successSummary(
+              resultSummary.removed,
+              resultSummary.trashed,
+              formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 })
+            )
+          }}
+        </p>
+        <p v-else>
+          {{
+            messages.result.partialSummary(
+              resultSummary.removed,
+              resultSummary.trashed,
+              formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 }),
+              resultSummary.failed
+            )
+          }}
+        </p>
+      </div>
+    </div>
 
     <div class="stat-grid stat-grid--4">
       <StatCard
@@ -133,7 +168,12 @@ const logFailure = computed(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(item, index) in lastResult" :key="`${item.target}-${index}`">
+            <tr
+              v-for="(item, index) in lastResult"
+              :key="`${item.target}-${index}`"
+              :class="item.result === 'ok' ? 'result-row--removed' : 'result-row--kept'"
+              :style="{ animationDelay: `${Math.min(index, 24) * 45}ms` }"
+            >
               <td class="nowrap tiny cell-action">{{ actionLabel(item.action) }}</td>
               <td class="mono cell-target">{{ displayPath(item.target, root) }}</td>
               <td class="tiny faint cell-detail">{{ detailText(item.detail_code, item.detail_args, item.detail) }}</td>
