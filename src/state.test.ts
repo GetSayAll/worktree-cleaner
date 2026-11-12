@@ -379,6 +379,92 @@ describe("an unmeasurable size travels as unknown", () => {
   });
 });
 
+describe("the snapshot follows the executor", () => {
+  it("drops removed worktrees and artifacts and clears the stale selection", async () => {
+    // The scan is a photograph; the executor's answer is what actually left. The
+    // sidebar counted the old photograph forever because nothing applied the
+    // answer to it. Removed worktrees, independently trashed artifacts, and the
+    // artifacts bundled with a removed worktree all disappear; a skipped artifact
+    // stays, and the selection does not keep pointing at rows that are gone.
+    const { state } = await freshStateWithExecutor({
+      entries: [
+        {
+          action: "worktree-remove",
+          target: codex,
+          result: "ok",
+          detail_code: "worktree.removed",
+          detail_args: {},
+          detail: null,
+          size_bytes: 1
+        },
+        {
+          action: "trash-move",
+          target: dist,
+          result: "ok",
+          detail_code: "artifact.trashed",
+          detail_args: {},
+          detail: null,
+          size_bytes: 2
+        },
+        {
+          action: "trash-move",
+          target: venv,
+          result: "skipped",
+          detail_code: "artifact.no_longer_safe",
+          detail_args: { reason: "af.recent_activity" },
+          detail: null,
+          size_bytes: 3
+        }
+      ],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.selectedWorktrees.value = [codex];
+    state.selectedArtifacts.value = [dist, venv];
+    await state.executeCleanup();
+    unmockPlatform();
+
+    expect(state.snapshot.value?.worktrees.some((record) => record.path === codex)).toBe(false);
+    expect(state.snapshot.value?.artifacts.some((record) => record.path === dist)).toBe(false);
+    expect(state.snapshot.value?.artifacts.some((record) => record.path === `${codex}/target`)).toBe(false);
+    expect(state.snapshot.value?.artifacts.some((record) => record.path === venv)).toBe(true);
+    expect(state.selectedWorktrees.value).toEqual([]);
+    expect(state.selectedArtifacts.value).toEqual([]);
+    expect(state.cleanupPlan.value.worktree_removals).toHaveLength(0);
+    expect(state.cleanupPlan.value.trash_moves).toHaveLength(0);
+  });
+
+  it("a prune removes the prunable worktree, not the repository root", async () => {
+    // The `prune` entry names the repository because that is where the command
+    // runs. Using that target as the removed path would delete the main worktree
+    // from the screenshot; the plan's prune item carries the actual path.
+    const { state } = await freshStateWithExecutor({
+      entries: [
+        {
+          action: "prune",
+          target: mockRoot,
+          result: "ok",
+          detail_code: "worktree.pruned",
+          detail_args: {},
+          detail: null,
+          size_bytes: null
+        }
+      ],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.selectedWorktrees.value = [gone];
+    state.selectedArtifacts.value = [];
+    await state.executeCleanup();
+    unmockPlatform();
+
+    expect(state.snapshot.value?.worktrees.some((record) => record.path === gone)).toBe(false);
+    expect(state.snapshot.value?.worktrees.some((record) => record.path === mockRoot)).toBe(true);
+  });
+});
+
 describe("the activity log", () => {
   it("records what the reader confirmed, not what happened afterwards", async () => {
     // The deletions are already in the operation log. This line is the other

@@ -41,6 +41,17 @@ fn options_with_log(path: &Path) -> ExecuteOptions {
     }
 }
 
+/// The executor's activity window must match the scan's. A different window
+/// would make the same directory `Safe` on the way in and `Review` on the way
+/// out, and the re-check would reject a plan the reader had already confirmed.
+fn options_with_log_and_activity(path: &Path, days: u32) -> ExecuteOptions {
+    ExecuteOptions {
+        recent_activity_days: days,
+        log_path: Some(path.to_path_buf()),
+        ..ExecuteOptions::default()
+    }
+}
+
 /// A repository plus one linked worktree that is clean and merged into main with
 /// main as its upstream — the only combination the decision table calls Safe
 /// (D12) — and an ignored `node_modules` in the main worktree for the Trash
@@ -99,6 +110,20 @@ fn repo_with_a_safe_worktree(name: &str) -> (Repo, PathBuf, String) {
 
 fn scan(repo: &Repo) -> ProjectSnapshot {
     scan_project(&repo.root.display().to_string(), &scan_options()).expect("scan")
+}
+
+/// Scan with a wider activity window, so the fixture's 30-day-old artifact is
+/// `Review` rather than `Safe`. The executor must use the same window, or the
+/// re-check would compare two different decisions.
+fn scan_with_activity(repo: &Repo, days: u32) -> ProjectSnapshot {
+    scan_project(
+        &repo.root.display().to_string(),
+        &ScanOptions {
+            recent_activity_days: days,
+            ..scan_options()
+        },
+    )
+    .expect("scan")
 }
 
 /// The linked worktree of [`repo_with_a_safe_worktree`], which is the only
@@ -240,6 +265,67 @@ fn a_safe_worktree_is_removed_by_git_and_pruned() {
         "every log line carries the verdict it was based on"
     );
     assert!(!history[0].at.is_empty());
+}
+
+#[test]
+fn an_explicitly_selected_review_worktree_is_removed_with_force() {
+    // A worktree with untracked files is Review by default. The reader sees the
+    // list and confirms it by selecting the worktree; the executor must then run
+    // `git worktree remove --force`. It used to require Safe, so this path could
+    // never run and the confirmation was a dead end.
+    let (repo, linked, _marker) = repo_with_a_safe_worktree("review-worktree");
+    std::fs::write(linked.join("scratch.txt"), "untracked\n").expect("write untracked file");
+
+    let snapshot = scan(&repo);
+    let record = safe_worktree(&snapshot);
+    assert_eq!(
+        record.safety.status,
+        SafetyStatus::Review,
+        "the fixture must be Review for this test to mean anything: {:?}",
+        record.safety.reasons
+    );
+    assert_eq!(record.untracked_files, 1);
+
+    let log_path = repo.base.join("operations.log");
+    let plan = CleanupPlan {
+        worktree_removals: vec![WorktreeRemovalItem {
+            kind: PlanItemKind::Worktree,
+            path: record.path.clone(),
+            branch: record.branch.clone(),
+            command: format!("git worktree remove --force -- {}", record.path),
+            force: true,
+            untracked_files: record.untracked_file_list.clone(),
+            size_bytes: record.size_bytes,
+        }],
+        ..CleanupPlan::default()
+    };
+    let outcome = execute_plan(&plan, &snapshot, &options_with_log(&log_path));
+
+    assert_eq!(outcome.entries.len(), 2, "{:?}", outcome.entries);
+    assert_eq!(
+        outcome.entries[0].result,
+        ExecutionResult::Ok,
+        "an explicitly selected Review worktree must be removed: {:?}",
+        outcome.entries[0]
+    );
+    assert_eq!(
+        outcome.entries[0].detail_code,
+        Some(DetailCode::WorktreeRemoved)
+    );
+    assert_eq!(outcome.entries[1].action, HistoryAction::Prune);
+    assert_eq!(outcome.entries[1].result, ExecutionResult::Ok);
+
+    assert!(!linked.exists(), "the worktree directory is gone");
+    let listed = repo.worktree_paths();
+    assert!(
+        !listed.iter().any(|path| path.ends_with("wt-removable")),
+        "git worktree list still reports {listed:?}"
+    );
+
+    let history = log::read(&log_path);
+    assert_eq!(history.len(), 2, "{history:?}");
+    assert_eq!(history[0].result, ExecutionResult::Ok);
+    assert_eq!(history[0].target, record.path);
 }
 
 #[test]
@@ -479,6 +565,83 @@ fn an_ignored_artifact_is_moved_to_the_system_trash() {
     assert_eq!(history[0].result, ExecutionResult::Ok);
     assert_eq!(history[0].target, artifact.path);
     assert!(history[0].size_bytes.is_some_and(|bytes| bytes > 0));
+}
+
+#[test]
+fn an_explicitly_selected_review_artifact_is_trashed() {
+    // The regression behind "I checked the artifacts and nothing was deleted":
+    // `Review` means the reader must confirm the item, and selecting it is that
+    // confirmation. The executor used to require `Safe` and silently skipped
+    // every Review item, even when the re-check found it unchanged.
+    let inspectable = trash_inspectable();
+    let (repo, _linked, marker) = repo_with_a_safe_worktree("review-artifact");
+    let snapshot = scan_with_activity(&repo, 365);
+    let artifact = ignored_modules(&snapshot);
+    assert_eq!(
+        artifact.safety.status,
+        SafetyStatus::Review,
+        "the fixture must be Review for this test to mean anything: {:?}",
+        artifact.safety.reasons
+    );
+
+    let log_path = repo.base.join("operations.log");
+    let plan = CleanupPlan {
+        trash_moves: vec![TrashMoveItem {
+            kind: PlanItemKind::Artifact,
+            path: artifact.path.clone(),
+            artifact_kind: artifact.kind.clone(),
+            size_bytes: artifact.size_bytes,
+            file_count: artifact.file_count,
+            bundled_with_worktree: None,
+        }],
+        ..CleanupPlan::default()
+    };
+    let outcome = execute_plan(
+        &plan,
+        &snapshot,
+        &options_with_log_and_activity(&log_path, 365),
+    );
+
+    // Take the fixture back out of the Trash before asserting anything, so a
+    // failed assertion cannot leave it sitting in the user's Trash.
+    let recovered = if inspectable {
+        purge_marked_from_trash("node_modules", &marker)
+    } else {
+        Vec::new()
+    };
+
+    assert_eq!(outcome.entries.len(), 1, "{:?}", outcome.entries);
+    assert_eq!(
+        outcome.entries[0].result,
+        ExecutionResult::Ok,
+        "an explicitly selected Review artifact must reach the Trash: {:?}",
+        outcome.entries[0]
+    );
+    assert_eq!(
+        outcome.entries[0].detail_code,
+        Some(DetailCode::ArtifactTrashed)
+    );
+    if inspectable {
+        assert_eq!(
+            recovered.len(),
+            1,
+            "the directory should have landed in the system Trash (D5); found {recovered:?}"
+        );
+    }
+    assert!(
+        !Path::new(&artifact.path).exists(),
+        "the directory left the working tree"
+    );
+    assert!(
+        repo.root.join("package.json").exists(),
+        "only the artifact moved; the project stayed"
+    );
+
+    let history = log::read(&log_path);
+    assert_eq!(history.len(), 1, "{history:?}");
+    assert_eq!(history[0].action, HistoryAction::TrashMove);
+    assert_eq!(history[0].result, ExecutionResult::Ok);
+    assert_eq!(history[0].target, artifact.path);
 }
 
 #[test]

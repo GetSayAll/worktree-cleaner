@@ -181,10 +181,13 @@ pub fn execute_plan(
             );
             continue;
         }
-        // A plan only ever carries Safe items (D12); if the re-check says
-        // anything else, the plan is stale in a way the identity above did not
-        // catch, and the item must not run.
-        if rechecked.safety.status != SafetyStatus::Safe {
+        // A plan carries the items the reader explicitly selected. A Safe item
+        // runs while the re-check still says Safe. A Review item runs only
+        // because the reader selected it, and only while the re-check still says
+        // Review; an Unsafe item never runs. This is what makes the Review level
+        // a confirmation instead of a dead end. Any change in the level or in a
+        // decision-relevant field was already caught above.
+        if !runs_at_planned_level(record.safety.status, rechecked.safety.status) {
             push(
                 &mut audit,
                 HistoryAction::WorktreeRemove,
@@ -434,7 +437,12 @@ pub fn execute_plan(
             );
             continue;
         }
-        if rechecked.safety.status != SafetyStatus::Safe {
+        // Same rule as Channel A: a Review artifact is executable only because
+        // the reader selected it, and only while the re-check still says Review.
+        // The level and the decision-relevant fields were compared above; this
+        // gate is what previously turned every explicitly selected Review item
+        // into a silent skip.
+        if !runs_at_planned_level(record.safety.status, rechecked.safety.status) {
             push(
                 &mut audit,
                 HistoryAction::TrashMove,
@@ -615,6 +623,20 @@ fn bytes_or_unknown(bytes: Option<u64>) -> DetailArg {
 
 fn flag_or_unknown(value: Option<bool>) -> DetailArg {
     value.map_or(DetailArg::Unknown, DetailArg::Flag)
+}
+
+/// Whether the re-check still permits the item at the level the reader planned.
+///
+/// `Safe` runs only while it is still `Safe`. `Review` is the level the product
+/// plan describes as "needs confirmation": the reader confirms it by selecting it
+/// for the plan, so it runs only while it is still `Review`. `Unsafe` never runs.
+/// A change to another level is already reported by `worktree_change` /
+/// `artifact_change`; this gate is the second half of that rule.
+const fn runs_at_planned_level(before: SafetyStatus, after: SafetyStatus) -> bool {
+    matches!(
+        (before, after),
+        (SafetyStatus::Safe, SafetyStatus::Safe) | (SafetyStatus::Review, SafetyStatus::Review)
+    )
 }
 
 /// The decision-relevant fields of a worktree, compared one at a time.
@@ -1041,6 +1063,30 @@ mod tests {
     }
 
     // ---- identity ----------------------------------------------------------
+
+    #[test]
+    fn a_review_item_runs_only_because_the_reader_selected_it_and_only_while_it_stays_review() {
+        assert!(runs_at_planned_level(
+            SafetyStatus::Safe,
+            SafetyStatus::Safe
+        ));
+        assert!(
+            runs_at_planned_level(SafetyStatus::Review, SafetyStatus::Review),
+            "Review means the reader confirms it by selecting it; the executor must not turn that into a dead end"
+        );
+        assert!(
+            !runs_at_planned_level(SafetyStatus::Safe, SafetyStatus::Review),
+            "an item that became Review after the plan was generated needs a new decision"
+        );
+        assert!(
+            !runs_at_planned_level(SafetyStatus::Review, SafetyStatus::Unsafe),
+            "a Review item that became Unsafe never runs"
+        );
+        assert!(
+            !runs_at_planned_level(SafetyStatus::Unsafe, SafetyStatus::Unsafe),
+            "an Unsafe item is never executable, even if a hand-written plan names it"
+        );
+    }
 
     #[test]
     fn worktree_change_names_the_field_that_moved() {

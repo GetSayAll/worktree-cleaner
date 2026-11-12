@@ -36,6 +36,15 @@ const trashBytes = computed(() => ({
   unknown: independentMoves.value.filter((item) => item.size_bytes === null).length
 }));
 const forceItems = computed(() => plan.value.worktree_removals.filter((item) => item.force));
+const permanentRemovals = computed(
+  () => plan.value.worktree_removals.filter((item) => !item.command.startsWith("git worktree prune")).length
+);
+const worktreeStatus = computed(
+  () => new Map((snapshot.value?.worktrees ?? []).map((record) => [record.path, record.safety.status]))
+);
+const artifactStatus = computed(
+  () => new Map((snapshot.value?.artifacts ?? []).map((record) => [record.path, record.safety.status]))
+);
 const needsAck = computed(() => plan.value.ack_reasons.length > 0);
 const needsName = computed(() => settings.require_project_name);
 const projectName = computed(() => basename(projectPath.value));
@@ -168,6 +177,24 @@ async function copyPlan() {
       </div>
     </div>
 
+    <div v-if="needsAck" class="card">
+      <div class="card__head"><h2>{{ messages.plan.confirmationTitle }}</h2></div>
+      <div class="card__body">
+        <div class="banner banner--warn">
+          <span>⚠</span>
+          <span class="stack stack--tight">
+            <span>{{ messages.plan.confirmationIntro }}</span>
+            <span v-for="reason in plan.ack_reasons" :key="reason" class="tiny">· {{ reason }}</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="permanentRemovals > 0" class="banner banner--warn">
+      <span>⚠</span>
+      <span>{{ messages.plan.permanenceNote }}</span>
+    </div>
+
     <div class="card">
       <div class="card__head">
         <h2>{{ messages.plan.channelA }}</h2>
@@ -187,6 +214,7 @@ async function copyPlan() {
                 <span class="mono">{{ displayPath(item.path, root) }}</span>
                 <span class="chip">{{ item.branch || messages.common.detached }}</span>
                 <span v-if="item.force" class="badge badge--review">{{ messages.plan.needForce }}</span>
+                <span v-else-if="worktreeStatus.get(item.path) === 'Review'" class="badge badge--review">{{ messages.plan.reviewItem }}</span>
                 <span v-else class="badge badge--safe">{{ messages.plan.removable }}</span>
               </div>
               <div class="code">{{ item.command }}</div>
@@ -229,6 +257,7 @@ async function copyPlan() {
               <td class="cell-directory">
                 <div class="row-wrap">
                   <span class="chip">{{ item.artifact_kind }}</span>
+                  <span v-if="artifactStatus.get(item.path) === 'Review'" class="badge badge--review">{{ messages.plan.reviewItem }}</span>
                   <span class="mono">{{ displayPath(item.path, root) }}</span>
                 </div>
               </td>
@@ -247,29 +276,6 @@ async function copyPlan() {
       </div>
     </div>
 
-    <div v-if="needsAck || needsName" class="card">
-      <div class="card__head"><h2>{{ messages.plan.confirmationTitle }}</h2></div>
-      <div class="card__body stack stack--tight">
-        <div v-if="needsAck" class="banner banner--warn">
-          <span>⚠</span>
-          <span class="stack stack--tight">
-            <span>{{ messages.plan.confirmationIntro }}</span>
-            <span v-for="reason in plan.ack_reasons" :key="reason" class="tiny">· {{ reason }}</span>
-          </span>
-        </div>
-        <label v-if="needsAck" class="row-wrap" style="gap: 8px">
-          <input v-model="acknowledged" class="check" type="checkbox" />
-          <span>{{ messages.plan.ackConfirm(forceItems.length) }}</span>
-        </label>
-        <div v-if="needsName" class="field">
-          <label class="field__label">
-            {{ " " + messages.plan.typeNameBefore }} <span class="mono">{{ projectName }}</span> {{ messages.plan.typeNameAfter + " " }}
-          </label>
-          <input v-model="confirmText" class="input input--mono setting-row__control--narrow" style="max-width: 320px" />
-        </div>
-      </div>
-    </div>
-
     <div v-if="showExport" class="card">
       <div class="card__head">
         <h2>{{ messages.plan.exportTitle }}</h2>
@@ -280,33 +286,51 @@ async function copyPlan() {
       </div>
     </div>
 
-    <div class="actionbar">
-      <div class="actionbar__side">
-        <button class="btn" data-nav-back="artifacts" @click="goTo('artifacts')">
-          {{ messages.plan.backToAdjust }}
-        </button>
+    <div class="actionbar actionbar--plan">
+      <div v-if="hasPlanItems" class="actionbar__recheck">
+        <span aria-hidden="true">⚠</span>
+        <span>{{ messages.plan.checks.recheckNotice }}</span>
       </div>
-      <span class="actionbar__summary faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
-      <div class="actionbar__side" style="margin-left: auto">
-        <!-- Same height as the button beside it: two buttons of different sizes in
-             one row do not read as a pair, and the taller one sets the row height so
-             the shorter one floats. -->
-        <button class="btn btn--lg" @click="showExport = !showExport">
-          {{ showExport ? messages.plan.hideExport : messages.plan.exportPlan }}
-        </button>
-        <button
-          class="btn btn--danger btn--lg"
-          :class="executing ? 'is-busy' : ''"
-          data-action="run-cleanup"
-          :disabled="!canExecute || executing || !desktop"
-          @click="executeCleanup"
-        >
-          <!-- A spinner, because a button that reads "running" and then does nothing
-               for a few seconds is indistinguishable from a hung app. The executor
-               works through the plan item by item, so the wait is real. -->
-          <span v-if="executing" class="spinner" aria-hidden="true"></span>
-          {{ executing ? messages.plan.running : messages.plan.runCleanup }}
-        </button>
+      <div v-if="needsAck || needsName" class="actionbar__confirm">
+        <label v-if="needsAck" class="row-wrap" style="gap: 8px">
+          <input v-model="acknowledged" class="check" type="checkbox" />
+          <span>{{ messages.plan.ackConfirm(forceItems.length) }}</span>
+        </label>
+        <div v-if="needsName" class="row-wrap" style="gap: 8px">
+          <span class="field__label">
+            {{ " " + messages.plan.typeNameBefore }} <span class="mono">{{ projectName }}</span> {{ messages.plan.typeNameAfter + " " }}
+          </span>
+          <input v-model="confirmText" class="input input--mono" style="max-width: 240px" />
+        </div>
+      </div>
+      <div class="actionbar__row">
+        <div class="actionbar__side">
+          <button class="btn" data-nav-back="artifacts" @click="goTo('artifacts')">
+            {{ messages.plan.backToAdjust }}
+          </button>
+        </div>
+        <span class="actionbar__summary faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
+        <div class="actionbar__side" style="margin-left: auto">
+          <!-- Same height as the button beside it: two buttons of different sizes in
+               one row do not read as a pair, and the taller one sets the row height so
+               the shorter one floats. -->
+          <button class="btn btn--lg" @click="showExport = !showExport">
+            {{ showExport ? messages.plan.hideExport : messages.plan.exportPlan }}
+          </button>
+          <button
+            class="btn btn--danger btn--lg"
+            :class="executing ? 'is-busy' : ''"
+            data-action="run-cleanup"
+            :disabled="!canExecute || executing || !desktop"
+            @click="executeCleanup"
+          >
+            <!-- A spinner, because a button that reads "running" and then does nothing
+                 for a few seconds is indistinguishable from a hung app. The executor
+                 works through the plan item by item, so the wait is real. -->
+            <span v-if="executing" class="spinner" aria-hidden="true"></span>
+            {{ executing ? messages.plan.running : messages.plan.runCleanup }}
+          </button>
+        </div>
       </div>
     </div>
 

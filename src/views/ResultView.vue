@@ -32,6 +32,9 @@ function outcomeLabel(result: string): string {
 }
 
 const okCount = computed(() => lastResult.value.filter((item) => item.result === "ok").length);
+const skippedTrashMoves = computed(
+  () => lastResult.value.filter((item) => item.action === "trash-move" && item.result === "skipped").length
+);
 
 /**
  * The failure of a system action this page offers.
@@ -87,6 +90,16 @@ const logFailure = computed(() => {
     <p v-if="logFailure" class="notice notice--unsafe">
       <strong>{{ messages.result.logFailedTitle }}</strong>
       {{ messages.result.logFailedBody(logFailure.path, logFailure.error) }}
+    </p>
+    <p v-if="resultSummary.failed > 0" class="notice notice--unsafe">
+      <strong>{{ messages.result.skippedNoticeTitle }}</strong>
+      {{ messages.result.skippedNotice(resultSummary.failed) }}
+    </p>
+    <p v-if="skippedTrashMoves > 0 && resultSummary.trashed === 0" class="notice">
+      {{ messages.result.noTrashNotice }}
+    </p>
+    <p v-if="resultSummary.removed > 0" class="notice">
+      {{ messages.result.worktreePermanentNotice(resultSummary.removed) }}
     </p>
 
     <div class="stat-grid stat-grid--4">

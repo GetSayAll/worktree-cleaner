@@ -1222,6 +1222,37 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   gap: 6px;
   align-items: center;
 }
+/* The plan page puts the confirmation controls in the sticky bar: the reader has
+   just scrolled through the whole plan, and the checkbox must not be the one thing
+   below the execute button. The bar is a block with a full-width confirmation row
+   above the usual back/summary/run row. */
+.actionbar--plan { display: block; }
+.actionbar--plan .actionbar__recheck {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--review-border);
+  color: var(--review);
+  font-size: var(--fs-ui);
+  line-height: 1.45;
+}
+.actionbar--plan .actionbar__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.actionbar--plan .actionbar__confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.actionbar--plan .actionbar__confirm .row-wrap { flex: 1 1 auto; }
 .actionbar__side--end { margin-left: auto; }
 .actionbar__summary {
   min-width: 0;
@@ -1364,6 +1395,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   .sidebar { display: none; }
   .stat-grid, .stat-grid--4, .promise-grid, .detail__grid { grid-template-columns: 1fr; }
   .actionbar { flex-wrap: wrap; }
+  .actionbar--plan .actionbar__row { flex-wrap: wrap; }
 }
 
 /* ---------- scrolling ---------- */

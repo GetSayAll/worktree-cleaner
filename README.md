@@ -13,7 +13,7 @@ License: GPL-3.0-only
 - Show branch, status, last-updated time, and the reason it is safe to delete;
 - Detect common artifact directories and show their size, last-modified time, and the reason they are safe to delete;
 - Provide verifiable reasons before deletion; read-only by default;
-- Use the system Trash or Recycle Bin for deletion and clean up Git worktree metadata.
+- Move artifact directories to the system Trash or Recycle Bin; remove worktrees permanently with `git worktree remove` and clean up their Git metadata.
 
 ## Status
 

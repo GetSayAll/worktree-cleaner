@@ -1,6 +1,6 @@
 # Worktree Cleaner Product Plan
 
-A cross-agent Git worktree and build-artifact safety audit tool. Read-only scanning by default; before deletion it gives verifiable reasons, and deletion goes through the system Trash while also cleaning up Git worktree metadata.
+A cross-agent Git worktree and build-artifact safety audit tool. Read-only scanning by default; before deletion it gives verifiable reasons. Artifact directories go through the system Trash; worktrees are permanently removed with `git worktree remove`.
 
 Platforms: macOS, Windows. Tech: Vue 3 + Tauri 2 + Rust (worktree-core).
 
@@ -20,7 +20,7 @@ Platforms: macOS, Windows. Tech: Vue 3 + Tauri 2 + Rust (worktree-core).
 
 - A deletion decision must rest on a verifiable piece of evidence (command output, path, count), not "looks like garbage."
 - If evidence can't be obtained, treat it as "unknown", and unknown is never judged safe to delete.
-- Never permanently delete user directory contents; everything goes to the system Trash.
+- Never permanently delete artifact directory contents; artifact directories go to the system Trash. Worktrees are permanently removed with `git worktree remove`, and the plan and result must say so before and after execution.
 - The main working tree can never be deleted.
 
 **Target users**: intermediate and advanced developers who use 2 or more AI coding agents at the same time; their own machines, with sufficient local permissions, and no enterprise centralized control.
@@ -58,7 +58,7 @@ Before a scan, only "Welcome" in the sidebar is available; data pages appear onl
 
 - Path input field + "Choose folder" (Tauri dialog plugin); supports dragging a folder into the window.
 - "Recent projects" card list: path, last scan time, summary of the last result (N items cleanable / X releasable), three-level dots.
-- Three capability description cards: read-only scan, verifiable reasons, Trash deletion.
+- Three capability description cards: read-only scan, verifiable reasons, and the two deletion paths (artifact directories through the Trash, worktrees through `git worktree remove`).
 - Default behavior on first use: automatically list repositories under common directories such as `~/MySrc`, `~/dev`, `~/Projects`, `~/Code`, as a fallback for "Recent projects".
 - An explicit read-only promise: the scan phase writes no files.
 
@@ -101,7 +101,7 @@ Bottom floating action bar: `N selected · X to free` → "View cleanup plan".
 - Each row: type badge (`node_modules` / `target` / `dist` / `.venv` …), relative path, size, file count, last activity time, Git status (ignored / untracked / tracked), safety level.
 - Sorting: by size (default) / by last activity.
 - Size threshold slider: by default, show only directories larger than 10 MB (small directories are noisy).
-- Relationship to worktrees: if the worktree containing an artifact has already been checked for deletion, that artifact row shows "removed together with the worktree" and its independent checkbox is automatically cleared, to avoid double-counting size.
+- Relationship to worktrees: if the worktree containing an artifact has already been checked for deletion, that artifact row shows "deleted together with the worktree (not recoverable)" and its independent checkbox is automatically cleared, to avoid double-counting size.
 
 ### 6. Cleanup plan (confirmation page — the most important page in the product)
 
@@ -114,7 +114,7 @@ Split "what will be done" into two channels shown separately, each landing on a 
 - Lost worktrees (directory no longer exists) go through `git worktree prune`, with a note that only metadata is cleaned up and no files are touched.
 - Undeletable entries do not appear here, but the footer shows "N undeletable items automatically excluded, view".
 
-**Channel B: move to Trash**
+**Channel B: move artifact directories to Trash**
 
 - Each entry shows: path, size, file count, whether recoverable (the Trash is recoverable, with a note on "recovering from the Trash").
 - Sorted by size descending.
@@ -127,7 +127,8 @@ Before execution, walk through each item; if one fails, show the blocking reason
 - Whitelist match check.
 - Duplicate deletion check (a worktree and an artifact inside it are both selected).
 - The target still exists and its identity is unchanged (record inode / size when the plan is generated; re-check before execution; if inconsistent, require a rescan).
-- Target activity re-check: for a directory judged "safe" when the plan was generated, re-check before execution whether there was new writing within the last 3 days; if it has become active, suspend that item and ask the user to confirm.
+- Target activity re-check: for a directory judged "safe" when the plan was generated, re-check before execution whether there was new writing within the last 3 days; if it has become active, suspend that item and report it, so a rescan and explicit selection are the confirmation.
+- A `Review` item runs only because the reader selected it. The executor re-checks it and runs it only while it is still `Review` and its decision-relevant fields are unchanged; a level change or a field change skips it and reports why. `Unsafe` never runs.
 
 **High-risk confirmation**
 
@@ -139,7 +140,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 ### 7. Execution result
 
 - Per-item results: success / skipped / failed, each with its reason.
-- Summary: space released, number of directories moved to the Trash, worktree metadata cleanup result. **Space released counts only items whose result was `Ok`, and only their measured bytes**: an artifact that left together with its worktree was not a separate move, a skipped or failed item freed nothing, and an item whose size was never measurable is counted as unknown rather than as `0 B`. The volume's free space is not read before and after, so nothing here claims to be exact.
+- Summary: space released, number of artifact directories moved to the Trash, number of worktrees permanently removed, and the prune result. **Space released counts only items whose result was `Ok`, and only their measured bytes**: an artifact that left together with its worktree was not a separate move, a skipped or failed item freed nothing, and an item whose size was never measurable is counted as unknown rather than as `0 B`. The volume's free space is not read before and after, so nothing here claims to be exact.
 - Failed items: provide copyable reason text and the corresponding command, for manual handling.
 - Action buttons: "Open Trash", "View log", "Rescan".
 
@@ -154,7 +155,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 - **Scan scope**: additional scan paths (one per line), maximum scan depth, per-directory timeout, whole-scan budget.
 - **Protection rules**: whitelist paths (matched directories are never deleted under any circumstances), protected branch names (the default branch is auto-detected and displayed by default), agent directories to protect.
 - **Decision thresholds**: activity days (default 3), artifact display size threshold (default 10 MB), whether "untracked files" count as unsafe (counts by default).
-- **Deletion method**: Trash (default and not changeable, with the note "this tool does not provide permanent deletion").
+- **Deletion method**: artifact directories use the system Trash (default and not changeable; no bypass switch). Worktrees use `git worktree remove` and are permanently deleted; the UI must state this before execution and on the result page.
 - Appearance: follow system / light / dark.
 - Language: follow system / English / 中文. English is the source locale; the interface follows the system language by default and can be switched manually.
 
@@ -403,7 +404,7 @@ Three properties are part of the contract rather than the implementation:
 ### 6.1 Execution order and deduplication
 
 1. **Remove worktrees first, then handle artifacts.** Artifacts inside a worktree checked for deletion are not deleted separately — `git worktree remove` already removes the entire directory.
-2. Deduplication is done when the plan is generated: any artifact inside a "worktree to be removed" is moved out of the Trash channel and labeled "removed together with the worktree" in the UI, with its size counted only once.
+2. Deduplication is done when the plan is generated: any artifact inside a "worktree to be removed" is moved out of the Trash channel and labeled "deleted together with the worktree (not recoverable)" in the UI, with its size counted only once.
 3. Serial execution, no concurrent deletion; each item's result is recorded independently, so a single failure doesn't affect the rest.
 
 ### 6.2 Worktree removal
@@ -464,7 +465,7 @@ Item 6 also guards against accidents such as "a variable being empty during conc
 
 ## 7. Boundaries and non-goals
 
-- **No permanent deletion**, and no switch to bypass the Trash.
+- **No permanent deletion of artifact directories**, and no switch to bypass the Trash. Worktrees are permanently removed with `git worktree remove`; that is the only permanent path, and the UI must say so before execution.
 - **Never delete the main working tree**, even if it looks clean.
 - **Never execute cleanup automatically**; scanning and cleanup are always two explicit steps.
 - **No cleaning of system caches, `~/Library`, the Downloads directory, or installers** — that's another product.
@@ -482,7 +483,7 @@ Item 6 also guards against accidents such as "a variable being empty during conc
 | P1 | artifact scanning + boundary detection (including the "artifact is not a project root" counterexample test) | the case with a git-tracked file inside `build/` is judged Unsafe |
 | P2 | CLI skeleton + snapshot JSON contract (`scan --json`) | the output conforms to the contract and passes schema validation; the repository has no changes after the scan |
 | P3 | read-only report web page (Form A) | the single-file web page opens with no network; the data matches the JSON item by item; the page has no deletion entry point whatsoever |
-| P4 | local cleanup execution + logging (the execution side of Form A) | on a real macOS machine, deleted items can be put back from the Trash; `git worktree list` shows no leftovers |
+| P4 | local cleanup execution + logging (the execution side of Form A) | on a real macOS machine, deleted artifact directories can be put back from the Trash; worktree removal is reported as permanent and `git worktree list` shows no leftovers |
 | P5 | local daemon + browser UI (Form B) | binds only to 127.0.0.1; requests without a token and cross-origin requests are rejected |
 | P6 | wrap-up: settings persistence, history, export, Tauri desktop shell (optional) | settings survive a restart; history comes from the real operation log |
 

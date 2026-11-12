@@ -753,12 +753,62 @@ export async function executeCleanup() {
   }
 }
 
+/**
+ * Applies the executor's removals to the snapshot on screen.
+ *
+ * The scan is a photograph of the moment it ran, and the executor's answer is the
+ * only authoritative record of what actually left. Keeping the removed rows makes
+ * the sidebar keep counting files that are already gone; filtering them here is
+ * what makes the numbers follow the cleanup. The next full scan is still the
+ * authority on everything that was skipped, which is why the selection is cleared
+ * rather than left pointing at rows whose safety was re-checked at execution time.
+ */
+function applyRemovalsToSnapshot(outcome: ExecutionOutcome, plan: CleanupPlan) {
+  const current = snapshot.value;
+  if (!current) return;
+
+  // A prune entry names the repository, not the worktree: `git worktree prune`
+  // runs once in the main worktree and cleans every stale registration. Removing
+  // the entry's target would remove the main working tree from the screenshot, so
+  // the pruned paths come from the plan items whose command is the prune.
+  const pruned = outcome.entries.some(
+    (entry) => entry.action === "prune" && entry.result === "ok"
+  )
+    ? plan.worktree_removals
+        .filter((item) => item.command.startsWith("git worktree prune"))
+        .map((item) => item.path)
+    : [];
+  const removedWorktrees = new Set([
+    ...outcome.entries
+      .filter((entry) => entry.result === "ok" && entry.action === "worktree-remove")
+      .map((entry) => entry.target),
+    ...pruned
+  ]);
+  const removedArtifacts = new Set(
+    outcome.entries
+      .filter((entry) => entry.result === "ok" && entry.action === "trash-move")
+      .map((entry) => entry.target)
+  );
+
+  const worktrees = current.worktrees.filter((record) => !removedWorktrees.has(record.path));
+  const remainingWorktrees = new Set(worktrees.map((record) => record.path));
+  const artifacts = current.artifacts.filter(
+    (record) =>
+      !removedArtifacts.has(record.path) &&
+      (record.worktree_path === null || remainingWorktrees.has(record.worktree_path))
+  );
+
+  snapshot.value = { ...current, worktrees, artifacts };
+  selectedWorktrees.value = [];
+  selectedArtifacts.value = [];
+}
+
 /** Turns the executor's answer into what the result page shows. */
 async function applyOutcome(outcome: ExecutionOutcome, plan: CleanupPlan) {
   // A whitelist-blocked item never reaches the executor — it was filtered out of
   // both channels before the plan was built — so it is added back here as its own
   // skipped row. Leaving it out would make the plan page's count disagree with
-  // the rows on this one.
+  // the rows on this one. Read it before the snapshot filter clears the selection.
   const blocked: ResultEntry[] = blockedPaths.value.map((path) => ({
     action: "trash-move",
     target: path,
@@ -769,6 +819,7 @@ async function applyOutcome(outcome: ExecutionOutcome, plan: CleanupPlan) {
     size_bytes: null
   }));
 
+  applyRemovalsToSnapshot(outcome, plan);
   lastResult.value = [...outcome.entries, ...blocked];
   resultSummary.value = summarise(lastResult.value, plan);
   logError.value = outcome.log_error;
