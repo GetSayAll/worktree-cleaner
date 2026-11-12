@@ -285,31 +285,41 @@ pub fn detect_default_branch(runner: &dyn GitRunner, repo: &Path) -> Option<Stri
     None
 }
 
-/// Agents recognised by a path token (product plan section 4).
+/// Agents recognised by a path token, or by a branch when the path has none
+/// (product plan section 4).
 ///
-/// The worktree directory name is the strongest signal (`repo--codex-fix-ble`), so
-/// every path component is split into tokens and each token is compared
-/// case-insensitively. An unrecognised path stays `None`: the label is inferred from
-/// the path only and is never guessed.
+/// The worktree directory name is the strongest signal (`repo--codex-fix-ble`),
+/// so every path component is split into tokens and compared case-insensitively.
+/// The branch is a weaker fallback: it identifies the work by its convention
+/// (`codex/update-check`), not by a filesystem layout. The label never changes a
+/// safety verdict.
 const AGENT_MARKERS: &[&str] = &["codex", "claude", "cursor", "aider", "workbuddy"];
 
-/// Infers the owning agent from the path, or `None` when no marker is present.
-pub fn infer_agent(path: &Path) -> Option<String> {
+/// The first agent marker in one piece of text, if any.
+fn agent_in(text: &str) -> Option<String> {
+    for token in text.split(|ch: char| !ch.is_alphanumeric()) {
+        for marker in AGENT_MARKERS {
+            if token.eq_ignore_ascii_case(marker) {
+                return Some((*marker).to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Infers the owning agent from the path, falling back to the branch name.
+pub fn infer_agent(path: &Path, branch: Option<&str>) -> Option<String> {
     let components: Vec<String> = path
         .components()
         .map(|component| component.as_os_str().to_string_lossy().into_owned())
         .collect();
     // Deepest component first: the worktree directory name outranks its parents.
     for name in components.iter().rev() {
-        for token in name.split(|ch: char| !ch.is_alphanumeric()) {
-            for marker in AGENT_MARKERS {
-                if token.eq_ignore_ascii_case(marker) {
-                    return Some((*marker).to_string());
-                }
-            }
+        if let Some(agent) = agent_in(name) {
+            return Some(agent);
         }
     }
-    None
+    branch.and_then(agent_in)
 }
 
 /// The `--force` confirmation page lists untracked files line by line; the list is
@@ -832,7 +842,7 @@ pub fn check_worktree(
         absorbed_into_default: absorbed,
         stash_count: opts.repository_stash_count.unwrap_or(0),
         last_updated_at: activity.map(format_rfc3339),
-        agent: infer_agent(&entry.path),
+        agent: infer_agent(&entry.path, entry.branch.as_deref()),
         size_bytes: opts.size_bytes,
         safety,
     }
@@ -1510,23 +1520,51 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     #[test]
     fn agent_is_inferred_from_path_tokens() {
         assert_eq!(
-            infer_agent(Path::new("/repo--codex-fix-ble")).as_deref(),
+            infer_agent(Path::new("/repo--codex-fix-ble"), None).as_deref(),
             Some("codex")
         );
         assert_eq!(
-            infer_agent(Path::new("/srv/repo--cursor-perf")).as_deref(),
+            infer_agent(Path::new("/srv/repo--cursor-perf"), None).as_deref(),
             Some("cursor")
         );
         assert_eq!(
-            infer_agent(Path::new("/srv/WorkBuddy-notes/wt")).as_deref(),
+            infer_agent(Path::new("/srv/WorkBuddy-notes/wt"), None).as_deref(),
             Some("workbuddy")
         );
     }
 
     #[test]
-    fn agent_is_none_when_unrecognised() {
-        assert!(infer_agent(Path::new("/Users/andy/MySrc/remote-mic-app")).is_none());
-        assert!(infer_agent(Path::new("/tmp/plain-worktree")).is_none());
+    fn agent_falls_back_to_the_branch_when_the_path_has_no_marker() {
+        assert_eq!(
+            infer_agent(
+                Path::new("/Users/andy/Develop/Src/AISrc/GetSayAll/.worktrees/remote-mic-update-checks-20261111"),
+                Some("codex/update-check-coalescing-20261111")
+            )
+            .as_deref(),
+            Some("codex")
+        );
+    }
+
+    #[test]
+    fn a_path_marker_outranks_the_branch_marker() {
+        assert_eq!(
+            infer_agent(
+                Path::new("/repo--claude-ui"),
+                Some("codex/update-check-coalescing-20261111")
+            )
+            .as_deref(),
+            Some("claude")
+        );
+    }
+
+    #[test]
+    fn agent_is_none_when_the_path_and_branch_have_no_marker() {
+        assert!(infer_agent(Path::new("/Users/andy/MySrc/remote-mic-app"), None).is_none());
+        assert!(infer_agent(
+            Path::new("/Users/andy/MySrc/remote-mic-app"),
+            Some("fix/update-check")
+        )
+        .is_none());
     }
 
     // ---- the happy path ----------------------------------------------------

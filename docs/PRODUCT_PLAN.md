@@ -88,7 +88,7 @@ Expanded detail panel:
 - Relationship to upstream: ahead / behind; when there is no upstream, explicitly write "no upstream branch" rather than leaving it blank. Being ahead of the upstream is a **branch** fact: `git worktree remove` keeps the ref, so it is shown as information and only adds `wt.unpushed_branch` at `Review` when the work is not already in the default branch.
 - Whether merged into the default branch (the default branch name is displayed and can be changed).
 - stash count (a **repository** fact, shown for information and never a reason — `refs/stash` is shared by every worktree and `git worktree remove` does not touch it), untracked file count.
-- The inferred owning agent (identify `codex` / `claude` / `cursor` / `aider` / `workbuddy` by path features; show "unknown" when it can't be identified — don't guess).
+- The inferred owning agent (identify `codex` / `claude` / `cursor` / `aider` / `workbuddy` by path features; when the path has no marker, use the branch name as a fallback; show "unknown" only when neither has a marker). The path is the stronger signal; the branch is a naming convention. This label is informational and never changes a safety verdict.
 - **Reason list**: one line per reason; green is positive evidence (merged / clean), amber and red are risk items, each followed by its evidence text.
 
 Top: search box + filter (All / Safe / Review / Unsafe / Locked / Unmerged).
