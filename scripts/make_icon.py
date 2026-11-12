@@ -23,7 +23,11 @@ BRANCH_B = ((0.345, 0.585), (0.700, 0.715))
 DOTS = [(0.345, 0.245), (0.665, 0.300), (0.700, 0.715)]
 STROKE = 0.072   # half width of a stroke, normalised
 DOT_R = 0.052    # dot radius, normalised
-CORNER = 0.225   # rounded-square radius, normalised
+CORNER = 0.225   # rounded-square radius, normalised to the square, not the canvas
+# Apple's macOS icon grid leaves a 10% transparent margin around the rounded
+# square: 824x824 of artwork in a 1024x1024 canvas. Without the margin the Dock
+# scales the artwork edge to edge and the icon reads larger than the stock apps.
+PADDING = 100 / 1024
 
 
 def clamp01(value):
@@ -147,10 +151,19 @@ def write_png(path, width, height, rgba):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    master = 512
-    width, height, pixels = render(master)
-    write_png(os.path.join(OUT_DIR, "icon.png"), width, height, pixels)
-    for size in (32, 128, 256):
+    # 1024 is the largest layer macOS reads (`icon_512x512@2x`). A 512 master
+    # leaves that slot empty, and the Dock falls back to an upscaled 512 — visibly
+    # soft on every Retina display.
+    #
+    # Two samples per axis rather than three: the coverage test is already
+    # analytic, so the supersample only smooths the rounded edge, and the 824px
+    # artwork at 3x would be six million pixels of pure Python.
+    master = 1024
+    content = round(master * (1.0 - 2.0 * PADDING))
+    _, _, content_pixels = render(content, supersample=2)
+    pixels = pad_centered(content_pixels, content, master)
+    write_png(os.path.join(OUT_DIR, "icon.png"), master, master, pixels)
+    for size in (32, 128, 256, 512):
         small = render_smaller(pixels, master, size)
         name = "128x128@2x.png" if size == 256 else f"{size}x{size}.png"
         write_png(os.path.join(OUT_DIR, name), size, size, small)
@@ -184,6 +197,20 @@ def render_smaller(source, source_size, size):
             out[target + 2] = total[2] // count
             out[target + 3] = total[3] // count
             target += 4
+    return out
+
+
+def pad_centered(source, source_size, canvas_size):
+    """Place a square raster in the middle of a transparent canvas."""
+    if source_size == canvas_size:
+        return source
+    offset = (canvas_size - source_size) // 2
+    row_bytes = source_size * 4
+    out = bytearray(canvas_size * canvas_size * 4)
+    for y in range(source_size):
+        start = y * row_bytes
+        target = ((y + offset) * canvas_size + offset) * 4
+        out[target:target + row_bytes] = source[start:start + row_bytes]
     return out
 
 
