@@ -53,6 +53,8 @@ when the language changes. `locale.test.ts` fails if a table's keys differ.
 | a user-visible string | `src/i18n/en.ts` **and** every other table under `src/i18n/` | D23 — `locale.test.ts` fails if the key sets differ |
 | what a list row shows, page width, or table columns | `src/styles.css`, and the row markup in `src/views/*.vue` (`item-row` for the list pages, `cell-*` for the two tables left) | §7 decisions 5 and 6 — `pnpm test:layout` checks margins, row fit and name wrapping in a real browser |
 | what the UI does with scan or execution results | `src/state.ts`, through `src/platform.ts` | §2 — the front end never re-makes a decision (D9) |
+| the update path, the release feed, or the updater key | `src/update.ts`, `src-tauri/tauri.conf.json` under `plugins.updater`, and `scripts/release-assets.mjs` | D25 — the update check is the app's only network request, and the manifest is written from the signatures the build produced |
+| a release step, a signing identity, or a manual check | `docs/RELEASE.md` and `.github/workflows/release.yml` | — a release is a draft until a person has installed it |
 
 ## The gate
 
@@ -85,6 +87,9 @@ before adding another.
 - Product design and decision tables: `docs/PRODUCT_PLAN.md`.
 - Development constraints and acceptance criteria: `docs/DEV_CONTRACT.md`.
   Implementation must follow that file.
+- Visual language, typography, component anatomy, and page recipes:
+  `docs/DESIGN.md`. The welcome screen is the reference implementation; every
+  page follows the same shell, page header, card, row, and control rules.
 - The disk-hygiene policy the audit implements: `docs/DISK_HYGIENE.md`, with
   `DISK_HYGIENE.zh-CN.md` kept in step. Its §8 says what the audit reads for each
   rule and what it cannot see; a rule that cannot be observed from inside one
