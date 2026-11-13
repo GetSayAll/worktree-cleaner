@@ -1475,8 +1475,14 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
 
     #[test]
     fn empty_porcelain_yields_no_entries() {
-        assert!(parse_worktree_list("").is_empty());
-        assert!(parse_worktree_list("\n\n").is_empty());
+        assert!(
+            parse_worktree_list("").is_empty(),
+            "empty input has no worktrees"
+        );
+        assert!(
+            parse_worktree_list("\n\n").is_empty(),
+            "blank lines have no worktrees"
+        );
     }
 
     #[test]
@@ -2600,7 +2606,10 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             .find(|reason| reason.code == ReasonCode::WtCannotVerify)
             .expect("cannot verify reason");
         assert!(reason.evidence.contains("timed out"));
-        assert!(!reason.evidence.trim().is_empty());
+        assert!(
+            !reason.evidence.trim().is_empty(),
+            "the timeout reason carries evidence"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2735,7 +2744,10 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             true,
             &default_options(),
         );
-        assert!(!record.safety.reasons.is_empty());
+        assert!(
+            !record.safety.reasons.is_empty(),
+            "every record carries at least one reason"
+        );
         for reason in &record.safety.reasons {
             assert!(
                 !reason.evidence.trim().is_empty(),
@@ -2822,7 +2834,10 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         assert!(!record.is_prunable);
         assert_eq!(record.dirty_files, 0);
         assert_eq!(record.untracked_files, 0);
-        assert!(record.untracked_file_list.is_empty());
+        assert!(
+            record.untracked_file_list.is_empty(),
+            "a clean worktree has no untracked files"
+        );
         assert_eq!(record.ahead, 0);
         assert_eq!(record.behind, 0);
         assert!(!record.has_upstream);
@@ -3304,7 +3319,10 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         );
         assert!(has(&record, ReasonCode::WtUntracked));
         assert_eq!(record.untracked_files, 1, "falls back to the status count");
-        assert!(record.untracked_file_list.is_empty());
+        assert!(
+            record.untracked_file_list.is_empty(),
+            "the status count is used when no list is parsed"
+        );
         let reason = record
             .safety
             .reasons

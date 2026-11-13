@@ -1686,7 +1686,7 @@ mod tests {
         );
         assert_eq!(record.file_count, 1);
         assert!(record.last_updated_at.is_some());
-        assert!(warnings.is_empty());
+        assert!(warnings.is_empty(), "the measured artifact should not warn");
         let codes: Vec<&str> = record
             .safety
             .reasons
@@ -1752,6 +1752,7 @@ mod tests {
         assert!(tracked.evidence.contains("2 files"), "{}", tracked.evidence);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlink_outside_the_project_is_unsafe_and_unmeasured() {
         let dir = tempfile::TempDir::new().expect("temp dir");
@@ -2258,7 +2259,9 @@ mod tests {
         std::fs::create_dir_all(&nested).expect("create nested");
         std::fs::write(root.join("a.txt"), vec![b'a'; 100]).expect("write a");
         std::fs::write(nested.join("b.txt"), vec![b'b'; 23]).expect("write b");
-        // A symlink must not be followed or counted.
+        // A symlink must not be followed or counted. Windows cannot create one
+        // without extra privileges, so this arm runs where symlinks are ordinary.
+        #[cfg(unix)]
         std::os::unix::fs::symlink(nested.join("b.txt"), root.join("link.txt")).expect("symlink");
 
         let measurement = walk_size(&root);
@@ -2509,7 +2512,13 @@ mod tests {
         std::fs::remove_dir_all(&gone).expect("remove");
         let runner = runner_with(vec![]);
         let result = scan_artifacts(&runner, std::slice::from_ref(&gone), &opts());
-        assert!(result.records.is_empty());
-        assert!(result.warnings.is_empty());
+        assert!(
+            result.records.is_empty(),
+            "a directory that has vanished produces no record"
+        );
+        assert!(
+            result.warnings.is_empty(),
+            "a directory that has vanished does not warn"
+        );
     }
 }

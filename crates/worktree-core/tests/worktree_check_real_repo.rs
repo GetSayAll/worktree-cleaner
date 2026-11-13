@@ -339,7 +339,10 @@ fn the_scanner_reads_a_real_repository_end_to_end() {
 
     // ---- every record carries a non-empty evidence string ----
     for record in &records {
-        assert!(!record.safety.reasons.is_empty());
+        assert!(
+            !record.safety.reasons.is_empty(),
+            "every record should carry at least one reason"
+        );
         for reason in &record.safety.reasons {
             assert!(!reason.evidence.trim().is_empty(), "{:?}", reason.code);
             assert!(!reason.text.trim().is_empty(), "{:?}", reason.code);

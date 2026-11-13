@@ -312,7 +312,10 @@ fn a_scan_of_a_real_repository_changes_nothing() {
     let before_head = repo.stdout_of(&["rev-parse", "HEAD"]);
 
     let snapshot = scan_project(&repo.root.display().to_string(), &options()).expect("scan");
-    assert!(!snapshot.artifacts.is_empty());
+    assert!(
+        !snapshot.artifacts.is_empty(),
+        "the scan should report at least one artifact"
+    );
 
     assert_eq!(
         repo.stdout_of(&["status", "--porcelain=v2", "--branch"]),

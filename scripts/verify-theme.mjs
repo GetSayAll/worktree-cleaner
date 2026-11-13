@@ -319,6 +319,9 @@ async function main() {
       if (choice !== "system") {
         await clickButton(page, '[data-view="settings"]');
         await clickButton(page, `[data-theme-choice="${choice}"]`);
+        // The palette transitions for up to 180 ms; measuring immediately reads
+        // the old painted colours while the custom properties have already changed.
+        await sleep(250);
       }
 
       const state = await readState(page);

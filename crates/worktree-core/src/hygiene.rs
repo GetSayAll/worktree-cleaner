@@ -486,17 +486,16 @@ impl Audit<'_> {
         let repo_name = self
             .repo
             .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
         let linked: Vec<WorktreeRecord> = self.linked_worktrees().cloned().collect();
 
         for record in &linked {
             let path = PathBuf::from(&record.path);
             if path.starts_with(&declared) {
-                let name = path
-                    .strip_prefix(&declared)
-                    .map(|rest| rest.to_string_lossy().into_owned())
-                    .unwrap_or_default();
+                let name = path.strip_prefix(&declared).map_or_else(
+                    |_| String::new(),
+                    |rest| rest.to_string_lossy().into_owned(),
+                );
                 self.check_name(&name, &repo_name, &record.path);
             } else {
                 let state = if path.starts_with(&self.repo) {
@@ -1797,7 +1796,10 @@ mod tests {
     fn a_conforming_name_produces_no_finding() {
         let fixture = fixture();
         let report = name_of(&fixture, "repo-feature-20260101");
-        assert!(states(&report, HygieneRule::L4).is_empty());
+        assert!(
+            states(&report, HygieneRule::L4).is_empty(),
+            "a correctly named worktree does not break L4"
+        );
     }
 
     // ---- L5 ----
@@ -1966,7 +1968,10 @@ mod tests {
         let (mut worktrees, _) = compliant(&fixture);
         worktrees[1].merged_into_default = None;
         let report = audit(&fixture, &worktrees, &[], &options(), IGNORED);
-        assert!(states(&report, HygieneRule::T2).is_empty());
+        assert!(
+            states(&report, HygieneRule::T2).is_empty(),
+            "an undetermined merge is not a T2 finding"
+        );
     }
 
     // ---- T3 ----
@@ -2016,7 +2021,10 @@ mod tests {
         opts.creation_override = Some(vec![(path, days_ago(1))]);
         let report = audit(&fixture, &worktrees, &[], &opts, IGNORED);
 
-        assert!(states(&report, HygieneRule::T3).is_empty());
+        assert!(
+            states(&report, HygieneRule::T3).is_empty(),
+            "a worktree created yesterday is not stale"
+        );
     }
 
     // ---- T4 ----
@@ -2392,7 +2400,10 @@ mod tests {
         let fixture = fixture();
         let loose = artifact(&fixture.repo.join("node_modules"), "node_modules");
         let report = audit(&fixture, &[], &[loose], &options(), IGNORED);
-        assert!(!report.findings.is_empty());
+        assert!(
+            !report.findings.is_empty(),
+            "a loose node_modules must be reported"
+        );
         for finding in &report.findings {
             assert!(!finding.subject.trim().is_empty(), "{finding:?}");
             assert!(!finding.evidence.trim().is_empty(), "{finding:?}");

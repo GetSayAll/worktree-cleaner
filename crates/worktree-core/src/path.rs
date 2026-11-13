@@ -1002,6 +1002,7 @@ mod tests {
         assert!(!key_under(r"c:\windowsapps", r"c:\windows"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn refuses_the_home_directory_reached_by_a_different_route() {
         // The environment's home is protected by spelling; a second route to the same

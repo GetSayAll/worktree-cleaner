@@ -192,7 +192,12 @@ pub fn backdate_tree(root: &Path, days: u64) {
 /// the cleanup a no-op rather than a failure.
 pub fn trash_entry_paths(name: &str) -> Vec<PathBuf> {
     let _ = name;
+    // Windows has no Trash layout this helper can inspect, so the list stays
+    // empty there and does not need to be mutable.
+    #[cfg(unix)]
     let mut found: Vec<PathBuf> = Vec::new();
+    #[cfg(not(unix))]
+    let found: Vec<PathBuf> = Vec::new();
     #[cfg(target_os = "macos")]
     {
         if let Some(home) = std::env::var_os("HOME") {

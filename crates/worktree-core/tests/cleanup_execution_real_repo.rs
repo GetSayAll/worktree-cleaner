@@ -264,7 +264,10 @@ fn a_safe_worktree_is_removed_by_git_and_pruned() {
         history[0].reason_code.is_some(),
         "every log line carries the verdict it was based on"
     );
-    assert!(!history[0].at.is_empty());
+    assert!(
+        !history[0].at.is_empty(),
+        "the log entry should carry a timestamp"
+    );
 }
 
 #[test]

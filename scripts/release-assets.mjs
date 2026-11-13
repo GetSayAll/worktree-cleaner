@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // The two ends of a release: gathering what the build produced, and writing the
 // manifest the updater reads.
 //

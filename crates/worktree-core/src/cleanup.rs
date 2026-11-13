@@ -1376,6 +1376,9 @@ mod tests {
         // how the two drift apart.
         assert_eq!(options.recent_activity_days, crate::DEFAULT_ACTIVITY_DAYS);
         assert!(!options.untracked_as_unsafe);
-        assert!(options.whitelist.is_empty());
+        assert!(
+            options.whitelist.is_empty(),
+            "the default options have no whitelist"
+        );
     }
 }

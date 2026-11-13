@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SNAPSHOT_SCHEMA_VERSION } from "./types";
@@ -31,8 +31,13 @@ function listSourceFiles(dir: string): string[] {
  */
 const ASSESS_IMPORT = /import\s*\{[^}]*\bassess\b[^}]*\}\s*from\s*["'][^"']*types["']/;
 
+/** The file's path below `src/`, with forward slashes on every platform. */
+function sourceName(file: string): string {
+  return file.slice(srcDir.length).split(sep).join("/");
+}
+
 function isAllowedToUseAssess(file: string): boolean {
-  const name = file.slice(srcDir.length);
+  const name = sourceName(file);
   if (name === "types.ts") return true; // the definition itself
   if (name === "mock/snapshot.ts") return true; // the mock snapshot builder
   return name.endsWith(".test.ts");
@@ -43,7 +48,7 @@ describe("source tree rules", () => {
     const offenders = listSourceFiles(srcDir)
       .filter((file) => !isAllowedToUseAssess(file))
       .filter((file) => ASSESS_IMPORT.test(readFileSync(file, "utf8")))
-      .map((file) => file.slice(srcDir.length));
+      .map(sourceName);
     expect(offenders).toEqual([]);
   });
 

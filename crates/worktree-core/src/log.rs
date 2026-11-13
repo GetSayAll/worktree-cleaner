@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn read_of_a_missing_file_is_empty_not_an_error() {
         let (_guard, path) = temp_log("missing.log");
-        assert!(read(&path).is_empty());
+        assert!(read(&path).is_empty(), "a missing log reads as empty");
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod tests {
         let (_guard, path) = temp_log("clear.log");
         append(&path, &[entry("/repo/a", Some(1))]).expect("append");
         clear(&path).expect("clear");
-        assert!(read(&path).is_empty());
+        assert!(read(&path).is_empty(), "clear removes every entry");
         // The file itself stays, so the next append does not have to recreate it.
         assert!(path.exists());
     }
