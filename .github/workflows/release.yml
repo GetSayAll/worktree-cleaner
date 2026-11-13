@@ -45,7 +45,7 @@ jobs:
           # updater asks for the key of the architecture it is running on, and
           # the manifest publishes the same universal archive under both keys.
           - label: macOS (universal)
-            os: macos-14
+            os: macos-15
             target: universal-apple-darwin
             platform: darwin
             arch: universal
