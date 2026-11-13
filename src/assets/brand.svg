@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Worktree Cleaner">
+  <!-- The same artwork as scripts/make_icon.py: a rounded blue square with the
+       white branch glyph. Kept as SVG so the sidebar and welcome page stay sharp
+       at every size instead of importing a raster copy of the app icon. -->
+  <defs>
+    <linearGradient id="brand-background" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3562db"/>
+      <stop offset="1" stop-color="#1b3c96"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="22.5" fill="url(#brand-background)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="14.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.94">
+    <path d="M34.5 24.5v51"/>
+    <path d="M34.5 41.5 66.5 30"/>
+    <path d="M34.5 58.5 70 71.5"/>
+  </g>
+  <g fill="#ffffff" opacity="0.94">
+    <circle cx="34.5" cy="24.5" r="5.2"/>
+    <circle cx="66.5" cy="30" r="5.2"/>
+    <circle cx="70" cy="71.5" r="5.2"/>
+  </g>
+</svg>

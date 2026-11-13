@@ -34,6 +34,13 @@
    pick anyway, and a CJK family would add megabytes to the repository to fix a
    problem only Windows has.
 
+   Where the CJK family sits matters. It is listed immediately after Inter, before
+   the Latin system faces, because font fallback is per character: Inter covers
+   Latin and digits, so Han and CJK punctuation are then drawn by the same CJK
+   face instead of being split between PingFang and SF Pro (macOS) or between
+   Segoe UI and Microsoft YaHei (Windows). One script, one voice; the mixed line
+   keeps the reader's eye instead of switching shape halfway through.
+
    `public/fonts/` rather than an import from `src/`: the browser preview inlines
    the whole bundle into one HTML file that opens straight off the file system,
    and only a path Vite leaves alone survives that. The licences sit beside the
@@ -63,17 +70,17 @@
    competes with the verdict beside it, and a page of tinted rows has no way left
    to say "look here".
 
-   Second, the shell is the frame and the surface is the sheet. `--bg` is what
-   sits behind everything, `--surface` is what a card and the sidebar are made
-   of, and the difference between them - about four points of lightness - is what
-   separates a panel from the page without a shadow doing it. Both themes keep
-   that relationship in the same direction, so a card reads as a card in either.
+   Second, the shell is the frame and the surface is the sheet. The light canvas is
+   white and a panel is the same white: a hairline and one shadow step separate the
+   two, which is how a white sheet on a white page reads in macOS. The dark theme
+   also lifts `--surface` a few points above `--bg`, because a dark sheet needs a
+   value difference as well as the hairline.
 
    Every token below is declared in this block and, where it is palette rather
    than layout, restated in the two dark blocks. `src/theme.test.ts` fails if the
    two dark copies drift or if one overrides a layout token. */
 :root {
-  --bg: #f5f6f8;
+  --bg: #ffffff;
   --surface: #ffffff;
   --surface-2: #fafbfc;
   --surface-3: #f0f2f5;
@@ -81,7 +88,7 @@
   --border-strong: #d4d8de;
   --text: #111418;
   --text-2: #59616e;
-  --text-3: #747c8a;
+  --text-3: #646c78;
   /* One accent, and everything else mixed from it. The three shades used to be
      picked by hand in the light block and again in each dark block, which is why
      the accent could not follow the operating system: there was no single value
@@ -89,7 +96,7 @@
      it where it can (see the @supports blocks below), and these are computed from
      whatever it ends up being. */
   --accent: #3a57d6;
-  --accent-weak: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  --accent-weak: color-mix(in srgb, var(--accent) 10%, var(--surface));
   --accent-border: color-mix(in srgb, var(--accent) 36%, var(--border));
   /* The accent as *text*. A fill can carry white or sit under a 12% wash at any
      saturation, but a label drawn in the accent has to clear its own tinted
@@ -106,13 +113,13 @@
   --unsafe: #ad2a26;
   --unsafe-bg: #fdeeed;
   --unsafe-border: #f2cfcc;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.03);
-  --shadow-lift: 0 2px 4px rgba(16, 24, 40, 0.06), 0 6px 14px rgba(16, 24, 40, 0.06);
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 20px -12px rgba(16, 24, 40, 0.16);
+  --shadow-lift: 0 1px 2px rgba(16, 24, 40, 0.05), 0 18px 40px -22px rgba(16, 24, 40, 0.22);
   --ring: color-mix(in srgb, var(--accent) 20%, transparent);
   --inset: inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  --radius-sm: 7px;
+  --radius-sm: 8px;
   --radius: 10px;
-  --radius-lg: 13px;
+  --radius-lg: 14px;
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -150,8 +157,14 @@
   --fs-lead: 18px;
   --fs-page: 22px;
   --fs-metric: 26px;
-  --fs-hero: 28px;
-  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --fs-hero: 32px;
+  /* Two families, one rule each. `--font-ui` is Inter first for Latin and digits,
+     then the CJK face that draws Han and Chinese punctuation, then the native UI
+     face for anything neither of them covers. `--font-mono` is JetBrains Mono for
+     machine text, with the same CJK fallbacks so a Chinese directory name inside
+     a path does not drop into an unnamed default. */
+  --font-ui: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Cascadia Mono", "PingFang SC", "Microsoft YaHei UI", monospace;
   color-scheme: light;
 }
 
@@ -165,7 +178,7 @@
     --border-strong: #363d47;
     --text: #e7eaee;
     --text-2: #99a2af;
-    --text-3: #7c8492;
+    --text-3: #8a93a2;
     --accent: #7d93fb;
     --accent-text: color-mix(in srgb, var(--accent) 85%, white);
     --safe: #4fce9b;
@@ -177,8 +190,8 @@
     --unsafe: #f0847d;
     --unsafe-bg: #2c1a19;
     --unsafe-border: #4a2b28;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-    --shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 20px rgba(0, 0, 0, 0.35);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 28px -18px rgba(0, 0, 0, 0.6);
+    --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.4), 0 22px 48px -24px rgba(0, 0, 0, 0.7);
     --inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
     color-scheme: dark;
   }
@@ -193,7 +206,7 @@
   --border-strong: #363d47;
   --text: #e7eaee;
   --text-2: #99a2af;
-  --text-3: #7c8492;
+  --text-3: #8a93a2;
   --accent: #7d93fb;
   --accent-text: color-mix(in srgb, var(--accent) 85%, white);
   --safe: #4fce9b;
@@ -205,8 +218,8 @@
   --unsafe: #f0847d;
   --unsafe-bg: #2c1a19;
   --unsafe-border: #4a2b28;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 20px rgba(0, 0, 0, 0.35);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 28px -18px rgba(0, 0, 0, 0.6);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.4), 0 22px 48px -24px rgba(0, 0, 0, 0.7);
   --inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   color-scheme: dark;
 }
@@ -252,6 +265,11 @@
 
 * { box-sizing: border-box; }
 
+/* One drawing style for every mark: a 16px box, painted in the current ink. The
+   size lives here rather than in each call site, so a nav glyph and a folder in a
+   recent row cannot drift a pixel apart. */
+.icon { width: 16px; height: 16px; flex-shrink: 0; }
+
 /* The window is the frame, and only its content area scrolls. The app is a fixed
    layout - sidebar beside a scrolling pane - so the page itself has nothing to
    scroll: a document-level scrollbar would drag the sidebar and the top bar off
@@ -264,7 +282,7 @@ html, body, #app { height: 100%; overflow: hidden; }
    hierarchy, not the body text. */
 body {
   margin: 0;
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-ui);
   font-size: var(--fs-body);
   line-height: 1.6;
   color: var(--text);
@@ -276,15 +294,30 @@ body {
 
 /* One type scale, three levels. Sizes are close together on purpose: the weight
    and the tracking do the separating, so a card heading does not have to shout to
-   sit above the line under it. */
-h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.02em; }
+   sit above the line under it.
+
+   Tracking is a property of the script, not of the size. Latin display type is
+   drawn a touch loose at large sizes and tightened here; CJK ideographs are
+   full-width by design, so the same negative tracking only crowds their
+   sidebearings. The negative values therefore live under `:lang(en)`, and every
+   other locale gets the zero the glyphs were designed for. */
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: 0; }
 h1 { font-size: var(--fs-page); line-height: 1.3; }
-h2 { font-size: var(--fs-title); line-height: 1.4; letter-spacing: -0.01em; }
+h2 { font-size: var(--fs-title); line-height: 1.4; letter-spacing: 0; }
 h3 { font-size: var(--fs-ui); line-height: 1.4; letter-spacing: 0; }
+:lang(en) h1 { letter-spacing: -0.02em; }
+:lang(en) h2 { letter-spacing: -0.01em; }
+:lang(zh-CN) h1 { line-height: 1.35; }
 p { margin: 0; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+/* Short headings take a balanced break; running prose takes a prettier last line.
+   Both are progressive: an engine that does not know the value ignores it and
+   keeps the ordinary greedy wrap. */
+h1, h2, .welcome__title { text-wrap: balance; }
+.banner, .notice, .welcome__lede, .assurance__body, .field__hint, .setting-row__hint, .sidebar__note, .reason__text { text-wrap: pretty; }
 
 /* Keyboard focus, once, for everything that can hold it. The inputs below add a
    soft ring of their own; this is the fallback for every other control, and it
@@ -301,18 +334,21 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
    fixed and hands the scrolling to `.content` alone. */
 .app {
   display: grid;
-  grid-template-columns: 176px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
 }
 
 /* ---------- sidebar ---------- */
+/* The rail is a quiet material beside the canvas, not a second page: one surface,
+   one hairline, and enough width for a path-shaped product name. 220px is the
+   width at which "Worktree Cleaner" and a group label both sit on one line. */
 .sidebar {
   background: var(--surface);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: var(--sp-4) 10px var(--sp-4);
+  padding: var(--sp-4) var(--sp-3) var(--sp-3);
   gap: var(--sp-5);
   /* The nav is the long list here. It scrolls inside the column rather than
      stretching the column, which would push the whole shell past the window. */
@@ -320,21 +356,19 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   overflow-y: auto;
 }
 
-/* The wordmark, and only the wordmark. It carried a gradient tile beside it while
-   the rail was 208px and had room to spare; at this width the tile took 36px of a
-   column that the labels need, and a name set on its own reads just as anchored.
-   If it ever needs a mark again, give the rail the width back first. */
-.brand { padding: 0 var(--sp-2); }
-/* The version sits under the name because that is what it qualifies: the window is
-   this product at this release. In the foot it read as one more item of fine print
-   beside the read-only advisory. */
-.brand__ver {
-  color: var(--text-3);
-  font-size: var(--fs-caption);
-  line-height: 1.4;
-  margin-top: 1px;
-  font-variant-numeric: tabular-nums;
+/* A mark and the name, read as one object. The tile is the accent's one large
+   appearance in the chrome; the nav below can then stay monochrome. */
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 var(--sp-2); }
+.brand__mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: block;
+  flex-shrink: 0;
+  object-fit: contain;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.18);
 }
+.brand__text { min-width: 0; display: flex; flex-direction: column; }
 .brand__name {
   font-size: var(--fs-body);
   font-weight: 600;
@@ -344,21 +378,40 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The version sits under the name because that is what it qualifies: the window is
+   this product at this release. In the foot it read as one more item of fine print
+   beside the read-only advisory. */
+.brand__ver {
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
 .brand__sub { color: var(--text-3); font-size: var(--fs-caption); letter-spacing: 0.1em; text-transform: uppercase; line-height: 1.4; }
 
-.nav { display: flex; flex-direction: column; gap: 1px; }
+/* Three passes, separated by a caption rather than a rule. The gap does the
+   grouping; a divider between every block would draw a ladder down the rail. */
+.nav { display: flex; flex-direction: column; gap: var(--sp-4); }
+.nav__group { display: flex; flex-direction: column; gap: 1px; }
+.nav__group--home { gap: var(--sp-1); }
+.nav__section {
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  padding: 0 10px var(--sp-1);
+}
 
-/* A row is 30px: tall enough to be a target, short enough that nine of them stay
-   one block. The active row is marked twice - a wash and a 2px rule at the
-   leading edge - because the wash alone disappears against a hovered neighbour
-   in the light theme. */
+/* A row is 32px: tall enough to be a target, short enough that nine of them stay
+   one block. The active row is a soft accent wash; the mark carries the same hue,
+   so the state reads without a second coloured edge in the column. */
 .nav__item {
-  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  height: 30px;
+  gap: 10px;
+  height: 32px;
   padding: 0 10px;
   border-radius: var(--radius-sm);
   border: 0;
@@ -372,42 +425,54 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   line-height: 1;
   transition: background-color 0.12s ease, color 0.12s ease;
 }
-.nav__item > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav__item::before {
-  content: "";
-  position: absolute;
-  left: 1px;
-  top: 7px;
-  bottom: 7px;
-  width: 2px;
-  border-radius: 2px;
-  background: transparent;
-}
+.nav__icon { color: var(--text-3); transition: color 0.12s ease; }
+.nav__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav__item:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.nav__item:hover:not(:disabled) .nav__icon { color: var(--text-2); }
 .nav__item.is-active { background: var(--accent-weak); color: var(--accent-text); font-weight: 600; }
-.nav__item.is-active::before { background: var(--accent); }
-.nav__item:disabled { opacity: 0.38; cursor: not-allowed; }
+.nav__item.is-active .nav__icon { color: var(--accent-text); }
+.nav__item:disabled { opacity: 0.48; cursor: not-allowed; }
 
+/* A count is a capsule, not a second word: the eye reads the number as a quantity
+   attached to the row rather than as part of its label. */
 .nav__count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-3);
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-caption);
-  font-weight: 500;
-  letter-spacing: 0;
-  color: var(--text-3);
+  font-weight: 400;
+  line-height: 1;
 }
-.nav__item.is-active .nav__count { color: var(--accent-text); }
+.nav__item.is-active .nav__count {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-text);
+}
 
-/* Fine print, separated by a rule rather than by whitespace: four grey lines
+/* Settings is chrome, not a page of the audit, so it sits below the navigation
+   and above the fine print. The note is separated by a rule: two grey sentences
    floating at the bottom of a column read as leftover text. */
 .sidebar__foot {
   margin-top: auto;
   display: flex;
   flex-direction: column;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-1);
+}
+.sidebar__notes {
+  display: flex;
+  flex-direction: column;
   gap: var(--sp-1);
-  padding: var(--sp-3) var(--sp-2) 0;
+  padding: var(--sp-3) 10px 0;
   border-top: 1px solid var(--border);
 }
-.sidebar__note { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.55; }
+.sidebar__note { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.6; }
 
 /* The window has no title bar on macOS (`titleBarStyle: Overlay`), so the traffic
    lights float over the top of this column instead of sitting in a strip above it.
@@ -420,7 +485,17 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 /* `min-height: 0` for the same reason as the grid track above: a flex item
    defaults to `min-height: auto` and refuses to shrink below its content, which
    is exactly what would make the page taller than the window. */
-.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+/* The pane is one white sheet. There is no tint and no second canvas: the topbar
+   hairline and the cards' own edges carry the structure, which keeps the right
+   side clean instead of turning it into a grey work surface. */
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
 
 /* The bar sits on the canvas, not on a sheet: a second white band under the title
    bar competes with the cards, and the only thing it has to say is a path. */
@@ -428,26 +503,29 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 0 var(--sp-6);
+  padding: 0 var(--sp-7);
   border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  min-height: 52px;
+  background: transparent;
+  min-height: 56px;
   flex-shrink: 0;
 }
 
+/* The path and its mark are one group, and that group is what takes the free
+   space; the path itself ellipsizes inside it instead of pushing the actions. */
+.topbar__place { display: flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 0; }
+.topbar__icon { color: var(--text-3); }
 .topbar__path {
   font-family: var(--mono);
   font-size: var(--fs-ui);
-  letter-spacing: -0.01em;
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
   min-width: 0;
 }
 
 .topbar__group { display: flex; align-items: center; gap: 6px; }
+.topbar__actions { display: flex; align-items: center; gap: 6px; }
 
 /* In the bar the badges are a count, not a verdict: four saturated pills across
    the top of every page turned the header into the loudest thing on screen. They
@@ -458,32 +536,92 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   color: var(--text-2);
   font-weight: 500;
 }
-.topbar .btn { height: 28px; font-size: var(--fs-ui); }
+.topbar .btn { height: 30px; font-size: var(--fs-ui); }
 
 /* The one place that scrolls. `min-height: 0` lets this actually shrink below
    its content, which is what turns the flex child above into the scroll container. */
-.content { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--sp-6); }
+.content { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--sp-6) var(--sp-7) var(--sp-7); }
 
 /* ---------- page columns ----------
    One width for every page: the full content pane, so the text starts and ends
    at the same place whichever page the user is on. The content pane's padding is
    the margin, and it is the same margin the worktree page has always had.
    Reading pages used to be capped at 860px and centred, which put their left and
-   right edges 56px in from the pane instead of 24px - the settings page and the
-   welcome screen jumped sideways every time the user changed view. */
+   right edges 56px in from the pane instead of at the pane's own margin - the
+   settings page and the welcome screen jumped sideways every time the user changed
+   view. */
 .page--wide { width: 100%; }
 .stack { display: flex; flex-direction: column; gap: var(--sp-4); }
 .stack--tight { gap: var(--sp-2); }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
-/* A page's title and the one line under it are one block: the subtitle names the
-   repository or the rule the page is about, and set flush against the baseline of
-   a 22px heading it read as a second heading. */
-.spread > div > h1 + p { margin-top: 3px; }
 .row-wrap { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+
+/* ---------- page head ----------
+   Every page below the welcome screen opens with the same block: a neutral mark,
+   the title, one line of context, and the page's actions on the far right. The
+   mark repeats the sidebar icon, so the reader always knows which section they
+   are in without reading the rail again. */
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.page-head__lead { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.page-head__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.page-head__icon .icon { width: 19px; height: 19px; }
+.page-head__text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.page-head__text h1 { line-height: 1.25; }
+.page-head__sub { color: var(--text-3); font-size: var(--fs-ui); line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
+.page-head__sub.mono { font-family: var(--mono); }
+.page-head__actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); flex-wrap: wrap; flex-shrink: 0; }
+.page-note { color: var(--text-2); font-size: var(--fs-ui); line-height: 1.6; max-width: 84ch; text-wrap: pretty; }
+
+/* ---------- toolbar ----------
+   A control surface between the page head and the content. It is one white card,
+   not a row of loose fields: the filters, the search, and the summary are read as
+   one instrument. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: 10px var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), var(--inset);
+}
+.toolbar__group { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; flex-shrink: 0; min-width: 0; }
+.toolbar__meta { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; font-variant-numeric: tabular-nums; }
+.toolbar__end { margin-left: auto; }
+
+.search { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.search .icon { position: absolute; left: 9px; width: 14px; height: 14px; color: var(--text-3); pointer-events: none; }
+.search .input { padding-left: 30px; width: 240px; max-width: 100%; }
+
 .muted { color: var(--text-2); }
 .faint { color: var(--text-3); }
-.mono { font-family: var(--mono); font-size: var(--fs-caption); letter-spacing: -0.01em; }
+/* Machine text has one default size, the UI step, wherever it sits: a path is the
+   same object in a table, a plan row and a sentence, and it should not change size
+   with the paragraph around it. A caption adds `.tiny` (declared below, so it
+   wins) and evidence keeps its own 12px rule. */
+.mono { font-family: var(--mono); font-size: var(--fs-ui); }
 .tiny { font-size: var(--fs-caption); line-height: 1.55; }
+/* A machine string inside a caption is still part of that caption. Without this,
+   a path nested in a 12px sentence rendered a step larger than the words around
+   it, which is the one thing an inline code span must not do. */
+.tiny .mono, .tiny.mono { font-size: var(--fs-caption); }
 .nowrap { white-space: nowrap; }
 .numeric { font-variant-numeric: tabular-nums; }
 
@@ -508,20 +646,20 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 .card__head {
-  padding: var(--sp-3) var(--sp-4);
+  padding: 14px var(--sp-5);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  min-height: 44px;
+  min-height: 48px;
 }
-.card__body { padding: var(--sp-4); }
+.card__body { padding: var(--sp-4) var(--sp-5); }
 .card__body--flush { padding: 0; }
 .card__foot {
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
   border-top: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface);
 }
 
 /* ---------- stats ----------
@@ -540,7 +678,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 13px var(--sp-4) 14px;
+  padding: var(--sp-4) 18px 17px;
   box-shadow: var(--shadow), var(--inset);
   min-width: 0;
 }
@@ -574,7 +712,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
-.stat__sub { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; margin-top: 4px; }
+.stat__sub { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .stat__value--safe { color: var(--safe); }
 .stat__value--review { color: var(--review); }
 .stat__value--unsafe { color: var(--unsafe); }
@@ -656,11 +794,21 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
 .btn:active:not(:disabled) { transform: translateY(0.5px); }
 .btn:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; }
+/* A disabled primary control is not a pale primary control: at 42% opacity the
+   accent turns into a washed blue with white letters on it, which looks broken
+   rather than unavailable. It goes back to the neutral surface it cannot claim. */
+.btn--primary:disabled {
+  opacity: 1;
+  background: var(--surface-3);
+  border-color: var(--border);
+  color: var(--text-3);
+}
 .btn--primary {
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white) 0%, var(--accent) 100%);
   border-color: color-mix(in srgb, var(--accent) 82%, black);
   color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 2px rgba(16, 24, 40, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(16, 24, 40, 0.18),
+    0 8px 18px -12px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 .btn--primary:hover:not(:disabled) {
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 80%, white) 0%, color-mix(in srgb, var(--accent) 92%, white) 100%);
@@ -672,9 +820,19 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 2px rgba(16, 24, 40, 0.18);
 }
 .btn--danger:hover:not(:disabled) { background: linear-gradient(180deg, #c43c37 0%, #b1302b 100%); }
+.btn--danger:disabled {
+  opacity: 1;
+  background: var(--surface-3);
+  border-color: var(--border);
+  color: var(--text-3);
+}
 .btn--ghost { border-color: transparent; background: transparent; color: var(--text-2); box-shadow: none; }
 .btn--ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text); border-color: transparent; }
 .btn--lg { height: 34px; padding: 0 var(--sp-4); font-size: var(--fs-ui); }
+/* The welcome screen's one call to action. It sits inside the composer, so it is
+   taller than a toolbar button and takes the card radius rather than the control
+   radius; the point is that the row has a single, unmistakable end. */
+.btn--cta { height: 40px; padding: 0 var(--sp-4); border-radius: var(--radius); font-weight: 600; }
 /* The cleanup button sets this while the executor is working. The spinner inside
    it already says so; the cursor says it to the pointer that is still resting on
    the button, which is where the click came from. */
@@ -710,7 +868,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   box-shadow: 0 0 0 3px var(--ring);
 }
 .input::placeholder { color: var(--text-3); }
-.input--mono { font-family: var(--mono); font-size: var(--fs-ui); letter-spacing: -0.01em; }
+.input--mono { font-family: var(--mono); font-size: var(--fs-ui); }
 .input--sm { height: 30px; font-size: var(--fs-ui); }
 .input[readonly] { background: var(--surface-2); color: var(--text-2); }
 .textarea {
@@ -841,14 +999,15 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   text-align: left;
   font-size: var(--fs-caption);
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: var(--text-3);
-  padding: 7px 14px;
+  padding: 10px var(--sp-4);
   border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface);
   white-space: nowrap;
 }
-.table td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; font-size: var(--fs-ui); }
+:lang(en) .table th { letter-spacing: 0.02em; }
+.table td { padding: 11px var(--sp-4); border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; font-size: var(--fs-ui); }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr { transition: background-color 0.12s ease; }
 .table tbody tr:hover { background: var(--surface-2); }
@@ -890,7 +1049,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--sp-2) var(--sp-3);
-  padding: 13px var(--sp-4);
+  padding: 14px var(--sp-5);
   border-bottom: 1px solid var(--border);
   transition: background-color 0.1s ease;
 }
@@ -909,7 +1068,6 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   font-family: var(--mono);
   font-size: var(--fs-ui);
   font-weight: 500;
-  letter-spacing: -0.01em;
   line-height: 20px;
   min-width: 0;
   overflow: hidden;
@@ -919,7 +1077,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 }
 /* The separator is drawn by the metadata itself, so a fact that is missing does
    not leave a stray dot behind the one next to it. */
-.item-row__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; }
+.item-row__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; font-variant-numeric: tabular-nums; }
 .item-row__figures { display: flex; align-items: center; gap: var(--sp-3); padding-top: 1px; }
 .item-row__size { font-size: var(--fs-ui); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); }
 /* Top-aligned, not centred: a row with two reasons is two lines tall, and a
@@ -932,33 +1090,35 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 /* The worktree page's own path, on the metadata line. It is a fact about the item,
    not its name - the branch above is what the reader recognises the row by - so it
    gives way first when the window is narrow. */
-.item-row__where { font-family: var(--mono); font-size: var(--fs-caption); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-row__where { font-family: var(--mono); font-size: var(--fs-caption); color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* What the table's header row used to hold, since there is no header row now. */
 .select-all {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 7px var(--sp-4);
+  padding: 8px var(--sp-5);
   border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface);
   color: var(--text-3);
   font-size: var(--fs-caption);
 }
 
-/* A group header is a caption for the rows under it: recessed, small, and the one
-   place a rule between two groups is drawn. */
+/* A group header is a caption for the rows under it: one hairline below, no
+   recessed fill. The rule is enough; a grey strip across the page is not. */
 .group-head {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 8px var(--sp-3);
-  background: var(--surface-2);
+  padding: 10px var(--sp-5);
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
   text-align: left;
   color: var(--text);
-  min-height: 40px;
+  min-height: 44px;
 }
 .group-head__path { font-family: var(--mono); font-size: var(--fs-caption); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-head__chevron { width: 14px; height: 14px; color: var(--text-3); transition: transform 0.12s ease; }
+.group-head__chevron.is-open { transform: rotate(90deg); }
 
 /* ---------- reasons ----------
    A line of text, not a box. Two bordered chips per row put four coloured frames
@@ -986,7 +1146,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 }
 .reason__mark { font-size: var(--fs-caption); font-weight: 600; margin-right: 4px; }
 .reason__text { min-width: 0; overflow-wrap: anywhere; }
-.reason__evidence { color: var(--text-3); font-family: var(--mono); font-size: var(--fs-caption); overflow-wrap: anywhere; }
+.reason__evidence { color: var(--text-2); font-family: var(--mono); font-size: var(--fs-caption); overflow-wrap: anywhere; }
 .reason__evidence::before { content: "· "; }
 .reason--safe .reason__mark { color: var(--safe); }
 .reason--review .reason__mark { color: var(--review); }
@@ -1003,13 +1163,15 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   padding: 10px var(--sp-3);
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface);
   font-size: var(--fs-ui);
   line-height: 1.6;
 }
 .banner--warn { border-color: var(--review-border); background: var(--review-bg); color: var(--review); }
 .banner--danger { border-color: var(--unsafe-border); background: var(--unsafe-bg); color: var(--unsafe); }
+.banner--safe { border-color: var(--safe-border); background: var(--safe-bg); color: var(--safe); }
 .banner--info { border-color: var(--accent-border); background: var(--accent-weak); color: var(--accent-text); }
+.banner__icon { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; }
 .banner__title { font-weight: 600; margin-right: 4px; }
 .banner .btn--ghost { color: inherit; }
 
@@ -1023,7 +1185,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   padding: 9px var(--sp-3);
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface);
   font-size: var(--fs-ui);
   line-height: 1.6;
   color: var(--text-2);
@@ -1048,104 +1210,227 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
 
 .empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
   padding: var(--sp-7) var(--sp-5);
   text-align: center;
   color: var(--text-3);
   font-size: var(--fs-ui);
+  line-height: 1.6;
 }
+.empty p { margin: 0; max-width: 60ch; text-wrap: pretty; }
+.empty__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.empty__icon .icon { width: 17px; height: 17px; }
+.empty--compact {
+  flex-direction: row;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+  text-align: left;
+}
+.empty--compact .empty__icon {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+}
+.empty--compact .empty__icon .icon { width: 16px; height: 16px; }
 
 .divider { height: 1px; background: var(--border); border: 0; margin: 0; }
 
 /* ---------- welcome ---------- */
-/* The full content pane like every other page, and the same stack rhythm. It used
-   to be its own layout - 860px wide and centred - which is why the welcome screen
-   and the page after it had two different left and right margins. */
-.welcome { width: 100%; padding: var(--sp-4) 0 var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-5); }
-.welcome__hero { display: flex; flex-direction: column; gap: 10px; max-width: 74ch; }
-.welcome__hero .faint { letter-spacing: 0.1em; text-transform: uppercase; font-size: var(--fs-caption); }
-.welcome__title { font-size: var(--fs-hero); line-height: 1.2; letter-spacing: -0.035em; }
-.welcome__lede { color: var(--text-2); font-size: var(--fs-lead); line-height: 1.55; letter-spacing: -0.01em; }
-
-/* A panel, not a drop target drawn in dashes: the input inside it is the way in,
-   dropping is the shortcut. The dashed edge was the loudest border on the page
-   and it promised a behaviour most users never reach for. The inline style the
-   view applies while dragging still lands, because the border is here to colour. */
-.dropzone {
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  padding: var(--sp-3);
+/* The content pane like every other page, with one difference: the column stops at
+   1040px. At the default window it is still full width, so the margins match; on a
+   wide monitor it stops the hero and the path rows from running into a line length
+   no reader can hold together. */
+.welcome {
+  width: 100%;
+  max-width: 1040px;
+  padding: var(--sp-5) 0 var(--sp-7);
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  box-shadow: var(--shadow), var(--inset);
-  transition: border-color 0.14s ease, background-color 0.14s ease;
+  gap: var(--sp-6);
 }
-.pick-row { display: flex; gap: var(--sp-2); }
-.pick-row .input { flex: 1; }
-.pick-row .input, .pick-row .btn { height: 36px; }
 
-.promise-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
-.promise {
+/* One anchor, three steps: the mark names the app, the title names the job, the
+   lede explains it. The mark is the only place the accent appears at this size;
+   everything below it is carried by type and material. */
+.welcome__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  max-width: 720px;
+}
+.welcome__mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: block;
+  object-fit: contain;
+  box-shadow: 0 10px 24px -10px rgba(27, 60, 150, 0.6);
+  margin-bottom: var(--sp-1);
+}
+.welcome__title { font-size: var(--fs-hero); line-height: 1.22; letter-spacing: 0; text-wrap: balance; }
+:lang(en) .welcome__title { line-height: 1.12; letter-spacing: -0.03em; }
+.welcome__lede { color: var(--text-2); font-size: var(--fs-lead); line-height: 1.6; letter-spacing: 0; text-wrap: pretty; }
+:lang(zh-CN) .welcome__lede { line-height: 1.7; }
+:lang(en) .welcome__lede { line-height: 1.55; letter-spacing: -0.01em; }
+
+/* One field, not a form. The panel is the surface, the input has no border of its
+   own, and the two buttons sit at the end of the same row: the whole assembly reads
+   as a single command line rather than as three controls that happen to be near
+   each other. Dropping a folder still works, and the state is a class now, so the
+   panel can carry its own ring without an inline style. */
+.composer {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lift), var(--inset);
+  padding: var(--sp-2);
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.composer:focus-within {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--ring), var(--shadow-lift), var(--inset);
+}
+.composer.is-dragging { border-color: var(--accent); background: var(--accent-weak); }
+.composer__row { display: flex; align-items: center; gap: var(--sp-2); }
+.composer__leading { width: 18px; height: 18px; color: var(--text-3); margin-left: var(--sp-3); }
+.composer__input.input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.composer__input.input:hover:not(:disabled),
+.composer__input.input:focus { border-color: transparent; box-shadow: none; }
+.composer__actions { display: flex; align-items: center; gap: var(--sp-1); flex-shrink: 0; }
+.composer__browse { color: var(--text-2); }
+.composer__hint,
+.composer__message {
+  padding: 6px var(--sp-3) var(--sp-1) 46px;
+  margin: 0;
+}
+.composer__message { padding-top: 4px; }
+
+/* The three promises are one sheet divided in thirds, not three cards. The icons
+   are the only illustration; the copy is short enough to read in one pass. */
+.assurances {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 13px var(--sp-4) var(--sp-4);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow), var(--inset);
 }
-/* No accent rule across the top of these. It was tried: three 2px gradients that
-   faded out mid-card read as three progress bars that had each stopped in the same
-   place, which is a claim about state that these panels do not make. The three
-   terms are told apart by their headings, and they share the page's one surface. */
-.promise__k { font-weight: 600; font-size: var(--fs-ui); letter-spacing: -0.01em; margin-bottom: 3px; }
-.promise__v { color: var(--text-3); font-size: var(--fs-ui); line-height: 1.65; }
+.assurance {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+  padding: var(--sp-4) var(--sp-5);
+}
+.assurance + .assurance { border-left: 1px solid var(--border); }
+.assurance__icon { color: var(--text-2); margin-top: 1px; }
+.assurance__text { min-width: 0; }
+.assurance__title { font-weight: 600; font-size: var(--fs-ui); line-height: 1.5; }
+.assurance__body { color: var(--text-2); font-size: var(--fs-caption); line-height: 1.65; margin-top: 2px; text-wrap: pretty; }
 
-.recent-list { display: flex; flex-direction: column; gap: 6px; }
-.recent {
+/* Recent projects is one inset list, not a card full of bordered cards. The head
+   is a caption for the rows; the rows are separated by hairlines and share the
+   panel's surface, so the eye follows the paths down one edge. */
+.recent-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow), var(--inset);
+  overflow: hidden;
+}
+.recent-panel__head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  cursor: pointer;
-  transition: border-color 0.12s ease, background-color 0.12s ease;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border);
 }
-.recent:hover { border-color: var(--accent-border); background: var(--accent-weak); }
-.recent__path { font-family: var(--mono); font-size: var(--fs-ui); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-list { display: flex; flex-direction: column; }
+.recent {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: 11px var(--sp-5);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s ease;
+}
+.recent + .recent { border-top: 1px solid var(--border); }
+.recent:hover { background: var(--surface-2); }
+.recent__icon { color: var(--text-3); transition: color 0.12s ease; }
+.recent:hover .recent__icon { color: var(--accent-text); }
+.recent__path {
+  font-family: var(--mono);
+  font-size: var(--fs-ui);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent__time { color: var(--text-3); font-size: var(--fs-caption); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.recent__chevron { width: 14px; height: 14px; color: var(--text-3); transition: transform 0.12s ease, color 0.12s ease; }
+.recent:hover .recent__chevron { transform: translateX(2px); color: var(--text-2); }
 
 /* ---------- scanning ---------- */
 /* The full content pane like every other page. */
-.scan { width: 100%; padding: var(--sp-4) 0 var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-5); }
+.scan { width: 100%; display: flex; flex-direction: column; gap: var(--sp-5); }
 .stage-list { display: flex; flex-direction: column; gap: 1px; }
 .stage {
-  position: relative;
   display: flex;
   gap: var(--sp-3);
   align-items: flex-start;
-  padding: 7px var(--sp-3);
+  padding: 10px var(--sp-3);
   border-radius: var(--radius-sm);
   transition: background-color 0.18s ease;
 }
-.stage.is-active { background: var(--surface-2); }
-.stage.is-active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--accent);
-}
+.stage.is-active { background: var(--accent-weak); }
 .stage.is-done { color: var(--text-2); }
-.stage__mark { width: 14px; flex-shrink: 0; text-align: center; font-size: var(--fs-caption); line-height: 22px; color: var(--text-3); }
-.stage.is-done .stage__mark { color: var(--safe); }
-.stage.is-active .stage__mark { color: var(--accent-text); }
-.stage__label { font-weight: 500; font-size: var(--fs-ui); line-height: 22px; }
+.stage__mark {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+  line-height: 1;
+  margin-top: 1px;
+}
+.stage.is-done .stage__mark { background: var(--safe-bg); border-color: var(--safe-border); color: var(--safe); }
+.stage.is-active .stage__mark { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stage__label { font-weight: 500; font-size: var(--fs-ui); line-height: 20px; }
 .stage__detail { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.5; font-family: var(--mono); }
 
 .trace {
@@ -1167,7 +1452,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .trace__line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- detail panel ---------- */
-.detail { background: var(--surface-2); border-top: 1px solid var(--border); }
+.detail { background: color-mix(in srgb, var(--accent) 3%, var(--surface)); border-top: 1px solid var(--border); }
 /* `minmax(0, 1fr)` on both tracks, and not `1fr`: a grid track defaults to
    `min-width: auto`, so one long path or one long commit hash - both of which
    this panel is full of - widens its column past the window and the row runs off
@@ -1203,10 +1488,10 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .actionbar {
   position: sticky;
   /* Not `0`. A sticky inset resolves against the scroll container's content box,
-     which sits inside the pane's 24px padding - so `bottom: 0` parked the bar 24px
-     above the window edge and the row underneath it showed through that strip.
-     Cancelling the padding is what puts it flush. */
-  bottom: calc(-1 * var(--sp-6));
+     which sits inside the pane's 32px bottom padding - so `bottom: 0` parked the
+     bar 32px above the window edge and the row underneath it showed through that
+     strip. Cancelling the padding is what puts it flush. */
+  bottom: calc(-1 * var(--sp-7));
   display: flex;
   align-items: center;
   gap: var(--sp-3);
@@ -1298,17 +1583,15 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .plan-item {
   display: flex;
   gap: var(--sp-3);
-  padding: var(--sp-3);
+  padding: var(--sp-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-2);
+  background: var(--surface);
 }
 .plan-item--force { border-color: var(--review-border); background: var(--review-bg); }
 .plan-item__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
-/* The command sits on the panel it belongs to, so it takes the page canvas as its
-   ground: on `--surface-2` inside a `--surface-2` card the code block and the card
-   it explains were the same shade and the block had only its border to place it. */
-.plan-item .code { background: var(--surface); }
+/* The command is the one recessed block inside the white plan row. */
+.plan-item .code { background: var(--surface-2); }
 .untracked-list {
   font-family: var(--mono);
   font-size: var(--fs-caption);
@@ -1323,11 +1606,36 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 }
 .untracked-list div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.gate { display: flex; flex-direction: column; gap: 6px; }
-.gate__item { display: flex; gap: 9px; align-items: baseline; font-size: var(--fs-ui); line-height: 1.6; }
-.gate__mark { flex-shrink: 0; width: 13px; text-align: center; font-size: var(--fs-caption); font-weight: 600; color: var(--text-3); }
-.gate__mark--ok { color: var(--safe); }
-.gate__mark--bad { color: var(--unsafe); }
+.gate { display: flex; flex-direction: column; gap: 8px; }
+.gate__item { display: flex; gap: 9px; align-items: flex-start; font-size: var(--fs-ui); line-height: 1.6; }
+.gate__mark {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  line-height: 1;
+  margin-top: 1px;
+}
+.gate__mark .icon { width: 12px; height: 12px; }
+.gate__mark--ok { background: var(--safe-bg); color: var(--safe); }
+.gate__mark--bad { background: var(--unsafe-bg); color: var(--unsafe); }
+
+/* Each prevention snippet is one row of the card: the state and the copy button
+   above, the snippet below. The hairline is the only divider. */
+.setup-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+.setup-item:last-child { border-bottom: 0; }
 
 /* ---------- result ---------- */
 .outcome { font-size: var(--fs-ui); font-weight: 500; }
@@ -1336,12 +1644,45 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
 .outcome--failed { color: var(--unsafe); }
 
 /* ---------- history ----------
-   A timeline is read down its left edge, so the time column is set in the mono
-   face at the same size as the rows it stamps and never in bold. */
+   A timeline is read down its left edge: one dot per row on a vertical hairline,
+   then the time, then the record. The dot carries the outcome; the row still says
+   the outcome in words, so colour is never the only signal. */
 .timeline { display: flex; flex-direction: column; }
-.timeline__row { display: flex; gap: var(--sp-3); padding: 11px var(--sp-4); border-bottom: 1px solid var(--border); transition: background-color 0.1s ease; }
+.timeline__row {
+  position: relative;
+  display: flex;
+  gap: var(--sp-3);
+  padding: 14px var(--sp-5) 14px 32px;
+  border-bottom: 1px solid var(--border);
+  transition: background-color 0.1s ease;
+}
+.timeline__row::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: 20px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  z-index: 1;
+}
+.timeline__row::after {
+  content: "";
+  position: absolute;
+  left: 20.5px;
+  top: 26px;
+  bottom: -14px;
+  width: 1px;
+  background: var(--border);
+}
+.timeline__row:last-child::after { display: none; }
 .timeline__row:hover { background: var(--surface-2); }
 .timeline__row:last-child { border-bottom: 0; }
+.timeline__row--ok::before { background: var(--safe); }
+.timeline__row--skipped::before { background: var(--review); }
+.timeline__row--failed::before { background: var(--unsafe); }
+.timeline__row--action::before { background: var(--accent); }
 .timeline__time { width: 132px; flex-shrink: 0; color: var(--text-3); font-size: var(--fs-caption); font-family: var(--mono); padding-top: 2px; }
 .timeline__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 
@@ -1349,7 +1690,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
    Two columns, a label and its control, one rule between rows. The label column is
    a fixed 216px so every control starts on the same x; that alignment is most of
    what makes a settings page look deliberate. */
-.setting-row { display: flex; gap: var(--sp-5); align-items: flex-start; padding: 14px var(--sp-4); border-bottom: 1px solid var(--border); }
+.setting-row { display: flex; gap: var(--sp-5); align-items: flex-start; padding: 16px var(--sp-5); border-bottom: 1px solid var(--border); }
 .setting-row:last-child { border-bottom: 0; }
 .setting-row__label { width: 216px; flex-shrink: 0; }
 .setting-row__name { font-weight: 500; font-size: var(--fs-ui); line-height: 1.5; }
@@ -1362,7 +1703,9 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
      track's minimum to `auto` and let a long page scroll the document again. */
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
-  .stat-grid, .stat-grid--4, .promise-grid, .detail__grid { grid-template-columns: 1fr; }
+  .stat-grid, .stat-grid--4, .detail__grid { grid-template-columns: 1fr; }
+  .assurances { grid-template-columns: 1fr; }
+  .assurance + .assurance { border-left: 0; border-top: 1px solid var(--border); }
   .actionbar { flex-wrap: wrap; }
 }
 

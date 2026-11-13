@@ -4,12 +4,23 @@ import { history, projectPath, refreshHistory, settings } from "../state";
 import { homePath } from "../format";
 import { LOCALES, messages } from "../i18n";
 import type { LocaleChoice } from "../i18n";
+import { APP_VERSION } from "../version";
+import {
+  checkForUpdates,
+  downloadPercent,
+  installUpdate,
+  installerRestartsApp,
+  isBusy,
+  restartApp,
+  updateState
+} from "../update";
 import {
   clearLog as clearLogFile,
   isDesktop,
   logPath as resolveLogPath,
   revealInFileManager
 } from "../platform";
+import AppIcon from "../components/AppIcon.vue";
 
 const desktop = isDesktop();
 
@@ -101,14 +112,57 @@ async function onClearLog() {
     logNotice.value = error instanceof Error ? error.message : String(error);
   }
 }
+
+// ---- updates ----------------------------------------------------------------
+
+/**
+ * What the update path is doing, in one sentence.
+ *
+ * Read at render time from the message table, like every other string: the
+ * language can change while the app is running, and a copy taken at import time
+ * would keep the old one.
+ */
+const updateStatus = computed(() => {
+  const copy = messages.update;
+  switch (updateState.phase) {
+    case "unsupported":
+      return copy.desktopOnly;
+    case "checking":
+      return copy.checking;
+    case "available":
+      return copy.available(updateState.version ?? "");
+    case "downloading": {
+      const percent = downloadPercent();
+      return percent === null ? copy.downloadingUnknown : copy.downloading(percent);
+    }
+    case "ready":
+      // On Windows the installer closes the app, so there is nothing left to
+      // restart from here.
+      return installerRestartsApp()
+        ? copy.readyWindows
+        : copy.ready(updateState.version ?? "");
+    case "error":
+      return copy.failed(updateState.error ?? "");
+    default:
+      return updateState.checkedAt ? copy.upToDate : copy.checking;
+  }
+});
+
+/** The release notes that came with the update, if there were any. */
+const updateNotes = computed(() => updateState.notes ?? "");
 </script>
 
 <template>
   <div class="stack page--wide">
-    <div class="spread">
-      <div>
-        <h1>{{ messages.settings.title }}</h1>
-        <p class="faint tiny">{{ messages.settings.currentProject }} <span class="mono">{{ projectPath || messages.common.none }}</span></p>
+    <div class="page-head">
+      <div class="page-head__lead">
+        <span class="page-head__icon"><AppIcon name="settings" /></span>
+        <div class="page-head__text">
+          <h1>{{ messages.settings.title }}</h1>
+          <p class="page-head__sub">
+            {{ messages.settings.currentProject }} <span class="mono">{{ projectPath || messages.common.none }}</span>
+          </p>
+        </div>
       </div>
     </div>
 
@@ -297,6 +351,45 @@ async function onClearLog() {
         </div>
       </div>
       <p v-if="logNotice" class="notice notice--unsafe">{{ logNotice }}</p>
+    </div>
+
+    <div class="card">
+      <div class="card__head"><h2>{{ messages.update.title }}</h2></div>
+      <div class="setting-row">
+        <div class="setting-row__label">
+          <div class="setting-row__name">{{ messages.update.currentVersion }}</div>
+          <div class="setting-row__hint">{{ messages.update.hint }}</div>
+        </div>
+        <div class="setting-row__control row-wrap">
+          <span class="badge badge--neutral">v{{ APP_VERSION }}</span>
+          <button class="btn" :disabled="isBusy()" @click="checkForUpdates()">
+            {{ messages.update.check }}
+          </button>
+          <button
+            v-if="updateState.phase === 'available'"
+            class="btn btn--primary"
+            @click="installUpdate()"
+          >
+            {{ messages.update.download }}
+          </button>
+          <button
+            v-if="updateState.phase === 'ready' && !installerRestartsApp()"
+            class="btn btn--primary"
+            @click="restartApp()"
+          >
+            {{ messages.update.restart }}
+          </button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-row__label">
+          <div class="setting-row__name">{{ messages.update.status }}</div>
+          <div class="setting-row__hint">{{ updateStatus }}</div>
+        </div>
+        <div class="setting-row__control">
+          <p v-if="updateNotes" class="faint tiny">{{ updateNotes }}</p>
+        </div>
+      </div>
     </div>
 
     <p class="faint tiny">{{ " " + messages.settings.pathAbbrevBefore }} <span class="mono">{{ homePath(logDisplay) }}</span>{{ messages.settings.pathAbbrevAfter + " " }}</p>

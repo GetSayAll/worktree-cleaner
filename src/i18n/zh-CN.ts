@@ -22,9 +22,8 @@ export const zhCN = {
     // 暂时留空，等口号定下来。键先留着：文案落地时只需改这一处，别的地方
     // （侧栏布局、两表一致性测试）都不用动。
     tagline: "",
-    readOnlyNote:
-      "扫描阶段只运行只读 Git 命令；删除一律进系统{{trash}}，不会永久删除。",
-    versionNote: "v0.1.0",
+    readOnlyNote: "只读扫描 · 目录进{{trash}}",
+    versionNote: "v{{version}}",
     sampleData: "示例数据",
     previewNote: "浏览器预览",
     switchProject: "切换项目",
@@ -37,6 +36,10 @@ export const zhCN = {
       "浏览器预览 —— 这个版本访问不到文件系统，因此清理操作不可用，页面上的数字都来自示例数据。"
   },
   nav: {
+    groups: {
+      audit: "审计",
+      cleanup: "清理"
+    },
     project: "项目",
     scan: "扫描",
     overview: "总览",
@@ -262,27 +265,23 @@ export const zhCN = {
     }
   },
   welcome: {
-    eyebrow: "Worktree Cleaner",
     title: "项目清理审计",
-    lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删。扫描默认只读；删除一律进系统{{trash}}。",
+    lede: "扫描仓库里的 Git 工作树与构建产物，逐条说明每一项为什么能删、为什么不能删。",
     pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
     chooseFolderUnavailable: "文件夹选择器只在桌面应用里可用，请直接输入路径",
     pickerFailed: (message: string) => `文件夹选择器没能打开：${message}`,
     startScan: "开始扫描",
-    dropHint: "也可以把项目文件夹拖进这个窗口。扫描阶段不写任何文件。",
+    dropHint: "也可以把项目文件夹拖进窗口；扫描阶段不写入任何文件。",
     scanFailed: (message: string) => `扫描没有运行：${message}`,
     promises: {
       readOnlyTitle: "只读扫描",
-      readOnlyBody:
-        "检查阶段只运行只读 Git 命令，不修改仓库，也不向目标目录写入任何内容。",
+      readOnlyBody: "只运行只读 Git 命令，不修改仓库。",
       evidenceTitle: "可核验的理由",
-      evidenceBody:
-        "每条判断都带证据：具体命令、文件数量或路径。「看着像垃圾」不算理由。",
+      evidenceBody: "每条判断都附具体命令、路径或计数。",
       trashTitle: "删除走{{trash}}",
-      trashBody:
-        "目录删除一律进系统{{trash}}；工作树走 git worktree remove。没有任何永久删除路径。"
+      trashBody: "目录进系统{{trash}}；工作树走 git worktree remove。"
     },
     recentTitle: "最近的项目",
     recentHint: "点击即可扫描",
@@ -620,6 +619,9 @@ export const zhCN = {
     title: "清理计划",
     lede: "执行前逐项复核；本页只说明将要发生什么，尚未执行任何操作。",
     backToAdjustSelection: "返回调整选择",
+    reviewSelectedTitle: "选中的条目需人工确认",
+    reviewSelectedBody: (n: number) =>
+      `有 ${n} 项仍处于「需人工确认」，执行时会被跳过；只有「可安全删除」的条目会真正删除。请重新扫描或取消这些选择。`,
     stats: {
       removeWorktree: "移除工作树",
       removeWorktreeSub: "git worktree remove",
@@ -662,8 +664,7 @@ export const zhCN = {
       duplicateCheck: (n: number) =>
         `重复删除检查通过：${n} 个产物随所属工作树移除，只计一次`,
       // 每条只说「要看什么」，不再重复「尚未运行」：列表里的短横线已经说明了状态，
-      // `note` 已经说明了时机，两条里各再写一遍就是同一句话说三遍。复检本身是
-      // 实现细节，读者拿它做不了什么决策。
+      // 复检本身是实现细节，读者拿它做不了什么决策。
       identityNotRun: "路径、体积与最近修改时间的复检",
       activityNotRun: "计划生成之后有没有新的写入"
     },
@@ -742,7 +743,20 @@ export const zhCN = {
     empty: "没有执行记录",
     footer:
       "失败的条目不影响其他条目；每个动作都会写入本机操作日志。删除不是永久的，目录类目标可以从{{trash}}恢复。",
-    complete: "清理完成；重新扫描即可确认结果",
+    finishedEmpty: "还没有执行清理",
+    finishedNone: (notDeleted: number) => `清理已结束，没有删除任何内容；${notDeleted} 项未执行`,
+    finishedPartial: (handled: number, notDeleted: number) =>
+      `清理已结束：已处理 ${handled} 项，未执行 ${notDeleted} 项`,
+    finishedAll: (handled: number) => `清理完成：已处理 ${handled} 项`,
+    outcomeNoneTitle: "没有删除任何内容",
+    outcomeNoneBody: (notDeleted: number) =>
+      `${notDeleted} 项都在删除前被拦下（复检未通过或操作失败），原因见下方「说明」列。重新扫描项目可以生成新的计划。`,
+    outcomePartialTitle: "清理结束，有项目未执行",
+    outcomePartialBody: (handled: number, notDeleted: number) =>
+      `已处理 ${handled} 项，未执行 ${notDeleted} 项；每一项的结果见下方表格。`,
+    outcomeDoneTitle: "清理完成",
+    outcomeDoneBody: (handled: number) =>
+      `已处理 ${handled} 项。目录类目标已移入{{trash}}，可从{{trash}}恢复；工作树由 git 移除。`,
     viewHistory: "查看历史记录",
     backToOverview: "返回总览"
   },
@@ -817,5 +831,27 @@ export const zhCN = {
     dark: "深色",
     pathAbbrevBefore: "路径以缩写形式显示，例如",
     pathAbbrevAfter: "；写出的始终是完整绝对路径。"
+  },
+  // 更新流程。每一句都说明读者看到的是什么，而不是更新器内部在做什么：
+  // 检查失败就说「检查失败」，不写错误码；下载就说下载到多少。
+  update: {
+    title: "更新",
+    status: "状态",
+    currentVersion: "当前版本",
+    hint: "应用启动时会检查是否有新版本。不会上传任何内容，也不会有数据离开这台机器。",
+    check: "检查更新",
+    checking: "正在检查更新…",
+    upToDate: "已经是最新版本。",
+    available: (version: string) => `有新版本 ${version}。`,
+    download: "下载并安装",
+    downloading: (percent: number) => `正在下载… ${percent}%`,
+    downloadingUnknown: "正在下载…",
+    ready: (version: string) => `${version} 已安装，重启后生效。`,
+    readyWindows: "新版本已安装。安装程序关闭了应用，重新打开即可使用。",
+    restart: "立即重启",
+    failed: (message: string) => `检查失败：${message}`,
+    installFailed: (message: string) => `安装失败：${message}`,
+    banner: (version: string) => `可更新至 ${version}`,
+    desktopOnly: "只有桌面应用会检查更新。"
   }
 };

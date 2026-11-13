@@ -52,6 +52,34 @@ const scale = [...root.matchAll(/(--fs-[a-z]+):\s*([0-9.]+)px/g)].map((match) =>
   size: Number(match[2])
 }));
 
+/** A token's value from the light `:root` block. */
+function token(name: string): string {
+  const match = root.match(new RegExp(`${name}:\\s*([^;]+);`));
+  if (!match) throw new Error(`${name} is not declared in :root`);
+  return match[1].trim();
+}
+
+describe("the font stacks", () => {
+  it("puts the CJK face before the Latin system faces", () => {
+    // Font fallback is per character: with the CJK family after `-apple-system`,
+    // Han would still reach PingFang, but Chinese punctuation and the Latin inside
+    // a Chinese line would be split between two systems. The order is the design.
+    const ui = token("--font-ui");
+    expect(ui).toContain('"Inter"');
+    expect(ui.indexOf('"PingFang SC"')).toBeGreaterThan(ui.indexOf('"Inter"'));
+    expect(ui.indexOf('"PingFang SC"')).toBeLessThan(ui.indexOf("-apple-system"));
+    expect(ui.indexOf('"Microsoft YaHei UI"')).toBeLessThan(ui.indexOf('"Segoe UI"'));
+  });
+
+  it("gives machine text a CJK fallback", () => {
+    // A path may contain a Chinese directory name. Without a named CJK fallback
+    // the Han inside a mono run lands on whatever the platform calls monospace.
+    const mono = token("--mono");
+    expect(mono).toContain('"JetBrains Mono"');
+    expect(mono).toContain('"PingFang SC"');
+  });
+});
+
 describe("the type scale", () => {
   it("has exactly eight steps", () => {
     expect(scale.map((step) => step.name)).toEqual([

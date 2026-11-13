@@ -5,6 +5,8 @@ import { snapshot } from "../state";
 import { displayPath, hygieneRuleKey, hygieneText } from "../format";
 import { messages } from "../i18n";
 import StatCard from "../components/StatCard.vue";
+import AppIcon from "../components/AppIcon.vue";
+import EmptyState from "../components/EmptyState.vue";
 
 // The policy page: what the audit found, and the wiring that keeps it from
 // coming back. Every level here was decided in `crates/worktree-core/src/hygiene.rs`
@@ -133,17 +135,20 @@ function ruleFix(rule: HygieneRule): string {
 
 <template>
   <div class="stack page--wide">
-    <div class="spread">
-      <div>
-        <h1>{{ messages.hygiene.title }}</h1>
-        <p class="faint tiny">
-          {{ messages.hygiene.metOf(counts.ok, rules.length) }}
-          <span v-if="report"> · {{ messages.hygiene.policyRef }}</span>
-        </p>
+    <div class="page-head">
+      <div class="page-head__lead">
+        <span class="page-head__icon"><AppIcon name="hygiene" /></span>
+        <div class="page-head__text">
+          <h1>{{ messages.hygiene.title }}</h1>
+          <p class="page-head__sub">
+            {{ messages.hygiene.metOf(counts.ok, rules.length) }}
+            <span v-if="report"> · {{ messages.hygiene.policyRef }}</span>
+          </p>
+        </div>
       </div>
     </div>
 
-    <p class="faint tiny">{{ messages.hygiene.lede }}</p>
+    <p class="page-note">{{ messages.hygiene.lede }}</p>
 
     <div v-if="snapshot" class="stat-grid stat-grid--4">
       <StatCard
@@ -175,7 +180,7 @@ function ruleFix(rule: HygieneRule): string {
     </div>
 
     <div v-if="counts.violation > 0" class="banner banner--danger">
-      <span>✕</span>
+      <AppIcon name="alert" class="banner__icon" />
       <span>
         <span class="banner__title">{{ messages.hygiene.level.violation }}</span>
         {{ messages.hygiene.violationBanner(counts.violation) }}
@@ -216,7 +221,7 @@ function ruleFix(rule: HygieneRule): string {
     </div>
 
     <div v-if="groups.length === 0" class="card">
-      <div class="empty">{{ messages.hygiene.findings.empty }}</div>
+      <EmptyState icon="hygiene" :text="messages.hygiene.findings.empty" />
     </div>
 
     <!-- Accepted exceptions: the finding stays visible, with the date it stops
@@ -250,8 +255,8 @@ function ruleFix(rule: HygieneRule): string {
         <h2>{{ messages.hygiene.setup.title }}</h2>
         <span class="faint tiny">{{ messages.hygiene.setup.note }}</span>
       </div>
-      <div class="card__body stack">
-        <div v-for="item in SETUP" :key="item.key" class="stack">
+      <div class="card__body card__body--flush">
+        <div v-for="item in SETUP" :key="item.key" class="setup-item">
           <div class="gate">
             <div class="gate__item">
               <span

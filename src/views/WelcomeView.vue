@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { recentProjects, scanError, startScan } from "../state";
-import { homePath } from "../format";
+import { formatRelTime, homePath } from "../format";
 import { messages } from "../i18n";
 import { isDesktop, onPathsDropped, pickDirectory } from "../platform";
+import AppIcon from "../components/AppIcon.vue";
+import brandLogo from "../assets/brand.svg";
+import EmptyState from "../components/EmptyState.vue";
 
 const path = ref("");
 const dragActive = ref(false);
@@ -23,11 +26,6 @@ onMounted(async () => {
 });
 
 onUnmounted(() => stopDropListener?.());
-// `dragActive` drives nothing but the highlight, so a dropped path arriving
-// without a `dragleave` cannot leave the panel stuck in the active look.
-const dropStyle = computed(() =>
-  dragActive.value ? { borderColor: "var(--accent)", background: "var(--accent-weak)" } : undefined
-);
 
 function submit() {
   if (!path.value.trim()) return;
@@ -66,111 +64,110 @@ function onDrop(event: DragEvent) {
   const text = event.dataTransfer?.getData("text/plain") ?? "";
   if (text.trim()) path.value = text.trim();
 }
-
-function scannedAt(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const minutes = Math.floor((Date.now() - then) / 60000);
-  if (minutes < 1) return messages.time.justNow;
-  if (minutes < 60) return messages.time.hoursAgo(Math.max(1, Math.round(minutes / 60)));
-  const days = Math.round(minutes / 1440);
-  if (days <= 1) return messages.time.oneDayAgo;
-  if (days < 30) return messages.time.daysAgo(days);
-  if (days < 365) return messages.time.monthsAgo(Math.round(days / 30));
-  return messages.time.yearsAgo(Math.round(days / 365));
-}
 </script>
 
 <template>
   <div class="welcome">
-    <div class="welcome__hero">
-      <p class="faint tiny">{{ messages.welcome.eyebrow }}</p>
+    <header class="welcome__hero">
+      <img class="welcome__mark" :src="brandLogo" alt="" />
       <h1 class="welcome__title">{{ messages.welcome.title }}</h1>
-      <p class="welcome__lede">{{ " " + messages.welcome.lede + " " }}</p>
-    </div>
+      <p class="welcome__lede">{{ messages.welcome.lede }}</p>
+    </header>
 
     <div
-      class="dropzone"
-      :style="dropStyle"
+      class="composer"
+      :class="{ 'is-dragging': dragActive }"
       @dragover.prevent="dragActive = true"
       @dragleave="dragActive = false"
       @drop.prevent="onDrop"
     >
-      <div class="pick-row">
+      <div class="composer__row">
+        <AppIcon name="folder" class="composer__leading" />
         <input
           v-model="path"
-          class="input input--mono"
+          class="input input--mono composer__input"
           :placeholder="messages.welcome.pathPlaceholder"
           @keyup.enter="submit"
         />
-        <button
-          class="btn"
-          data-action="choose-folder"
-          :title="desktop ? messages.welcome.chooseFolderTitle : messages.welcome.chooseFolderUnavailable"
-          @click="chooseFolder"
-        >
-          {{ messages.welcome.chooseFolder }}
-        </button>
-        <button
-          class="btn btn--primary"
-          data-action="start-scan"
-          :disabled="!path.trim()"
-          @click="submit"
-        >
-          {{ messages.welcome.startScan }}
-        </button>
+        <div class="composer__actions">
+          <button
+            class="btn btn--ghost composer__browse"
+            data-action="choose-folder"
+            :title="desktop ? messages.welcome.chooseFolderTitle : messages.welcome.chooseFolderUnavailable"
+            @click="chooseFolder"
+          >
+            {{ messages.welcome.chooseFolder }}
+          </button>
+          <button
+            class="btn btn--primary btn--cta"
+            data-action="start-scan"
+            :disabled="!path.trim()"
+            @click="submit"
+          >
+            {{ messages.welcome.startScan }}
+          </button>
+        </div>
       </div>
-      <p v-if="pickerUnavailable" class="field__hint field__hint--warn">
+      <p v-if="pickerUnavailable" class="field__hint field__hint--warn composer__message">
         {{ messages.welcome.chooseFolderUnavailable }}
       </p>
-      <p v-if="pickerError" class="field__hint field__hint--warn">
+      <p v-if="pickerError" class="field__hint field__hint--warn composer__message">
         {{ messages.welcome.pickerFailed(pickerError) }}
       </p>
-      <p class="field__hint">{{ messages.welcome.dropHint }}</p>
+      <p class="field__hint composer__hint">{{ messages.welcome.dropHint }}</p>
     </div>
 
     <p v-if="scanError" class="notice notice--unsafe">{{ messages.welcome.scanFailed(scanError) }}</p>
 
-    <div class="promise-grid">
-      <div class="promise">
-        <div class="promise__k">{{ messages.welcome.promises.readOnlyTitle }}</div>
-        <div class="promise__v">{{ messages.welcome.promises.readOnlyBody }}</div>
+    <div class="assurances">
+      <div class="assurance">
+        <AppIcon name="lock" class="assurance__icon" />
+        <div class="assurance__text">
+          <p class="assurance__title">{{ messages.welcome.promises.readOnlyTitle }}</p>
+          <p class="assurance__body">{{ messages.welcome.promises.readOnlyBody }}</p>
+        </div>
       </div>
-      <div class="promise">
-        <div class="promise__k">{{ messages.welcome.promises.evidenceTitle }}</div>
-        <div class="promise__v">{{ messages.welcome.promises.evidenceBody }}</div>
+      <div class="assurance">
+        <AppIcon name="evidence" class="assurance__icon" />
+        <div class="assurance__text">
+          <p class="assurance__title">{{ messages.welcome.promises.evidenceTitle }}</p>
+          <p class="assurance__body">{{ messages.welcome.promises.evidenceBody }}</p>
+        </div>
       </div>
-      <div class="promise">
-        <div class="promise__k">{{ messages.welcome.promises.trashTitle }}</div>
-        <div class="promise__v">{{ messages.welcome.promises.trashBody }}</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card__head">
-        <h2>{{ messages.welcome.recentTitle }}</h2>
-        <span class="faint tiny">{{ messages.welcome.recentHint }}</span>
-      </div>
-      <div class="card__body">
-        <p v-if="recentProjects.length === 0" class="faint">{{ messages.welcome.recentEmpty }}</p>
-        <div v-else class="recent-list">
-          <button
-            v-for="item in recentProjects"
-            :key="item.path"
-            class="recent"
-            @click="startScan(item.path)"
-          >
-            <span class="recent__path">{{ homePath(item.path) }}</span>
-            <span class="faint tiny nowrap">
-              {{
-                item.scanned_at
-                  ? messages.welcome.lastScan(scannedAt(item.scanned_at))
-                  : messages.welcome.neverScanned
-              }}
-            </span>
-          </button>
+      <div class="assurance">
+        <AppIcon name="trash" class="assurance__icon" />
+        <div class="assurance__text">
+          <p class="assurance__title">{{ messages.welcome.promises.trashTitle }}</p>
+          <p class="assurance__body">{{ messages.welcome.promises.trashBody }}</p>
         </div>
       </div>
     </div>
+
+    <section class="recent-panel">
+      <div class="recent-panel__head">
+        <h2>{{ messages.welcome.recentTitle }}</h2>
+        <span class="faint tiny">{{ messages.welcome.recentHint }}</span>
+      </div>
+      <EmptyState v-if="recentProjects.length === 0" compact icon="folder" :text="messages.welcome.recentEmpty" />
+      <div v-else class="recent-list">
+        <button
+          v-for="item in recentProjects"
+          :key="item.path"
+          class="recent"
+          @click="startScan(item.path)"
+        >
+          <AppIcon name="folder" class="recent__icon" />
+          <span class="recent__path">{{ homePath(item.path) }}</span>
+          <span class="recent__time">
+            {{
+              item.scanned_at
+                ? messages.welcome.lastScan(formatRelTime(item.scanned_at))
+                : messages.welcome.neverScanned
+            }}
+          </span>
+          <AppIcon name="chevron" class="recent__chevron" />
+        </button>
+      </div>
+    </section>
   </div>
 </template>

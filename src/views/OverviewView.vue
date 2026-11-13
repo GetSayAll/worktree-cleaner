@@ -4,6 +4,8 @@ import { artifacts, counts, goTo, primaryReason, selectedSummary, snapshot, work
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import StatCard from "../components/StatCard.vue";
+import AppIcon from "../components/AppIcon.vue";
+import EmptyState from "../components/EmptyState.vue";
 import { compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
@@ -48,10 +50,13 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
 
 <template>
   <div class="stack page--wide">
-    <div class="spread">
-      <div>
-        <h1>{{ messages.overview.title }}</h1>
-        <p class="faint tiny mono">{{ messages.overview.subtitle(root, snapshot?.default_branch || messages.common.unknown) }}</p>
+    <div class="page-head">
+      <div class="page-head__lead">
+        <span class="page-head__icon"><AppIcon name="overview" /></span>
+        <div class="page-head__text">
+          <h1>{{ messages.overview.title }}</h1>
+          <p class="page-head__sub mono">{{ messages.overview.subtitle(root, snapshot?.default_branch || messages.common.unknown) }}</p>
+        </div>
       </div>
     </div>
 
@@ -93,7 +98,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
     </div>
 
     <div v-for="warning in snapshot?.warnings || []" :key="warning" class="banner banner--warn">
-      <span>⚠</span>
+      <AppIcon name="alert" class="banner__icon" />
       <span>
         <span class="banner__title">{{ messages.overview.warningTitle }}</span>{{ warning }}
       </span>
@@ -105,6 +110,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         <button class="btn btn--ghost" @click="goTo('worktrees')">{{ messages.overview.viewAll(worktrees.length) }}</button>
       </div>
       <div class="card__body card__body--flush">
+        <EmptyState v-if="topWorktrees.length === 0" compact icon="branch" :text="messages.worktrees.empty" />
         <!-- The same three lines as the worktree page, without the checkbox: this
              page is a way in, not a place to choose. -->
         <div v-for="item in topWorktrees" :key="item.path" class="item-row item-row--plain">
@@ -142,6 +148,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         <button class="btn btn--ghost" @click="goTo('artifacts')">{{ messages.overview.viewAll(artifacts.length) }}</button>
       </div>
       <div class="card__body card__body--flush">
+        <EmptyState v-if="topArtifacts.length === 0" compact icon="artifacts" :text="messages.artifacts.empty" />
         <div v-for="item in topArtifacts" :key="item.path" class="item-row item-row--plain">
           <div class="item-row__main">
             <div class="item-row__head">

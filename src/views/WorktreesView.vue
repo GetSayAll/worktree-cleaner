@@ -13,6 +13,8 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
+import AppIcon from "../components/AppIcon.vue";
+import EmptyState from "../components/EmptyState.vue";
 import { compareByActionability, compareSizeNullsFirst, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
@@ -78,7 +80,7 @@ const filtered = computed<WorktreeRecord[]>(() => {
   });
 });
 
-const selectable = computed(() => filtered.value.filter((item) => item.safety.status !== "Unsafe").map((item) => item.path));
+const selectable = computed(() => filtered.value.filter((item) => item.safety.status === "Safe").map((item) => item.path));
 
 const allSelected = computed({
   get: () => selectable.value.length > 0 && selectable.value.every((p) => isSelectedWorktree(p)),
@@ -126,13 +128,18 @@ function stateText(item: WorktreeRecord): string {
 
 <template>
   <div class="stack page--wide">
-    <div class="spread">
-      <h1>{{ messages.worktrees.title }}</h1>
-      <span class="faint tiny">{{ " " + messages.worktrees.dataSource + " " }}</span>
+    <div class="page-head">
+      <div class="page-head__lead">
+        <span class="page-head__icon"><AppIcon name="branch" /></span>
+        <div class="page-head__text">
+          <h1>{{ messages.worktrees.title }}</h1>
+          <p class="page-head__sub">{{ messages.worktrees.dataSource }}</p>
+        </div>
+      </div>
     </div>
 
     <div v-if="hygieneViolations > 0" class="banner banner--warn">
-      <span>!</span>
+      <AppIcon name="alert" class="banner__icon" />
       <span>
         <span class="banner__title">{{ messages.worktrees.hygieneTitle }}</span>
         {{ messages.worktrees.hygieneBody(hygieneViolations) }}
@@ -141,20 +148,25 @@ function stateText(item: WorktreeRecord): string {
       <button class="btn btn--ghost" @click="goTo('hygiene')">{{ messages.worktrees.hygieneAction }}</button>
     </div>
 
-    <div class="row-wrap">
-      <div class="segmented">
-        <button :class="filter === 'all' ? 'is-active' : ''" @click="filter = 'all'">{{ messages.worktrees.filterAll(worktrees.length) }}</button>
-        <button :class="filter === 'Safe' ? 'is-active' : ''" @click="filter = 'Safe'">
-          {{ " " + messages.worktrees.filterSafe(statusCount(worktrees, "Safe")) }}
-        </button>
-        <button :class="filter === 'Review' ? 'is-active' : ''" @click="filter = 'Review'">
-          {{ " " + messages.worktrees.filterReview(statusCount(worktrees, "Review")) }}
-        </button>
-        <button :class="filter === 'Unsafe' ? 'is-active' : ''" @click="filter = 'Unsafe'">
-          {{ " " + messages.worktrees.filterUnsafe(statusCount(worktrees, "Unsafe")) }}
-        </button>
+    <div class="toolbar">
+      <div class="toolbar__group">
+        <div class="segmented">
+          <button :class="filter === 'all' ? 'is-active' : ''" @click="filter = 'all'">{{ messages.worktrees.filterAll(worktrees.length) }}</button>
+          <button :class="filter === 'Safe' ? 'is-active' : ''" @click="filter = 'Safe'">
+            {{ " " + messages.worktrees.filterSafe(statusCount(worktrees, "Safe")) }}
+          </button>
+          <button :class="filter === 'Review' ? 'is-active' : ''" @click="filter = 'Review'">
+            {{ " " + messages.worktrees.filterReview(statusCount(worktrees, "Review")) }}
+          </button>
+          <button :class="filter === 'Unsafe' ? 'is-active' : ''" @click="filter = 'Unsafe'">
+            {{ " " + messages.worktrees.filterUnsafe(statusCount(worktrees, "Unsafe")) }}
+          </button>
+        </div>
       </div>
-      <input v-model="query" class="input input--sm" style="max-width: 240px" :placeholder="messages.worktrees.searchPlaceholder" />
+      <label class="search toolbar__end">
+        <AppIcon name="search" />
+        <input v-model="query" class="input input--sm" :aria-label="messages.worktrees.searchPlaceholder" :placeholder="messages.worktrees.searchPlaceholder" />
+      </label>
     </div>
 
     <div class="card">
@@ -243,7 +255,7 @@ function stateText(item: WorktreeRecord): string {
             </div>
           </div>
         </template>
-        <div v-if="filtered.length === 0" class="empty">{{ messages.worktrees.empty }}</div>
+        <EmptyState v-if="filtered.length === 0" icon="branch" :text="messages.worktrees.empty" />
       </div>
     </div>
 

@@ -26,9 +26,8 @@ export const en = {
     // Intentionally blank until the tagline is decided. The key stays so that
     // landing the copy later is a one-line edit and nothing else has to move.
     tagline: "",
-    readOnlyNote:
-      "The scan phase runs only read-only Git commands; deletions always go to the system {{trash}} and are never permanent.",
-    versionNote: "v0.1.0",
+    readOnlyNote: "Read-only · directories go to the {{trash}}",
+    versionNote: "v{{version}}",
     sampleData: "Sample data",
     previewNote: "Browser preview",
     switchProject: "Switch project",
@@ -44,6 +43,10 @@ export const en = {
       "Browser preview — this build cannot reach the file system, so the cleanup actions are disabled and the numbers on these pages come from sample data."
   },
   nav: {
+    groups: {
+      audit: "Audit",
+      cleanup: "Cleanup"
+    },
     project: "Project",
     scan: "Scan",
     overview: "Overview",
@@ -247,7 +250,7 @@ export const en = {
   },
   time: {
     justNow: "just now",
-    hoursAgo: (n: number) => `${n} hours ago`,
+    hoursAgo: (n: number) => (n === 1 ? "1 hour ago" : `${n} hours ago`),
     oneDayAgo: "1 day ago",
     daysAgo: (n: number) => `${n} days ago`,
     monthsAgo: (n: number) => `${n} months ago`,
@@ -280,9 +283,8 @@ export const en = {
     }
   },
   welcome: {
-    eyebrow: "Worktree Cleaner",
     title: "Project cleanup audit",
-    lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted. Scanning is read-only by default; deletions always go to the system {{trash}}.",
+    lede: "Scan a repository's Git worktrees and build artifacts, and explain why each one can or cannot be deleted.",
     pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "Choose folder",
     chooseFolderTitle: "Open the system folder picker",
@@ -290,18 +292,15 @@ export const en = {
       "The folder picker lives in the desktop app; type the path instead",
     pickerFailed: (message: string) => `The folder picker could not open: ${message}`,
     startScan: "Start scan",
-    dropHint: "You can also drop a project folder onto this window. The scan phase writes no files.",
+    dropHint: "You can also drop a project folder here. The scan writes no files.",
     scanFailed: (message: string) => `The scan did not run: ${message}`,
     promises: {
       readOnlyTitle: "Read-only scan",
-      readOnlyBody:
-        "The check phase runs only read-only Git commands; it does not modify the repository or write into the target directory.",
+      readOnlyBody: "Runs read-only Git commands only; the repository is never modified.",
       evidenceTitle: "Verifiable reasons",
-      evidenceBody:
-        'Every judgment comes with evidence: a concrete command, file count, or path. "Looks like junk" is not accepted.',
+      evidenceBody: "Every judgment carries a concrete command, path, or count.",
       trashTitle: "Deletion through the {{trash}}",
-      trashBody:
-        "Directory deletions always go to the system {{trash}}; worktrees go through git worktree remove. Nothing is permanently deleted."
+      trashBody: "Directories go to the system {{trash}}; worktrees go through git worktree remove."
     },
     recentTitle: "Recent projects",
     recentHint: "Click to scan",
@@ -661,6 +660,9 @@ export const en = {
     title: "Cleanup plan",
     lede: "Review each item before executing; this page only describes what will happen — nothing has been executed yet.",
     backToAdjustSelection: "Back to adjust selection",
+    reviewSelectedTitle: "Selected items need review",
+    reviewSelectedBody: (n: number) =>
+      `${n} selected items are still marked Needs review. The executor skips them; only Safe items are deleted. Rescan or clear them from the selection.`,
     stats: {
       removeWorktree: "Remove Worktree",
       removeWorktreeSub: "git worktree remove",
@@ -789,7 +791,21 @@ export const en = {
     empty: "No execution records",
     footer:
       "Failed items do not affect the others; every action is written to the local operation log. Deletions are not permanent, and directory targets can be recovered from {{trash}}.",
-    complete: "Cleanup complete; rescan to confirm the result",
+    finishedEmpty: "No cleanup actions have run",
+    finishedNone: (notDeleted: number) =>
+      `Cleanup finished; nothing was deleted — ${notDeleted} ${notDeleted === 1 ? "item was" : "items were"} not executed`,
+    finishedPartial: (handled: number, notDeleted: number) =>
+      `Cleanup finished: ${handled} handled, ${notDeleted} not executed`,
+    finishedAll: (handled: number) => `Cleanup complete: ${handled} handled`,
+    outcomeNoneTitle: "Nothing was deleted",
+    outcomeNoneBody: (notDeleted: number) =>
+      `${notDeleted} ${notDeleted === 1 ? "item was" : "items were"} stopped before removal — by the pre-deletion re-check or by a failed action. The Detail column says why. Rescan the project to build a fresh plan.`,
+    outcomePartialTitle: "Cleanup finished with skipped items",
+    outcomePartialBody: (handled: number, notDeleted: number) =>
+      `${handled} items were handled; ${notDeleted} were not executed. The table below says what happened to each one.`,
+    outcomeDoneTitle: "Cleanup complete",
+    outcomeDoneBody: (handled: number) =>
+      `${handled} items were handled. Directory targets moved to the {{trash}} are recoverable there; worktrees were removed with git.`,
     viewHistory: "View history",
     backToOverview: "Back to overview"
   },
@@ -871,5 +887,29 @@ export const en = {
     dark: "Dark",
     pathAbbrevBefore: "Paths are shown using abbreviations like",
     pathAbbrevAfter: "; the full absolute path is written out."
+  },
+  // The update path. Every line says what the reader is looking at, not what the
+  // updater is doing internally: a failed check is "the check failed", not an
+  // error code, and the download says how much of it is done.
+  update: {
+    title: "Updates",
+    status: "Status",
+    currentVersion: "Installed version",
+    hint: "The app checks for a newer version when it starts. Nothing is uploaded and no data leaves the machine.",
+    check: "Check for updates",
+    checking: "Checking for updates…",
+    upToDate: "This is the latest version.",
+    available: (version: string) => `Version ${version} is available.`,
+    download: "Download and install",
+    downloading: (percent: number) => `Downloading… ${percent}%`,
+    downloadingUnknown: "Downloading…",
+    ready: (version: string) => `Version ${version} is installed. Restart to run it.`,
+    readyWindows:
+      "The new version is installed. The installer closed the app; open it again to run it.",
+    restart: "Restart now",
+    failed: (message: string) => `The check failed: ${message}`,
+    installFailed: (message: string) => `The installation failed: ${message}`,
+    banner: (version: string) => `Update ${version} available`,
+    desktopOnly: "Only the desktop app checks for updates."
   }
 };

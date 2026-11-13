@@ -67,22 +67,31 @@ struct ExecuteRequest {
     log_path: Option<String>,
 }
 
+/// Rebuilds the core's execution options from the wire request.
+///
+/// The scan and the re-check measure the same directories, so a setting must mean
+/// the same thing in both; this is the one place the request becomes the core's
+/// options.
+fn execution_options(request: &ExecuteRequest) -> ExecuteOptions {
+    ExecuteOptions {
+        recent_activity_days: request.recent_activity_days,
+        untracked_as_unsafe: request.untracked_as_unsafe,
+        whitelist: request.whitelist.clone(),
+        // `max(1)`: a zero budget would make every measurement time out before it
+        // starts, which reads as "unmeasurable" rather than as the setting the
+        // user chose. The same guard the scan path applies.
+        per_dir_timeout: Duration::from_millis(request.per_dir_timeout_ms.max(1)),
+        git_timeout: Duration::from_millis(request.git_timeout_ms.max(1)),
+        log_path: request.log_path.clone().map(PathBuf::from),
+        ..ExecuteOptions::default()
+    }
+}
+
 /// Runs a confirmed plan.
 #[tauri::command]
 async fn execute_plan(request: ExecuteRequest) -> Result<ExecutionOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let options = ExecuteOptions {
-            recent_activity_days: request.recent_activity_days,
-            untracked_as_unsafe: request.untracked_as_unsafe,
-            whitelist: request.whitelist,
-            // `max(1)`: a zero budget would make every measurement time out before it
-            // starts, which reads as "unmeasurable" rather than as the setting the
-            // user chose. The same guard the scan path applies.
-            per_dir_timeout: Duration::from_millis(request.per_dir_timeout_ms.max(1)),
-            git_timeout: Duration::from_millis(request.git_timeout_ms.max(1)),
-            log_path: request.log_path.map(PathBuf::from),
-            ..ExecuteOptions::default()
-        };
+        let options = execution_options(&request);
         core_execute(&request.plan, &request.snapshot, &options)
     })
     .await
@@ -223,6 +232,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // The updater is the plugin that checks the release feed and installs a
+        // newer build; the process plugin restarts the app once it is installed,
+        // because the running binary cannot become the new one by itself.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             scan_project,
             execute_plan,

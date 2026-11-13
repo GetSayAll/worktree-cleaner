@@ -77,6 +77,69 @@ const mainCoverage = `${mockRoot}/coverage`;
 
 const MIN_MB = 10 * 1024 * 1024;
 
+describe("default settings", () => {
+  it("uses a 300-second per-directory budget", async () => {
+    // Large build trees take longer than 30s to walk and credential-check. A
+    // smaller default turns their safe verdict into `cannot_verify` at execution.
+    const state = await freshState();
+    expect(state.settings.per_dir_timeout_sec).toBe(300);
+  });
+
+  it("uses the 3-day activity window the core and product plan specify", async () => {
+    // The front end shipped 7 here while `DEFAULT_ACTIVITY_DAYS` and
+    // PRODUCT_PLAN §9 say 3. The mismatch made 4–7 day old build output Review
+    // in every fresh install.
+    const state = await freshState();
+    expect(state.settings.active_days).toBe(3);
+  });
+
+  it("migrates the old 7-day/30-second pair once and leaves custom values alone", async () => {
+    // A stored settings object wins over a changed default. Existing installs
+    // still held the old pair, so changing the default alone would never reach
+    // the scan that made the wrong call. The version key makes the migration
+    // one-time, and a user who changed either value keeps their choice.
+    const values = new Map<string, string>();
+    const store = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key)
+    };
+    vi.stubGlobal("localStorage", store);
+    values.set(
+      "worktree-cleaner.settings",
+      JSON.stringify({ active_days: 7, per_dir_timeout_sec: 30 })
+    );
+
+    const migrated = await freshState();
+    expect(migrated.settings.active_days).toBe(3);
+    expect(migrated.settings.per_dir_timeout_sec).toBe(300);
+    expect(values.get("worktree-cleaner.settings-version")).toBe("1");
+
+    // The version key is what stops a second write from overwriting a value the
+    // reader chose after the upgrade.
+    values.set(
+      "worktree-cleaner.settings",
+      JSON.stringify({ active_days: 7, per_dir_timeout_sec: 30 })
+    );
+    vi.resetModules();
+    const notMigratedAgain = await import("./state");
+    expect(notMigratedAgain.settings.active_days).toBe(7);
+    expect(notMigratedAgain.settings.per_dir_timeout_sec).toBe(30);
+
+    // A value the reader changed is not the old default pair.
+    values.set(
+      "worktree-cleaner.settings",
+      JSON.stringify({ active_days: 7, per_dir_timeout_sec: 60 })
+    );
+    values.delete("worktree-cleaner.settings-version");
+    vi.resetModules();
+    const custom = await import("./state");
+    expect(custom.settings.active_days).toBe(7);
+    expect(custom.settings.per_dir_timeout_sec).toBe(60);
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("default selection (D12)", () => {
   it("selects Safe items, leaves Review unselected, and never offers Unsafe", async () => {
     const state = await freshState();

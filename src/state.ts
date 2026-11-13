@@ -56,11 +56,11 @@ export type ScanStage = (typeof SCAN_STAGES)[number];
  * would look like their own configuration, and the scanner would act on it.
  */
 const defaultSettings: Settings = {
-  active_days: 7,
+  active_days: 3,
   min_artifact_mb: 10,
   untracked_is_unsafe: false,
   max_depth: 6,
-  per_dir_timeout_sec: 30,
+  per_dir_timeout_sec: 300,
   scan_budget_sec: 600,
   extra_scan_paths: [],
   whitelist_paths: [],
@@ -125,6 +125,8 @@ export const isDemoData = ref(false);
 export const recentProjects = ref<RecentProject[]>([]);
 
 const SETTINGS_KEY = "worktree-cleaner.settings";
+const SETTINGS_VERSION_KEY = "worktree-cleaner.settings-version";
+const SETTINGS_VERSION = 1;
 const RECENTS_KEY = "worktree-cleaner.recents";
 const RECENTS_LIMIT = 6;
 
@@ -147,6 +149,7 @@ function loadSettings() {
     const raw = store.getItem(SETTINGS_KEY);
     if (!raw) return;
     const stored = JSON.parse(raw) as Partial<Settings>;
+    migrateSettings(store, stored);
     for (const [key, value] of Object.entries(stored)) {
       if (key in settings && value !== undefined) {
         (settings as Record<string, unknown>)[key] = value;
@@ -155,6 +158,27 @@ function loadSettings() {
   } catch {
     // A corrupt entry is not worth a broken start: the defaults stand.
   }
+}
+
+/**
+ * Moves installs that still hold the old scan defaults onto the current ones.
+ *
+ * `active_days: 7` and `per_dir_timeout_sec: 30` were the defaults before the
+ * initial-check fix. A stored settings object wins over a changed default, so
+ * without this migration the scan would keep using 7 days and 30 seconds on
+ * every existing install — exactly the values that made the initial scan call
+ * recently written build output `Review`. Only the exact old pair is migrated;
+ * a user who changed either value keeps their choice, and the separate version
+ * key makes the migration one-time.
+ */
+function migrateSettings(store: Storage, stored: Partial<Settings>) {
+  const version = Number(store.getItem(SETTINGS_VERSION_KEY) ?? "0");
+  if (version >= SETTINGS_VERSION) return;
+  if (stored.active_days === 7 && stored.per_dir_timeout_sec === 30) {
+    stored.active_days = 3;
+    stored.per_dir_timeout_sec = 300;
+  }
+  store.setItem(SETTINGS_VERSION_KEY, String(SETTINGS_VERSION));
 }
 
 function loadRecents() {
@@ -696,6 +720,24 @@ function buildPlan(): CleanupPlan {
 }
 
 /**
+ * The knobs the executor receives.
+ *
+ * A setting that shaped the scan and is then replaced by a default here would
+ * mean one thing on the way in and another on the way out; keeping the object in
+ * one place is what stops the scan and the run from disagreeing.
+ */
+function executeKnobs(logPathValue: string | null) {
+  return {
+    recent_activity_days: settings.active_days,
+    untracked_as_unsafe: settings.untracked_is_unsafe,
+    whitelist: settings.whitelist_paths,
+    per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+    git_timeout_ms: GIT_TIMEOUT_MS,
+    log_path: logPathValue
+  };
+}
+
+/**
  * Runs the confirmed plan.
  *
  * Nothing is simulated here: the core re-checks every item, executes what still
@@ -733,18 +775,7 @@ export async function executeCleanup() {
     typed_name: confirmText.value.trim() !== ""
   });
   try {
-    const outcome = await executePlan(plan, current, {
-      recent_activity_days: settings.active_days,
-      untracked_as_unsafe: settings.untracked_is_unsafe,
-      whitelist: settings.whitelist_paths,
-      // The same two budgets the scan used. The re-check measures the very same
-      // directories, so a setting that shaped the scan and was then replaced by a
-      // default here would mean one thing on the way in and another on the way out.
-      per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
-      git_timeout_ms: GIT_TIMEOUT_MS,
-      // `null` disables the audit log, which the user is then told about.
-      log_path: await logPath()
-    });
+    const outcome = await executePlan(plan, current, executeKnobs(await logPath()));
     await applyOutcome(outcome, plan);
   } catch (error) {
     executeError.value = error instanceof Error ? error.message : String(error);

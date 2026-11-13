@@ -173,4 +173,80 @@ describe("the app shell", () => {
     app.unmount();
     host.remove();
   });
+
+  it("says clearly that nothing was deleted when every item was skipped", async () => {
+    // The result page used to say "Cleanup complete" for a run where every item
+    // was skipped, which made a safe no-op look like a deletion. The verdict
+    // must be on the page before the counts are read.
+    const { app, host } = mountApp();
+    state.snapshot.value = mockSnapshot;
+    state.projectPath.value = mockSnapshot.root;
+    state.lastResult.value = [
+      {
+        action: "trash-move",
+        target: `${mockSnapshot.root}/dist`,
+        result: "skipped",
+        detail_code: "artifact.no_longer_safe",
+        detail_args: { reason: "af.cannot_verify" },
+        detail: null,
+        size_bytes: 1
+      },
+      {
+        action: "trash-move",
+        target: `${mockSnapshot.root}/.turbo`,
+        result: "skipped",
+        detail_code: "artifact.no_longer_safe",
+        detail_args: { reason: "af.recent_activity" },
+        detail: null,
+        size_bytes: 1
+      }
+    ];
+    state.view.value = "result";
+    await nextTick();
+
+    const banner = host.querySelector<HTMLElement>(".banner.banner--warn");
+    expect(banner, "the no-deletion outcome banner is missing").not.toBeNull();
+    expect(banner?.textContent).toContain("Nothing was deleted");
+    expect(banner?.textContent).toContain("2 items were stopped");
+    expect(host.querySelector(".banner.banner--safe")).toBeNull();
+    expect(host.querySelector(".actionbar__summary")?.textContent).toContain("nothing was deleted");
+
+    state.lastResult.value = [];
+    state.projectPath.value = "";
+    state.view.value = "welcome";
+    state.snapshot.value = null;
+    app.unmount();
+    host.remove();
+  });
+
+  it("shows the completed banner only when at least one item was handled", async () => {
+    const { app, host } = mountApp();
+    state.snapshot.value = mockSnapshot;
+    state.projectPath.value = mockSnapshot.root;
+    state.lastResult.value = [
+      {
+        action: "trash-move",
+        target: `${mockSnapshot.root}/dist`,
+        result: "ok",
+        detail_code: "artifact.trashed",
+        detail_args: {},
+        detail: null,
+        size_bytes: 1
+      }
+    ];
+    state.view.value = "result";
+    await nextTick();
+
+    const banner = host.querySelector<HTMLElement>(".banner.banner--safe");
+    expect(banner, "the successful outcome banner is missing").not.toBeNull();
+    expect(banner?.textContent).toContain("Cleanup complete");
+    expect(host.querySelector(".banner.banner--warn")).toBeNull();
+
+    state.lastResult.value = [];
+    state.projectPath.value = "";
+    state.view.value = "welcome";
+    state.snapshot.value = null;
+    app.unmount();
+    host.remove();
+  });
 });

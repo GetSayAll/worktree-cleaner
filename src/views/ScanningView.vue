@@ -5,6 +5,7 @@ import { scanTrace } from "../mock/snapshot";
 import { formatClock } from "../format";
 import { isDesktop } from "../platform";
 import { messages } from "../i18n";
+import AppIcon from "../components/AppIcon.vue";
 
 const desktop = isDesktop();
 const visibleTrace = computed(() =>
@@ -51,9 +52,14 @@ const scannedTrace = desktop ? [] : scanTrace;
 
 <template>
   <div class="scan">
-    <div class="stack stack--tight">
-      <h1>{{ messages.scan.title }}</h1>
-      <p class="mono faint">{{ projectPath }}</p>
+    <div class="page-head">
+      <div class="page-head__lead">
+        <span class="page-head__icon"><AppIcon name="search" /></span>
+        <div class="page-head__text">
+          <h1>{{ messages.scan.title }}</h1>
+          <p class="page-head__sub mono">{{ projectPath }}</p>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -80,6 +86,6 @@ const scannedTrace = desktop ? [] : scanTrace;
       <div v-for="line in visibleTrace" :key="line" class="trace__line">{{ line }}</div>
     </div>
 
-    <p class="faint tiny">{{ " " + messages.scan.budgetNote + " " }}</p>
+    <p class="page-note">{{ messages.scan.budgetNote }}</p>
   </div>
 </template>

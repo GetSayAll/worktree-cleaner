@@ -9,6 +9,7 @@ import {
   executing,
   goTo,
   projectPath,
+  selectedArtifacts,
   selectedWorktrees,
   settings,
   snapshot
@@ -17,6 +18,8 @@ import { isDesktop } from "../platform";
 
 const desktop = isDesktop();
 import StatCard from "../components/StatCard.vue";
+import AppIcon from "../components/AppIcon.vue";
+import EmptyState from "../components/EmptyState.vue";
 import { basename, displayPath, formatBytes, formatCount, isAbsolutePath, normalizePathKey } from "../format";
 import { messages } from "../i18n";
 
@@ -39,6 +42,29 @@ const forceItems = computed(() => plan.value.worktree_removals.filter((item) => 
 const needsAck = computed(() => plan.value.ack_reasons.length > 0);
 const needsName = computed(() => settings.require_project_name);
 const projectName = computed(() => basename(projectPath.value));
+
+/**
+ * Selected items the executor will refuse.
+ *
+ * Only Safe items are ever removed (D3/D11). Review items stay selectable so a
+ * reader can inspect them, but a plan that showed them as ordinary deletions
+ * promised something the executor would not do. This count is the warning
+ * between the selection and the result.
+ */
+const reviewSelected = computed(() => {
+  const snap = snapshot.value;
+  if (!snap) return 0;
+  const worktrees = snap.worktrees.filter(
+    (item) => selectedWorktrees.value.includes(item.path) && item.safety.status === "Review"
+  ).length;
+  const artifacts = snap.artifacts.filter(
+    (item) =>
+      selectedArtifacts.value.includes(item.path) &&
+      item.safety.status === "Review" &&
+      (item.worktree_path === null || !selectedWorktrees.value.includes(item.worktree_path))
+  ).length;
+  return worktrees + artifacts;
+});
 
 /** Paths the plan is about to touch, used by the path precondition check. */
 const itemPaths = computed(() => [
@@ -118,12 +144,25 @@ async function copyPlan() {
 
 <template>
   <div class="stack page--wide">
-    <div class="spread">
-      <div>
-        <h1>{{ messages.plan.title }}</h1>
-        <p class="faint tiny">{{ messages.plan.lede }}</p>
+    <div class="page-head">
+      <div class="page-head__lead">
+        <span class="page-head__icon"><AppIcon name="plan" /></span>
+        <div class="page-head__text">
+          <h1>{{ messages.plan.title }}</h1>
+          <p class="page-head__sub">{{ messages.plan.lede }}</p>
+        </div>
       </div>
-      <button class="btn" @click="goTo('overview')">{{ messages.plan.backToAdjustSelection }}</button>
+      <div class="page-head__actions">
+        <button class="btn" @click="goTo('overview')">{{ messages.plan.backToAdjustSelection }}</button>
+      </div>
+    </div>
+
+    <div v-if="reviewSelected > 0" class="banner banner--warn">
+      <AppIcon name="alert" class="banner__icon" />
+      <span>
+        <span class="banner__title">{{ messages.plan.reviewSelectedTitle }}</span>
+        {{ messages.plan.reviewSelectedBody(reviewSelected) }}
+      </span>
     </div>
 
     <div class="stat-grid stat-grid--4">
@@ -149,7 +188,7 @@ async function copyPlan() {
     </div>
 
     <div v-for="blocker in plan.blockers" :key="blocker" class="banner banner--danger">
-      <span>✕</span>
+      <AppIcon name="alert" class="banner__icon" />
       <span><span class="banner__title">{{ messages.plan.blockerTitle }}</span>{{ blocker }}</span>
     </div>
 
@@ -161,7 +200,9 @@ async function copyPlan() {
       <div class="card__body">
         <div class="gate">
           <div v-for="gate in gates" :key="gate.label" class="gate__item">
-            <span class="gate__mark" :class="gate.pending ? '' : gate.ok ? 'gate__mark--ok' : 'gate__mark--bad'">{{ gate.pending ? "–" : gate.ok ? "✓" : "✕" }}</span>
+            <span class="gate__mark" :class="gate.pending ? '' : gate.ok ? 'gate__mark--ok' : 'gate__mark--bad'">
+              <AppIcon :name="gate.pending ? 'dash' : gate.ok ? 'check' : 'close'" />
+            </span>
             <span :class="gate.pending ? 'faint' : gate.ok ? 'muted' : ''">{{ gate.label }}</span>
           </div>
         </div>
@@ -174,7 +215,7 @@ async function copyPlan() {
         <span class="faint tiny">{{ messages.plan.items(plan.worktree_removals.length) }}</span>
       </div>
       <div class="card__body">
-        <div v-if="plan.worktree_removals.length === 0" class="faint tiny">{{ messages.plan.noWorktrees }}</div>
+        <EmptyState v-if="plan.worktree_removals.length === 0" compact icon="branch" :text="messages.plan.noWorktrees" />
         <div class="stack stack--tight">
           <div
             v-for="item in plan.worktree_removals"
@@ -240,7 +281,7 @@ async function copyPlan() {
               </td>
             </tr>
             <tr v-if="plan.trash_moves.length === 0">
-              <td colspan="4"><div class="empty">{{ messages.plan.noArtifacts }}</div></td>
+              <td colspan="4"><EmptyState compact icon="artifacts" :text="messages.plan.noArtifacts" /></td>
             </tr>
           </tbody>
         </table>
@@ -251,7 +292,7 @@ async function copyPlan() {
       <div class="card__head"><h2>{{ messages.plan.confirmationTitle }}</h2></div>
       <div class="card__body stack stack--tight">
         <div v-if="needsAck" class="banner banner--warn">
-          <span>⚠</span>
+          <AppIcon name="alert" class="banner__icon" />
           <span class="stack stack--tight">
             <span>{{ messages.plan.confirmationIntro }}</span>
             <span v-for="reason in plan.ack_reasons" :key="reason" class="tiny">· {{ reason }}</span>

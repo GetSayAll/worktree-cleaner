@@ -4,6 +4,8 @@ import { activity, history, historyError } from "../state";
 import { activityText, detailText, formatBytes, formatTimestamp, homePath, reasonCopy } from "../format";
 import type { ActivityEvent, HistoryEntry } from "../types";
 import { messages } from "../i18n";
+import AppIcon from "../components/AppIcon.vue";
+import EmptyState from "../components/EmptyState.vue";
 
 type FilterKey = "all" | "worktree-remove" | "trash-move" | "activity";
 
@@ -83,17 +85,22 @@ async function copyAll() {
 
 <template>
   <div class="stack page--wide">
-    <div class="spread">
-      <div>
-        <h1>{{ messages.history.title }}</h1>
-        <p class="faint tiny">{{ messages.history.lede }}</p>
+    <div class="page-head">
+      <div class="page-head__lead">
+        <span class="page-head__icon"><AppIcon name="history" /></span>
+        <div class="page-head__text">
+          <h1>{{ messages.history.title }}</h1>
+          <p class="page-head__sub">{{ messages.history.lede }}</p>
+        </div>
       </div>
-      <button class="btn" @click="copyAll">{{ copied ? messages.common.copied : messages.history.copyLog }}</button>
+      <div class="page-head__actions">
+        <button class="btn" @click="copyAll">{{ copied ? messages.common.copied : messages.history.copyLog }}</button>
+      </div>
     </div>
 
     <p v-if="historyError" class="notice notice--unsafe">{{ messages.history.readFailed(historyError) }}</p>
 
-    <div class="row-wrap">
+    <div class="toolbar">
       <div class="segmented">
         <button :class="filter === 'all' ? 'is-active' : ''" @click="filter = 'all'">{{ messages.history.filterAll(history.length) }}</button>
         <button :class="filter === 'worktree-remove' ? 'is-active' : ''" @click="filter = 'worktree-remove'">
@@ -107,7 +114,12 @@ async function copyAll() {
     <div class="card">
       <div class="card__body card__body--flush">
         <div class="timeline">
-          <div v-for="(row, index) in filtered" :key="`${row.at}-${index}`" class="timeline__row">
+          <div
+            v-for="(row, index) in filtered"
+            :key="`${row.at}-${index}`"
+            class="timeline__row"
+            :class="row.kind === 'action' ? 'timeline__row--action' : `timeline__row--${row.entry.result}`"
+          >
             <div class="timeline__time">{{ formatTimestamp(row.at) }}</div>
             <div v-if="row.kind === 'action'" class="timeline__body">
               <div class="row-wrap">
@@ -128,7 +140,7 @@ async function copyAll() {
               <div class="tiny muted">{{ detailText(row.entry.detail_code, row.entry.detail_args, row.entry.detail) }}</div>
             </div>
           </div>
-          <div v-if="filtered.length === 0" class="empty">{{ messages.history.empty }}</div>
+          <EmptyState v-if="filtered.length === 0" icon="history" :text="messages.history.empty" />
         </div>
       </div>
     </div>

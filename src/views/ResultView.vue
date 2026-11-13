@@ -2,6 +2,8 @@
 import { computed, ref } from "vue";
 import { executeError, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
+import AppIcon from "../components/AppIcon.vue";
+import EmptyState from "../components/EmptyState.vue";
 import { detailText, formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
 import { openTrash, isDesktop } from "../platform";
@@ -32,6 +34,59 @@ function outcomeLabel(result: string): string {
 }
 
 const okCount = computed(() => lastResult.value.filter((item) => item.result === "ok").length);
+
+/**
+ * What the bar under the result says.
+ *
+ * The count is the message: "cleanup complete" on a run where every item was
+ * skipped is the one sentence that made a safe no-op look like a deletion. The
+ * bar now names the handled and not-executed counts, and the page carries a
+ * banner when nothing was removed at all.
+ */
+const finishedSummary = computed(() => {
+  const total = lastResult.value.length;
+  const handled = okCount.value;
+  const notDeleted = total - handled;
+  if (total === 0) return messages.result.finishedEmpty;
+  if (handled === 0) return messages.result.finishedNone(notDeleted);
+  if (notDeleted === 0) return messages.result.finishedAll(handled);
+  return messages.result.finishedPartial(handled, notDeleted);
+});
+
+/** The one banner at the top of the page: what the run actually did. */
+const outcome = computed<{
+  tone: "banner--safe" | "banner--warn";
+  icon: "check" | "alert";
+  title: string;
+  body: string;
+} | null>(() => {
+  const total = lastResult.value.length;
+  if (total === 0) return null;
+  const handled = okCount.value;
+  const notDeleted = total - handled;
+  if (handled === 0) {
+    return {
+      tone: "banner--warn",
+      icon: "alert",
+      title: messages.result.outcomeNoneTitle,
+      body: messages.result.outcomeNoneBody(notDeleted)
+    };
+  }
+  if (notDeleted > 0) {
+    return {
+      tone: "banner--warn",
+      icon: "alert",
+      title: messages.result.outcomePartialTitle,
+      body: messages.result.outcomePartialBody(handled, notDeleted)
+    };
+  }
+  return {
+    tone: "banner--safe",
+    icon: "check",
+    title: messages.result.outcomeDoneTitle,
+    body: messages.result.outcomeDoneBody(handled)
+  };
+});
 
 /**
  * The failure of a system action this page offers.
@@ -69,15 +124,18 @@ const logFailure = computed(() => {
 
 <template>
   <div class="stack page--wide">
-    <div class="spread">
-      <div>
-        <h1>{{ messages.result.title }}</h1>
-        <p class="faint tiny mono">{{ projectPath }}</p>
+    <div class="page-head">
+      <div class="page-head__lead">
+        <span class="page-head__icon"><AppIcon name="result" /></span>
+        <div class="page-head__text">
+          <h1>{{ messages.result.title }}</h1>
+          <p class="page-head__sub mono">{{ projectPath }}</p>
+        </div>
       </div>
-      <div class="row-wrap">
+      <div class="page-head__actions">
         <button class="btn" @click="openSystemTrash">{{ messages.result.openTrash }}</button>
         <button class="btn" @click="goTo('history')">{{ messages.result.openLog }}</button>
-        <button class="btn btn--primary" @click="startScan(projectPath)">{{ messages.common.rescan }}</button>
+        <button class="btn" @click="startScan(projectPath)">{{ messages.common.rescan }}</button>
       </div>
     </div>
 
@@ -88,6 +146,11 @@ const logFailure = computed(() => {
       <strong>{{ messages.result.logFailedTitle }}</strong>
       {{ messages.result.logFailedBody(logFailure.path, logFailure.error) }}
     </p>
+
+    <div v-if="outcome" class="banner" :class="outcome.tone">
+      <AppIcon :name="outcome.icon" class="banner__icon" />
+      <span><span class="banner__title">{{ outcome.title }}</span>{{ outcome.body }}</span>
+    </div>
 
     <div class="stat-grid stat-grid--4">
       <StatCard
@@ -130,7 +193,7 @@ const logFailure = computed(() => {
               <td class="cell-size cell-bytes numeric">{{ formatBytes(item.size_bytes) }}</td>
             </tr>
             <tr v-if="lastResult.length === 0">
-              <td colspan="5"><div class="empty">{{ messages.result.empty }}</div></td>
+              <td colspan="5"><EmptyState compact icon="result" :text="messages.result.empty" /></td>
             </tr>
           </tbody>
         </table>
@@ -146,7 +209,7 @@ const logFailure = computed(() => {
       <div class="actionbar__side">
         <button class="btn" data-nav-back="plan" @click="goTo('plan')">{{ messages.plan.title }}</button>
       </div>
-      <span class="actionbar__summary muted">{{ messages.result.complete }}</span>
+      <span class="actionbar__summary muted">{{ finishedSummary }}</span>
       <div class="actionbar__side" style="margin-left: auto">
         <button class="btn" @click="goTo('history')">{{ messages.result.viewHistory }}</button>
         <button class="btn btn--primary" @click="goTo('overview')">
