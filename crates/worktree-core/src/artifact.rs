@@ -1686,7 +1686,7 @@ mod tests {
         );
         assert_eq!(record.file_count, 1);
         assert!(record.last_updated_at.is_some());
-        assert!(warnings.is_empty());
+        assert!(warnings.is_empty(), "the measured artifact should not warn");
         let codes: Vec<&str> = record
             .safety
             .reasons
@@ -2509,7 +2509,13 @@ mod tests {
         std::fs::remove_dir_all(&gone).expect("remove");
         let runner = runner_with(vec![]);
         let result = scan_artifacts(&runner, std::slice::from_ref(&gone), &opts());
-        assert!(result.records.is_empty());
-        assert!(result.warnings.is_empty());
+        assert!(
+            result.records.is_empty(),
+            "a directory that has vanished produces no record"
+        );
+        assert!(
+            result.warnings.is_empty(),
+            "a directory that has vanished does not warn"
+        );
     }
 }
