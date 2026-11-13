@@ -1752,6 +1752,7 @@ mod tests {
         assert!(tracked.evidence.contains("2 files"), "{}", tracked.evidence);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlink_outside_the_project_is_unsafe_and_unmeasured() {
         let dir = tempfile::TempDir::new().expect("temp dir");
@@ -2258,7 +2259,9 @@ mod tests {
         std::fs::create_dir_all(&nested).expect("create nested");
         std::fs::write(root.join("a.txt"), vec![b'a'; 100]).expect("write a");
         std::fs::write(nested.join("b.txt"), vec![b'b'; 23]).expect("write b");
-        // A symlink must not be followed or counted.
+        // A symlink must not be followed or counted. Windows cannot create one
+        // without extra privileges, so this arm runs where symlinks are ordinary.
+        #[cfg(unix)]
         std::os::unix::fs::symlink(nested.join("b.txt"), root.join("link.txt")).expect("symlink");
 
         let measurement = walk_size(&root);
