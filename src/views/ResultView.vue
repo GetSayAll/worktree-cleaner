@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { executeError, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
+import { computed, onMounted, ref } from "vue";
+import { executeError, executing, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
-import AppIcon from "../components/AppIcon.vue";
-import EmptyState from "../components/EmptyState.vue";
 import { detailText, formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
 import { openTrash, isDesktop } from "../platform";
@@ -11,6 +9,15 @@ import { openTrash, isDesktop } from "../platform";
 const desktop = isDesktop();
 
 const root = computed(() => snapshot.value?.root ?? "");
+
+// The result page is the success page, so it has to open at its own top. The
+// content pane is shared with the plan page and keeps its scroll position; after
+// a run that followed the live rows that position is somewhere in the table,
+// which would hide the completion summary.
+onMounted(() => {
+  const content = document.querySelector(".content");
+  if (content) content.scrollTop = 0;
+});
 
 // Looked up while rendering: the language can change with this page open.
 function actionLabel(action: string): string {
@@ -34,59 +41,9 @@ function outcomeLabel(result: string): string {
 }
 
 const okCount = computed(() => lastResult.value.filter((item) => item.result === "ok").length);
-
-/**
- * What the bar under the result says.
- *
- * The count is the message: "cleanup complete" on a run where every item was
- * skipped is the one sentence that made a safe no-op look like a deletion. The
- * bar now names the handled and not-executed counts, and the page carries a
- * banner when nothing was removed at all.
- */
-const finishedSummary = computed(() => {
-  const total = lastResult.value.length;
-  const handled = okCount.value;
-  const notDeleted = total - handled;
-  if (total === 0) return messages.result.finishedEmpty;
-  if (handled === 0) return messages.result.finishedNone(notDeleted);
-  if (notDeleted === 0) return messages.result.finishedAll(handled);
-  return messages.result.finishedPartial(handled, notDeleted);
-});
-
-/** The one banner at the top of the page: what the run actually did. */
-const outcome = computed<{
-  tone: "banner--safe" | "banner--warn";
-  icon: "check" | "alert";
-  title: string;
-  body: string;
-} | null>(() => {
-  const total = lastResult.value.length;
-  if (total === 0) return null;
-  const handled = okCount.value;
-  const notDeleted = total - handled;
-  if (handled === 0) {
-    return {
-      tone: "banner--warn",
-      icon: "alert",
-      title: messages.result.outcomeNoneTitle,
-      body: messages.result.outcomeNoneBody(notDeleted)
-    };
-  }
-  if (notDeleted > 0) {
-    return {
-      tone: "banner--warn",
-      icon: "alert",
-      title: messages.result.outcomePartialTitle,
-      body: messages.result.outcomePartialBody(handled, notDeleted)
-    };
-  }
-  return {
-    tone: "banner--safe",
-    icon: "check",
-    title: messages.result.outcomeDoneTitle,
-    body: messages.result.outcomeDoneBody(handled)
-  };
-});
+const skippedTrashMoves = computed(
+  () => lastResult.value.filter((item) => item.action === "trash-move" && item.result === "skipped").length
+);
 
 /**
  * The failure of a system action this page offers.
@@ -124,18 +81,14 @@ const logFailure = computed(() => {
 
 <template>
   <div class="stack page--wide">
-    <div class="page-head">
-      <div class="page-head__lead">
-        <span class="page-head__icon"><AppIcon name="result" /></span>
-        <div class="page-head__text">
-          <h1>{{ messages.result.title }}</h1>
-          <p class="page-head__sub mono">{{ projectPath }}</p>
-        </div>
+    <div class="spread">
+      <div>
+        <h1>{{ messages.result.title }}</h1>
       </div>
-      <div class="page-head__actions">
+      <div class="row-wrap">
         <button class="btn" @click="openSystemTrash">{{ messages.result.openTrash }}</button>
         <button class="btn" @click="goTo('history')">{{ messages.result.openLog }}</button>
-        <button class="btn" @click="startScan(projectPath)">{{ messages.common.rescan }}</button>
+        <button class="btn btn--primary" :disabled="executing" @click="startScan(projectPath)">{{ messages.common.rescan }}</button>
       </div>
     </div>
 
@@ -146,10 +99,41 @@ const logFailure = computed(() => {
       <strong>{{ messages.result.logFailedTitle }}</strong>
       {{ messages.result.logFailedBody(logFailure.path, logFailure.error) }}
     </p>
+    <p v-if="skippedTrashMoves > 0 && resultSummary.trashed === 0" class="notice">
+      {{ messages.result.noTrashNotice }}
+    </p>
+    <p v-if="resultSummary.removed > 0" class="notice">
+      {{ messages.result.worktreePermanentNotice(resultSummary.removed) }}
+    </p>
 
-    <div v-if="outcome" class="banner" :class="outcome.tone">
-      <AppIcon :name="outcome.icon" class="banner__icon" />
-      <span><span class="banner__title">{{ outcome.title }}</span>{{ outcome.body }}</span>
+    <div
+      v-if="lastResult.length > 0"
+      class="result-hero"
+      :class="resultSummary.failed === 0 ? 'result-hero--success' : 'result-hero--partial'"
+    >
+      <div class="result-hero__mark" aria-hidden="true">{{ resultSummary.failed === 0 ? "✓" : "!" }}</div>
+      <div class="result-hero__copy">
+        <h2>{{ resultSummary.failed === 0 ? messages.result.successTitle : messages.result.partialTitle }}</h2>
+        <p v-if="resultSummary.failed === 0">
+          {{
+            messages.result.successSummary(
+              resultSummary.removed,
+              resultSummary.trashed,
+              formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 })
+            )
+          }}
+        </p>
+        <p v-else>
+          {{
+            messages.result.partialSummary(
+              resultSummary.removed,
+              resultSummary.trashed,
+              formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 }),
+              resultSummary.failed
+            )
+          }}
+        </p>
+      </div>
     </div>
 
     <div class="stat-grid stat-grid--4">
@@ -183,7 +167,12 @@ const logFailure = computed(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(item, index) in lastResult" :key="`${item.target}-${index}`">
+            <tr
+              v-for="(item, index) in lastResult"
+              :key="`${item.target}-${index}`"
+              :class="item.result === 'ok' ? 'result-row--removed' : 'result-row--kept'"
+              :style="{ animationDelay: `${Math.min(index, 24) * 45}ms` }"
+            >
               <td class="nowrap tiny cell-action">{{ actionLabel(item.action) }}</td>
               <td class="mono cell-target">{{ displayPath(item.target, root) }}</td>
               <td class="tiny faint cell-detail">{{ detailText(item.detail_code, item.detail_args, item.detail) }}</td>
@@ -193,7 +182,7 @@ const logFailure = computed(() => {
               <td class="cell-size cell-bytes numeric">{{ formatBytes(item.size_bytes) }}</td>
             </tr>
             <tr v-if="lastResult.length === 0">
-              <td colspan="5"><EmptyState compact icon="result" :text="messages.result.empty" /></td>
+              <td colspan="5"><div class="empty">{{ messages.result.empty }}</div></td>
             </tr>
           </tbody>
         </table>
@@ -209,7 +198,7 @@ const logFailure = computed(() => {
       <div class="actionbar__side">
         <button class="btn" data-nav-back="plan" @click="goTo('plan')">{{ messages.plan.title }}</button>
       </div>
-      <span class="actionbar__summary muted">{{ finishedSummary }}</span>
+      <span class="actionbar__summary muted">{{ messages.result.complete }}</span>
       <div class="actionbar__side" style="margin-left: auto">
         <button class="btn" @click="goTo('history')">{{ messages.result.viewHistory }}</button>
         <button class="btn btn--primary" @click="goTo('overview')">

@@ -13,9 +13,7 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
-import AppIcon from "../components/AppIcon.vue";
-import EmptyState from "../components/EmptyState.vue";
-import { compareByActionability, compareSizeNullsFirst, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
+import { basename, compareByActionability, compareSizeNullsFirst, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
 type FilterKey = "all" | SafetyStatus;
@@ -25,6 +23,13 @@ const query = ref("");
 const expanded = ref<string[]>([]);
 
 const root = computed(() => snapshot.value?.root ?? "");
+
+/** The remote-tracking ref the merge check actually uses, for the protected hint. */
+const defaultBranchRef = computed(() => {
+  const branch = snapshot.value?.default_branch;
+  if (!branch) return "";
+  return branch.startsWith("origin/") ? branch : `origin/${branch}`;
+});
 
 /**
  * How many disk-hygiene rules the core reported as violated for this repository.
@@ -72,15 +77,18 @@ const filtered = computed<WorktreeRecord[]>(() => {
     return item.path.toLowerCase().includes(q) || (item.branch || "").toLowerCase().includes(q);
   });
   // Copied before sorting: `worktrees` is a computed over the snapshot, and
-  // sorting in place would reorder the array the other pages read.
+  // sorting in place would reorder the array the other pages read. The main
+  // workspace is pinned first: it is protected, and it is the anchor every other
+  // worktree is judged against, so it must not be buried among the Unsafe rows.
   return [...matched].sort((a, b) => {
+    if (a.is_main !== b.is_main) return a.is_main ? -1 : 1;
     const byStatus = compareByActionability(a, b);
     if (byStatus !== 0) return byStatus;
     return compareSizeNullsFirst(a.size_bytes, b.size_bytes);
   });
 });
 
-const selectable = computed(() => filtered.value.filter((item) => item.safety.status === "Safe").map((item) => item.path));
+const selectable = computed(() => filtered.value.filter((item) => item.safety.status !== "Unsafe").map((item) => item.path));
 
 const allSelected = computed({
   get: () => selectable.value.length > 0 && selectable.value.every((p) => isSelectedWorktree(p)),
@@ -105,7 +113,10 @@ function upstreamText(item: WorktreeRecord): string {
 
 function mergeText(item: WorktreeRecord): string {
   if (item.is_main) return messages.worktrees.mergeMain;
-  const branch = snapshot.value?.default_branch || messages.common.defaultBranch;
+  // The merge check uses the remote-tracking default branch (`origin/main`), not
+  // whatever local branch the main workspace has checked out. Show the ref the
+  // command actually used, so the detail panel agrees with the evidence line.
+  const branch = defaultBranchRef.value || messages.common.defaultBranch;
   // Absorption is checked before the ancestry answer: the commit is not an ancestor,
   // so `merged_into_default` is false here, and reporting that alone would hide the
   // one fact that matters — the change is already in the default branch.
@@ -128,18 +139,15 @@ function stateText(item: WorktreeRecord): string {
 
 <template>
   <div class="stack page--wide">
-    <div class="page-head">
-      <div class="page-head__lead">
-        <span class="page-head__icon"><AppIcon name="branch" /></span>
-        <div class="page-head__text">
-          <h1>{{ messages.worktrees.title }}</h1>
-          <p class="page-head__sub">{{ messages.worktrees.dataSource }}</p>
-        </div>
-      </div>
+    <div class="spread">
+      <h1>{{ messages.worktrees.title }}</h1>
+      <span class="faint tiny">{{ " " + messages.worktrees.dataSource + " " }}</span>
     </div>
 
+    <p class="rules-summary"><strong>{{ messages.rules.shortLabel }}</strong>{{ messages.rules.worktreesSummary }}</p>
+
     <div v-if="hygieneViolations > 0" class="banner banner--warn">
-      <AppIcon name="alert" class="banner__icon" />
+      <span>!</span>
       <span>
         <span class="banner__title">{{ messages.worktrees.hygieneTitle }}</span>
         {{ messages.worktrees.hygieneBody(hygieneViolations) }}
@@ -148,25 +156,20 @@ function stateText(item: WorktreeRecord): string {
       <button class="btn btn--ghost" @click="goTo('hygiene')">{{ messages.worktrees.hygieneAction }}</button>
     </div>
 
-    <div class="toolbar">
-      <div class="toolbar__group">
-        <div class="segmented">
-          <button :class="filter === 'all' ? 'is-active' : ''" @click="filter = 'all'">{{ messages.worktrees.filterAll(worktrees.length) }}</button>
-          <button :class="filter === 'Safe' ? 'is-active' : ''" @click="filter = 'Safe'">
-            {{ " " + messages.worktrees.filterSafe(statusCount(worktrees, "Safe")) }}
-          </button>
-          <button :class="filter === 'Review' ? 'is-active' : ''" @click="filter = 'Review'">
-            {{ " " + messages.worktrees.filterReview(statusCount(worktrees, "Review")) }}
-          </button>
-          <button :class="filter === 'Unsafe' ? 'is-active' : ''" @click="filter = 'Unsafe'">
-            {{ " " + messages.worktrees.filterUnsafe(statusCount(worktrees, "Unsafe")) }}
-          </button>
-        </div>
+    <div class="row-wrap">
+      <div class="segmented">
+        <button :class="filter === 'all' ? 'is-active' : ''" @click="filter = 'all'">{{ messages.worktrees.filterAll(worktrees.length) }}</button>
+        <button :class="filter === 'Safe' ? 'is-active' : ''" @click="filter = 'Safe'">
+          {{ " " + messages.worktrees.filterSafe(statusCount(worktrees, "Safe")) }}
+        </button>
+        <button :class="filter === 'Review' ? 'is-active' : ''" @click="filter = 'Review'">
+          {{ " " + messages.worktrees.filterReview(statusCount(worktrees, "Review")) }}
+        </button>
+        <button :class="filter === 'Unsafe' ? 'is-active' : ''" @click="filter = 'Unsafe'">
+          {{ " " + messages.worktrees.filterUnsafe(statusCount(worktrees, "Unsafe")) }}
+        </button>
       </div>
-      <label class="search toolbar__end">
-        <AppIcon name="search" />
-        <input v-model="query" class="input input--sm" :aria-label="messages.worktrees.searchPlaceholder" :placeholder="messages.worktrees.searchPlaceholder" />
-      </label>
+      <input v-model="query" class="input input--sm" style="max-width: 240px" :placeholder="messages.worktrees.searchPlaceholder" />
     </div>
 
     <div class="card">
@@ -176,7 +179,7 @@ function stateText(item: WorktreeRecord): string {
           <span>{{ messages.worktrees.selectAll }}</span>
         </div>
         <template v-for="item in filtered" :key="item.path">
-          <div class="item-row">
+          <div class="item-row" :class="{ 'item-row--main': item.is_main }">
             <div class="item-row__check">
               <input
                 class="check"
@@ -190,10 +193,11 @@ function stateText(item: WorktreeRecord): string {
             <div class="item-row__main">
               <div class="item-row__head">
                 <span class="item-row__name">{{ item.branch || messages.common.detachedHead }}</span>
-                <span class="chip">{{ item.agent || messages.common.emDash }}</span>
+                <span v-if="item.is_main" class="chip chip--protected" :title="messages.worktrees.mainWorkspaceHint(defaultBranchRef)">{{ messages.worktrees.mainWorkspaceBadge }}</span>
+                <span v-if="item.agent" class="chip">{{ item.agent }}</span>
               </div>
               <div class="item-row__meta">
-                <span class="item-row__where" :title="item.path">{{ displayPath(item.path, root) }}</span>
+                <span class="item-row__where" :title="item.path">{{ item.is_main ? basename(item.path) : displayPath(item.path, root) }}</span>
                 <span
                   v-if="isOutsideRoot(item.path)"
                   class="chip chip--outside"
@@ -255,7 +259,7 @@ function stateText(item: WorktreeRecord): string {
             </div>
           </div>
         </template>
-        <EmptyState v-if="filtered.length === 0" icon="branch" :text="messages.worktrees.empty" />
+        <div v-if="filtered.length === 0" class="empty">{{ messages.worktrees.empty }}</div>
       </div>
     </div>
 

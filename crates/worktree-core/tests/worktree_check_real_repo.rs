@@ -279,7 +279,7 @@ fn the_scanner_reads_a_real_repository_end_to_end() {
     assert!(feature.has_upstream);
     assert!(has(feature, ReasonCode::WtDirty));
     assert!(has(feature, ReasonCode::WtUntracked));
-    assert!(has(feature, ReasonCode::WtUnpushed));
+    assert!(has(feature, ReasonCode::WtUnpushedBranch));
     assert_eq!(feature.safety.status, SafetyStatus::Unsafe);
     // Not merged: its commit is not an ancestor of main.
     assert_eq!(feature.merged_into_default, Some(false));
@@ -294,7 +294,7 @@ fn the_scanner_reads_a_real_repository_end_to_end() {
     assert!(has(spike, ReasonCode::WtClean));
     assert_eq!(spike.safety.status, SafetyStatus::Review);
     assert!(
-        !has(spike, ReasonCode::WtUnpushed),
+        !has(spike, ReasonCode::WtUnpushedBranch),
         "no upstream means no ahead"
     );
 
@@ -304,10 +304,12 @@ fn the_scanner_reads_a_real_repository_end_to_end() {
         .find(|record| record.is_detached)
         .expect("detached record");
     assert!(detached.branch.is_none());
-    assert!(has(detached, ReasonCode::WtDetached));
+    // The commit is already in the default branch, so the detached HEAD holds no
+    // work that the worktree deletion could lose.
+    assert!(!has(detached, ReasonCode::WtDetached));
     assert_eq!(detached.merged_into_default, Some(true));
     assert!(has(detached, ReasonCode::WtMerged));
-    assert_eq!(detached.safety.status, SafetyStatus::Review);
+    assert_eq!(detached.safety.status, SafetyStatus::Safe);
 
     // ---- a prunable worktree ----
     let gone = by_branch(&records, "gone-branch");

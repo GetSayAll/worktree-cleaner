@@ -8,11 +8,14 @@ export type ReasonCode =
   | "wt.locked"
   | "wt.dirty"
   | "wt.unpushed"
+  | "wt.unpushed_branch"
   | "wt.detached"
   | "wt.no_upstream"
   | "wt.unmerged"
   | "wt.absorbed"
+  | "wt.absorbed_content_changed"
   | "wt.untracked"
+  | "wt.credentials"
   | "wt.stash"
   | "wt.recent_activity"
   | "wt.agent_active"
@@ -66,6 +69,9 @@ export interface WorktreeRecord {
    * though the commits are not ancestors of it — the squash-merge answer from
    * `git cherry`. Separate from `merged_into_default` because the two are
    * different facts; `false` means "not established", never "known not to be".
+   * The content answer is separate: a matching patch whose files changed
+   * afterwards keeps this `true` and emits `wt.absorbed_content_changed` at
+   * `Review` beside `wt.absorbed`.
    */
   absorbed_into_default: boolean;
   stash_count: number;

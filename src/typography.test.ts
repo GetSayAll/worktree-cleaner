@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /**
- * The type scale is eight tokens in `:root`, and no other size exists.
+ * The type scale is seven tokens in `:root`, and no other size exists.
  *
  * Why this file exists: the stylesheet had accumulated thirteen sizes - 10, 10.5,
  * 11, 11.5, 12, 12.5, 13, 13.5, 14, 15, 22, 26, 30 - and five of them sat inside
@@ -13,11 +13,11 @@ import { describe, expect, it } from "vitest";
  *
  * The rules below are the ones a stylesheet cannot state about itself:
  *
- *   - eight steps, no more;
+ *   - seven steps, no more;
  *   - never below 12, the size at which the Chinese fallback still holds;
  *   - ascending, because a scale read out of order is a list;
  *   - every step used, so no step survives as decoration;
- *   - no `font-size` anywhere else, so a ninth step cannot appear by accident.
+ *   - no `font-size` anywhere else, so an eighth step cannot appear by accident.
  *
  * Reading the source rather than the rendered page is deliberate: this is a rule
  * about what the stylesheet is allowed to say, and a browser would only report
@@ -81,7 +81,7 @@ describe("the font stacks", () => {
 });
 
 describe("the type scale", () => {
-  it("has exactly eight steps", () => {
+  it("has exactly seven steps", () => {
     expect(scale.map((step) => step.name)).toEqual([
       "--fs-caption",
       "--fs-ui",
@@ -89,8 +89,7 @@ describe("the type scale", () => {
       "--fs-title",
       "--fs-lead",
       "--fs-page",
-      "--fs-metric",
-      "--fs-hero"
+      "--fs-metric"
     ]);
   });
 
@@ -118,8 +117,8 @@ describe("the type scale", () => {
   });
 
   it("leaves no font size outside the scale", () => {
-    // This is the guard that keeps the count at eight. A literal size here is
-    // either a typo or a ninth step arriving without a decision.
+    // This is the guard that keeps the count at seven. A literal size here is
+    // either a typo or an eighth step arriving without a decision.
     const written = [...outside.matchAll(/font-size:\s*([^;}]+)/g)].map((match) => match[1].trim());
     expect(written.length).toBeGreaterThan(20);
     const strays = written.filter((value) => !/^var\(--fs-[a-z]+\)$/.test(value));

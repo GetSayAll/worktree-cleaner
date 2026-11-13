@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { history, projectPath, refreshHistory, settings } from "../state";
+import { history, refreshHistory, settings } from "../state";
 import { homePath } from "../format";
 import { LOCALES, messages } from "../i18n";
 import type { LocaleChoice } from "../i18n";
@@ -20,7 +20,6 @@ import {
   logPath as resolveLogPath,
   revealInFileManager
 } from "../platform";
-import AppIcon from "../components/AppIcon.vue";
 
 const desktop = isDesktop();
 
@@ -136,8 +135,6 @@ const updateStatus = computed(() => {
       return percent === null ? copy.downloadingUnknown : copy.downloading(percent);
     }
     case "ready":
-      // On Windows the installer closes the app, so there is nothing left to
-      // restart from here.
       return installerRestartsApp()
         ? copy.readyWindows
         : copy.ready(updateState.version ?? "");
@@ -154,15 +151,9 @@ const updateNotes = computed(() => updateState.notes ?? "");
 
 <template>
   <div class="stack page--wide">
-    <div class="page-head">
-      <div class="page-head__lead">
-        <span class="page-head__icon"><AppIcon name="settings" /></span>
-        <div class="page-head__text">
-          <h1>{{ messages.settings.title }}</h1>
-          <p class="page-head__sub">
-            {{ messages.settings.currentProject }} <span class="mono">{{ projectPath || messages.common.none }}</span>
-          </p>
-        </div>
+    <div class="spread">
+      <div>
+        <h1>{{ messages.settings.title }}</h1>
       </div>
     </div>
 

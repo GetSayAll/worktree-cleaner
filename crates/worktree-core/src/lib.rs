@@ -445,7 +445,9 @@ pub struct WorktreeRecord {
     /// Separate from `merged_into_default` rather than folded into it: the two are
     /// different facts, and a reader who wants "is the work in the default branch"
     /// has to see which of the two answered. `false` means "not established", never
-    /// "known not to be absorbed".
+    /// "known not to be absorbed". The content answer is separate: a matching patch
+    /// whose files changed afterwards keeps this `true` and emits
+    /// `wt.absorbed_content_changed` at `Review` beside `wt.absorbed`.
     #[serde(default)]
     pub absorbed_into_default: bool,
     pub stash_count: u32,
@@ -627,6 +629,7 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
             now,
             size_bytes,
             repository_stash_count,
+            credential_scan_timeout: per_dir_timeout.min(Duration::from_secs(5)),
         };
         worktrees.push(check_worktree(
             &runner,

@@ -20,8 +20,9 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
+use crate::artifact::{credential_in_worktree, CredentialScan};
 use crate::git::{display_command, GitError, GitOutput, GitRunner};
 use crate::path::whitelist_hit;
 use crate::reason::{Reason, ReasonCode, SafetyAssessment, SafetyStatus};
@@ -220,6 +221,14 @@ pub struct WorktreeCheckOptions {
     /// which is reported as a scan warning; the record then carries `0` because
     /// `stash_count` has no "unknown" state. It influences no verdict either way.
     pub repository_stash_count: Option<u32>,
+    /// Budget for the worktree-level credential walk.
+    ///
+    /// The walk skips the recognised build and cache directories, because those
+    /// are artifact candidates and the artifact scan checks them separately. What
+    /// remains is a project tree, so the bound is small; it exists so a worktree
+    /// on a slow or network mount cannot hold the whole scan. Passing it produces
+    /// `wt.cannot_verify`, never a silent pass.
+    pub credential_scan_timeout: Duration,
     // There is deliberately no per-command timeout here: the timeout belongs to
     // the [`crate::git::GitRunner`], which owns the processes. The orchestrator
     // passes the setting into `ProcessGitRunner::new`, so one knob, one owner.
@@ -235,6 +244,7 @@ impl Default for WorktreeCheckOptions {
             now: SystemTime::now(),
             size_bytes: None,
             repository_stash_count: None,
+            credential_scan_timeout: Duration::from_secs(5),
         }
     }
 }
@@ -275,31 +285,41 @@ pub fn detect_default_branch(runner: &dyn GitRunner, repo: &Path) -> Option<Stri
     None
 }
 
-/// Agents recognised by a path token (product plan section 4).
+/// Agents recognised by a path token, or by a branch when the path has none
+/// (product plan section 4).
 ///
-/// The worktree directory name is the strongest signal (`repo--codex-fix-ble`), so
-/// every path component is split into tokens and each token is compared
-/// case-insensitively. An unrecognised path stays `None`: the label is inferred from
-/// the path only and is never guessed.
+/// The worktree directory name is the strongest signal (`repo--codex-fix-ble`),
+/// so every path component is split into tokens and compared case-insensitively.
+/// The branch is a weaker fallback: it identifies the work by its convention
+/// (`codex/update-check`), not by a filesystem layout. The label never changes a
+/// safety verdict.
 const AGENT_MARKERS: &[&str] = &["codex", "claude", "cursor", "aider", "workbuddy"];
 
-/// Infers the owning agent from the path, or `None` when no marker is present.
-pub fn infer_agent(path: &Path) -> Option<String> {
+/// The first agent marker in one piece of text, if any.
+fn agent_in(text: &str) -> Option<String> {
+    for token in text.split(|ch: char| !ch.is_alphanumeric()) {
+        for marker in AGENT_MARKERS {
+            if token.eq_ignore_ascii_case(marker) {
+                return Some((*marker).to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Infers the owning agent from the path, falling back to the branch name.
+pub fn infer_agent(path: &Path, branch: Option<&str>) -> Option<String> {
     let components: Vec<String> = path
         .components()
         .map(|component| component.as_os_str().to_string_lossy().into_owned())
         .collect();
     // Deepest component first: the worktree directory name outranks its parents.
     for name in components.iter().rev() {
-        for token in name.split(|ch: char| !ch.is_alphanumeric()) {
-            for marker in AGENT_MARKERS {
-                if token.eq_ignore_ascii_case(marker) {
-                    return Some((*marker).to_string());
-                }
-            }
+        if let Some(agent) = agent_in(name) {
+            return Some(agent);
         }
     }
-    None
+    branch.and_then(agent_in)
 }
 
 /// The `--force` confirmation page lists untracked files line by line; the list is
@@ -386,6 +406,9 @@ pub fn check_worktree(
     // succeeded. `None` = not measured; the folded status count is then used.
     let mut untracked_listed: Option<u32> = None;
     let mut activity: Option<SystemTime> = None;
+    // The status header names an upstream, but Git omits `# branch.ab` when that
+    // ref is gone: ahead/behind are unknown, while the file counts are still real.
+    let mut upstream_without_ab = false;
 
     if directory_gone {
         reasons.push(Reason::safe(
@@ -402,35 +425,19 @@ pub fn check_worktree(
             &mut reasons,
         ) {
             let info = parse_status(&output.stdout);
-            if !info.header_seen {
-                // A status without the `# branch.*` header cannot be read as
-                // "zero changes": the counts would be a guess (D3).
-                reasons.push(Reason::review(
-                    ReasonCode::WtCannotVerify,
-                    "cannot read the worktree status",
-                    "the status header (# branch.oid / # branch.head) was missing, so the file counts are unknown",
-                ));
-            } else if info.upstream_without_ab {
-                // Git omits `# branch.ab` when the upstream ref itself is gone;
-                // ahead/behind are then unknown, not zero.
-                reasons.push(Reason::review(
-                    ReasonCode::WtCannotVerify,
-                    "cannot read the worktree status",
-                    "the upstream branch no longer exists, so the ahead/behind counts are unknown",
-                ));
-            } else {
+            if info.header_seen {
+                // The file counts are independent of the ahead/behind line: Git
+                // omits `# branch.ab` when the upstream ref is gone, but it still
+                // prints the changed and untracked entries. Reading only the
+                // confident half is what keeps a dirty worktree from hiding behind
+                // an "unknown ahead/behind" Review (D3: fail closed, but do not
+                // throw away the facts that did arrive).
+                upstream_without_ab = info.upstream_without_ab;
                 if info.dirty_files > 0 {
                     reasons.push(Reason::blocking(
                         ReasonCode::WtDirty,
                         "has uncommitted changes",
                         format!("{} files have uncommitted changes", info.dirty_files),
-                    ));
-                }
-                if info.ahead > 0 {
-                    reasons.push(Reason::blocking(
-                        ReasonCode::WtUnpushed,
-                        "has commits that were never pushed",
-                        format!("{} commits not pushed", info.ahead),
                     ));
                 }
                 if info.dirty_files == 0 && info.untracked_files == 0 {
@@ -441,6 +448,14 @@ pub fn check_worktree(
                     ));
                 }
                 status = Some(info);
+            } else {
+                // A status without the `# branch.*` header cannot be read as
+                // "zero changes": the counts would be a guess (D3).
+                reasons.push(Reason::review(
+                    ReasonCode::WtCannotVerify,
+                    "cannot read the worktree status",
+                    "the status header (# branch.oid / # branch.head) was missing, so the file counts are unknown",
+                ));
             }
         }
 
@@ -493,6 +508,73 @@ pub fn check_worktree(
                     "has untracked files",
                     evidence,
                 ));
+            }
+        }
+
+        // The worktree itself is deleted by `git worktree remove`, ignored files
+        // included, so the credential check has to run at the root. It is limited
+        // to a worktree with no tracked changes: a dirty worktree is already
+        // blocked, and walking it would only add cost. Untracked files do not stop
+        // the check — an untracked `.env` is exactly the file this exists to catch.
+        // Build and cache directories are skipped by the walker; the artifact scan
+        // checks those when it visits them as candidates.
+        if !is_main && !entry.is_locked && !is_prunable {
+            if let Some(info) = &status {
+                if info.dirty_files == 0 {
+                    match credential_in_worktree(&entry.path, opts.credential_scan_timeout) {
+                        CredentialScan::Complete(Some(name)) => {
+                            // A tracked `.env.example` is in Git; deleting the
+                            // worktree does not lose it, and blocking on it would
+                            // make every repository that commits a template
+                            // Unsafe. Only an untracked or ignored file is a
+                            // worktree-level loss.
+                            match runner.run(
+                                &entry.path,
+                                &["ls-files", "--error-unmatch", "--", &name],
+                            ) {
+                                Ok(output) if output.code == Some(0) => {}
+                                Ok(output) if output.code == Some(1) => {
+                                    reasons.push(Reason::blocking(
+                                        ReasonCode::WtCredentials,
+                                        "contains what looks like a credential file",
+                                        format!(
+                                            "{name} is inside; deleting the worktree would delete it too"
+                                        ),
+                                    ));
+                                }
+                                Ok(output) => reasons.push(Reason::review(
+                                    ReasonCode::WtCannotVerify,
+                                    "could not check whether the credential file is tracked",
+                                    format!(
+                                        "git ls-files exited with {:?} for {name}: {}",
+                                        output.code,
+                                        output.stderr.trim()
+                                    ),
+                                )),
+                                Err(error) => reasons.push(cannot_verify(
+                                    "whether the credential file is tracked",
+                                    &error,
+                                )),
+                            }
+                        }
+                        CredentialScan::Complete(None) => {}
+                        CredentialScan::Truncated { scanned } => reasons.push(Reason::review(
+                            ReasonCode::WtCannotVerify,
+                            "could not finish checking the worktree for credentials",
+                            format!(
+                                "looked at {scanned} entries before the time limit, without covering the whole worktree; a credential further inside would not have been found"
+                            ),
+                        )),
+                        CredentialScan::Failed(error) => reasons.push(Reason::review(
+                            ReasonCode::WtCannotVerify,
+                            "could not check the worktree for credentials",
+                            format!(
+                                "could not list {} to check for credentials: {error}",
+                                entry.path.display()
+                            ),
+                        )),
+                    }
+                }
             }
         }
 
@@ -557,17 +639,6 @@ pub fn check_worktree(
         }
     }
 
-    if let Some(activity) = activity {
-        let age_days = elapsed_days(opts.now, activity);
-        if age_days < u64::from(opts.recent_activity_days) {
-            reasons.push(Reason::review(
-                ReasonCode::WtRecentActivity,
-                "changed within the activity window",
-                format!("last activity: {}", humanize_days(age_days)),
-            ));
-        }
-    }
-
     // ---- merge status: runs in `repo`, so it survives a missing directory ----
     let mut absorbed = false;
     let merged = match (opts.default_branch.as_deref(), entry.head.as_deref()) {
@@ -584,14 +655,16 @@ pub fn check_worktree(
                 Ok((false, evidence)) => {
                     // Not an ancestor, which is what a squash merge looks like: the
                     // change is in the default branch but as a different commit. Ask
-                    // the patch question before falling back to "unmerged".
-                    // The `if let` is the whole decision: either every commit already
-                    // has an equivalent patch upstream and the default branch still
-                    // holds that content, or the ancestry answer stands. A patch check
-                    // that could not run is not an upgrade — it must never make a
-                    // worktree look safer than it did (D3).
+                    // the patch question before falling back to "unmerged". The three
+                    // answers are distinct: the patch is there and so is the content
+                    // (`wt.absorbed`, Safe); the patch is there but the content
+                    // changed (`wt.absorbed` plus `wt.absorbed_content_changed`,
+                    // Review); or at least one commit has no equivalent patch
+                    // (`wt.unmerged`, Review). A patch check that could not run is not
+                    // an upgrade — it must never make a worktree look safer than it
+                    // did (D3).
                     match commits_absorbed(runner, repo, head, default_branch) {
-                        Ok((true, absorbed_evidence)) => {
+                        Ok(AbsorbedAnswer::Absorbed(absorbed_evidence)) => {
                             absorbed = true;
                             reasons.push(Reason::safe(
                                 ReasonCode::WtAbsorbed,
@@ -599,10 +672,28 @@ pub fn check_worktree(
                                 absorbed_evidence,
                             ));
                         }
-                        // The patch matched but the content is gone, which is what a
-                        // revert leaves behind. Both halves go into the evidence: the
-                        // second is the one the reader has to act on.
-                        Ok((false, why)) => reasons.push(Reason::review(
+                        // The patch-id matched, but the files it touched no longer
+                        // hold the content this branch produced. The patch answer
+                        // keeps its original meaning and stays Safe; the content
+                        // answer is a second reason at Review, so the overall
+                        // verdict cannot be Safe. A later revert and an ordinary
+                        // edit after the merge look the same here, so the second
+                        // reason says what was observed rather than claiming a
+                        // revert.
+                        Ok(AbsorbedAnswer::ContentChanged(why)) => {
+                            absorbed = true;
+                            reasons.push(Reason::safe(
+                                ReasonCode::WtAbsorbed,
+                                "every commit has an equivalent patch in the default branch",
+                                why.clone(),
+                            ));
+                            reasons.push(Reason::review(
+                                ReasonCode::WtAbsorbedContentChanged,
+                                "the patch is in the default branch, but the content changed afterwards",
+                                format!("{evidence}; {why}"),
+                            ));
+                        }
+                        Ok(AbsorbedAnswer::NotAbsorbed(why)) => reasons.push(Reason::review(
                             ReasonCode::WtUnmerged,
                             "not merged into the default branch",
                             format!("{evidence}; {why}"),
@@ -641,6 +732,58 @@ pub fn check_worktree(
         }
     };
 
+    // A recent commit is an attention signal, not evidence that deleting the
+    // worktree loses something. When the worktree is clean and its work is already
+    // in the default branch, the only thing a recent HEAD says is "this was used
+    // recently" — and `last_updated_at` already carries that fact to the detail
+    // panel. Keep the Review reason only when the worktree is not in that state.
+    let clean = status
+        .as_ref()
+        .is_some_and(|info| info.dirty_files == 0 && info.untracked_files == 0);
+    let in_default = merged == Some(true) || absorbed;
+    if let Some(activity) = activity {
+        let age_days = elapsed_days(opts.now, activity);
+        if age_days < u64::from(opts.recent_activity_days) && !(clean && in_default) {
+            reasons.push(Reason::review(
+                ReasonCode::WtRecentActivity,
+                "changed within the activity window",
+                format!("last activity: {}", humanize_days(age_days)),
+            ));
+        }
+    }
+
+    // The upstream ref is gone, so ahead/behind are unknown. That matters only when
+    // the merge answer is not already "the work is in the default branch"; in that
+    // case the missing ref changes nothing about whether the worktree can go.
+    if upstream_without_ab && merged != Some(true) && !absorbed {
+        reasons.push(Reason::review(
+            ReasonCode::WtCannotVerify,
+            "cannot read the worktree status",
+            "the upstream branch no longer exists, so the ahead/behind counts are unknown",
+        ));
+    }
+
+    // Unpushed commits live on the branch, not in the worktree: `git worktree
+    // remove` keeps the ref. When the work is already in the default branch the
+    // upstream being behind says nothing about this directory, so no reason is
+    // emitted. Otherwise it is a Review — the reader should see the fact, but the
+    // directory can still be removed without losing the commits. The old
+    // `wt.unpushed` code was Unsafe for this fact and is retained for audit logs;
+    // `wt.unpushed_branch` is the append-only replacement.
+    if let Some(info) = &status {
+        if !upstream_without_ab && info.ahead > 0 && merged != Some(true) && !absorbed {
+            let upstream = info.upstream.as_deref().unwrap_or("its upstream");
+            reasons.push(Reason::review(
+                ReasonCode::WtUnpushedBranch,
+                "commits are not pushed to the upstream branch",
+                format!(
+                    "{} commits not pushed to {upstream}; the branch ref is kept when the worktree is removed",
+                    info.ahead
+                ),
+            ));
+        }
+    }
+
     // ---- reasons that need both the status header and the merge answer ----
     if let Some(info) = &status {
         // `absorbed` counts as merged here: the change is in the default branch, so
@@ -662,9 +805,11 @@ pub fn check_worktree(
                 evidence,
             ));
         }
-        // A detached HEAD only reaches this check when status ran: without the
-        // header the "no upstream" half of the condition cannot be verified.
-        if entry.is_detached && info.upstream.is_none() {
+        // A detached HEAD is only a reason when its commit is not already in the
+        // default branch: then the commit is preserved there, and the worktree
+        // holds no branch that could be lost. The check needs the status header
+        // for the "no upstream" half.
+        if entry.is_detached && info.upstream.is_none() && merged != Some(true) && !absorbed {
             reasons.push(Reason::review(
                 ReasonCode::WtDetached,
                 "HEAD is detached",
@@ -697,7 +842,7 @@ pub fn check_worktree(
         absorbed_into_default: absorbed,
         stash_count: opts.repository_stash_count.unwrap_or(0),
         last_updated_at: activity.map(format_rfc3339),
-        agent: infer_agent(&entry.path),
+        agent: infer_agent(&entry.path, entry.branch.as_deref()),
         size_bytes: opts.size_bytes,
         safety,
     }
@@ -727,7 +872,7 @@ fn merge_base_is_ancestor(
     default_branch: &str,
 ) -> Result<(bool, String), GitError> {
     let mut candidates = Vec::with_capacity(2);
-    if !default_branch.contains('/') {
+    if !default_branch.starts_with("origin/") {
         candidates.push(format!("origin/{default_branch}"));
     }
     candidates.push(default_branch.to_string());
@@ -770,6 +915,19 @@ fn merge_base_is_ancestor(
     }))
 }
 
+/// What `git cherry` plus the content comparison established.
+enum AbsorbedAnswer {
+    /// Every commit has an equivalent patch, and the default branch still holds
+    /// the content. This is the only answer that may be `Safe`.
+    Absorbed(String),
+    /// Every commit has an equivalent patch, but the files it touched no longer
+    /// hold the content this branch produced. A later revert and an ordinary edit
+    /// after the merge look the same; the answer is `Review`, not "unmerged".
+    ContentChanged(String),
+    /// At least one commit has no equivalent patch upstream.
+    NotAbsorbed(String),
+}
+
 /// Asks `git cherry` whether every commit on this branch already has an equivalent
 /// patch in the default branch.
 ///
@@ -784,16 +942,17 @@ fn merge_base_is_ancestor(
 /// ref. A name that does not resolve exits 128 and the next one is tried; a
 /// transport error is returned as-is, because another name cannot fix it.
 ///
-/// What this cannot see: a commit applied and then reverted still matches its
-/// patch-id, so a reverted change reads as absorbed.
+/// A patch-id survives a revert, so the patch answer is paired with a content
+/// answer. When the content differs, the result is [`AbsorbedAnswer::ContentChanged`]
+/// rather than "absorbed": the patch is upstream, but its effect is not confirmed.
 fn commits_absorbed(
     runner: &dyn GitRunner,
     repo: &Path,
     head: &str,
     default_branch: &str,
-) -> Result<(bool, String), GitError> {
+) -> Result<AbsorbedAnswer, GitError> {
     let mut candidates = Vec::with_capacity(2);
-    if !default_branch.contains('/') {
+    if !default_branch.starts_with("origin/") {
         candidates.push(format!("origin/{default_branch}"));
     }
     candidates.push(default_branch.to_string());
@@ -812,7 +971,9 @@ fn commits_absorbed(
                     }
                 }
                 if unique > 0 {
-                    return Ok((false, format!("{unique} commit(s) not in {candidate}")));
+                    return Ok(AbsorbedAnswer::NotAbsorbed(format!(
+                        "{unique} commit(s) not in {candidate}"
+                    )));
                 }
                 // A matching patch-id says the patch was applied, not that it is still
                 // there: a later revert leaves the patch-id matching and the code gone.
@@ -823,9 +984,9 @@ fn commits_absorbed(
                     format!("{absorbed} commit(s) have an equivalent patch in {candidate}")
                 };
                 return Ok(if present {
-                    (true, format!("{subject}, and {detail}"))
+                    AbsorbedAnswer::Absorbed(format!("{subject}, and {detail}"))
                 } else {
-                    (false, format!("{subject}, but {detail}"))
+                    AbsorbedAnswer::ContentChanged(format!("{subject}, but {detail}"))
                 });
             }
             Ok(output) => {
@@ -862,14 +1023,14 @@ const MAX_CONFIRM_PATHS: usize = 200;
 /// The test is a tree comparison, not a history one. `git diff <head> <target> -- <the
 /// files this branch touched>` asks whether the two sides hold the same content for
 /// exactly those files; the file list comes from `<target>...<head>`, which is the
-/// branch's own diff against the merge base. A revert makes the two sides differ, so
-/// the branch stays `Review`. Because the comparison covers only the files the branch
-/// touched, unrelated work on the default branch cannot make it fail.
+/// branch's own diff against the merge base. A revert or an ordinary edit after
+/// the merge makes the two sides differ, so the branch stays `Review`. Because the
+/// comparison covers only the files the branch touched, unrelated work on the
+/// default branch cannot make it fail.
 ///
-/// It is deliberately strict in one direction: if the default branch changed one of
-/// those files again after the merge, the two sides differ and the answer is "cannot
-/// confirm", which is `Review`. That is the safe direction — this check may cost a
-/// re-read, never a silent deletion.
+/// The answer is "cannot confirm", not "reverted": whole-file equality cannot tell
+/// the two apart. The caller reports that distinction as
+/// `wt.absorbed_content_changed`.
 fn content_still_present(
     runner: &dyn GitRunner,
     repo: &Path,
@@ -915,7 +1076,7 @@ fn content_still_present(
         Some(1) => Ok((
             false,
             format!(
-                "{} touched file(s) no longer match — a later revert or rewrite",
+                "{} touched file(s) changed after the merge, so the content this branch produced is no longer identical",
                 paths.len()
             ),
         )),
@@ -1045,6 +1206,19 @@ mod tests {
         )
     }
 
+    /// A successful process whose exit code is 1: `git ls-files --error-unmatch`
+    /// uses that for "not tracked", which is an answer, not a failure.
+    fn not_tracked(args: &[&str]) -> (Vec<String>, Canned) {
+        (
+            args.iter().map(|arg| (*arg).to_string()).collect(),
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
+        )
+    }
+
     /// Porcelain output captured from a real repository (git 2.54, `--porcelain -z`):
     /// a main worktree, a detached one, a locked one, one whose path contains a
     /// newline, and a prunable one.
@@ -1097,6 +1271,15 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
 # branch.oid 3704a98b0e299445f52e13555002a5ffe7d13814
 # branch.head feature/x
 # branch.upstream origin/feature/x
+";
+
+    /// The same missing `# branch.ab`, with one tracked file changed. The file
+    /// count is still a real answer even though ahead/behind are not.
+    const DIRTY_UPSTREAM_WITHOUT_AB: &str = "\
+# branch.oid 3704a98b0e299445f52e13555002a5ffe7d13814
+# branch.head feature/x
+# branch.upstream origin/feature/x
+1 .M N... 100644 100644 100644 814f4a422927b82f5f8a43f8fab6d3839e3983f2 814f4a422927b82f5f8a43f8fab6d3839e3983f2 a.txt
 ";
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -1174,6 +1357,38 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 }),
             ),
         ]
+    }
+
+    /// The same answers, with the branch not merged and one unique commit. Used by
+    /// the tests whose reason only exists when the work is not in the default
+    /// branch.
+    fn not_merged_rules(status: &str) -> Vec<(Vec<String>, Canned)> {
+        let mut rules = calm_rules(status);
+        rules.pop();
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                "19402c62a2bdb19e2271df95ecfc1a272aad4bf6".to_string(),
+                "origin/main".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
+        ));
+        rules.push(canned(
+            &[
+                "cherry",
+                "--",
+                "origin/main",
+                "19402c62a2bdb19e2271df95ecfc1a272aad4bf6",
+            ],
+            "+ 2222222222222222222222222222222222222222\n",
+        ));
+        rules
     }
 
     fn codes(record: &WorktreeRecord) -> Vec<&'static str> {
@@ -1305,23 +1520,51 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     #[test]
     fn agent_is_inferred_from_path_tokens() {
         assert_eq!(
-            infer_agent(Path::new("/repo--codex-fix-ble")).as_deref(),
+            infer_agent(Path::new("/repo--codex-fix-ble"), None).as_deref(),
             Some("codex")
         );
         assert_eq!(
-            infer_agent(Path::new("/srv/repo--cursor-perf")).as_deref(),
+            infer_agent(Path::new("/srv/repo--cursor-perf"), None).as_deref(),
             Some("cursor")
         );
         assert_eq!(
-            infer_agent(Path::new("/srv/WorkBuddy-notes/wt")).as_deref(),
+            infer_agent(Path::new("/srv/WorkBuddy-notes/wt"), None).as_deref(),
             Some("workbuddy")
         );
     }
 
     #[test]
-    fn agent_is_none_when_unrecognised() {
-        assert!(infer_agent(Path::new("/Users/andy/MySrc/remote-mic-app")).is_none());
-        assert!(infer_agent(Path::new("/tmp/plain-worktree")).is_none());
+    fn agent_falls_back_to_the_branch_when_the_path_has_no_marker() {
+        assert_eq!(
+            infer_agent(
+                Path::new("/Users/andy/Develop/Src/AISrc/GetSayAll/.worktrees/remote-mic-update-checks-20261111"),
+                Some("codex/update-check-coalescing-20261111")
+            )
+            .as_deref(),
+            Some("codex")
+        );
+    }
+
+    #[test]
+    fn a_path_marker_outranks_the_branch_marker() {
+        assert_eq!(
+            infer_agent(
+                Path::new("/repo--claude-ui"),
+                Some("codex/update-check-coalescing-20261111")
+            )
+            .as_deref(),
+            Some("claude")
+        );
+    }
+
+    #[test]
+    fn agent_is_none_when_the_path_and_branch_have_no_marker() {
+        assert!(infer_agent(Path::new("/Users/andy/MySrc/remote-mic-app"), None).is_none());
+        assert!(infer_agent(
+            Path::new("/Users/andy/MySrc/remote-mic-app"),
+            Some("fix/update-check")
+        )
+        .is_none());
     }
 
     // ---- the happy path ----------------------------------------------------
@@ -1443,9 +1686,42 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
-    fn wt_unpushed_blocks_unpushed_commits() {
+    fn wt_unpushed_is_review_because_the_branch_ref_is_kept() {
         let dir = temp_dir("unpushed");
         backdate(&dir, 30 * 86_400);
+        let runner = FakeGitRunner::new(not_merged_rules(AHEAD_STATUS));
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtUnpushedBranch));
+        assert!(
+            !has(&record, ReasonCode::WtUnpushed),
+            "the old Unsafe code is retained for audit logs and must not be emitted"
+        );
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert_eq!(record.ahead, 2);
+        assert_eq!(record.behind, 1);
+        assert!(record.has_upstream);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtUnpushedBranch)
+            .expect("unpushed reason");
+        assert!(
+            reason.evidence.contains("origin/feature/x")
+                && reason.evidence.contains("branch ref is kept"),
+            "the evidence must name the upstream and the kept ref: {}",
+            reason.evidence
+        );
+
+        // Merged: the upstream being behind says nothing about this directory.
+        // `git worktree remove` keeps the branch, and the work is in the default
+        // branch already, so the reason must not appear at all.
         let runner = FakeGitRunner::new(calm_rules(AHEAD_STATUS));
         let record = check_worktree(
             &runner,
@@ -1454,11 +1730,8 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             false,
             &default_options(),
         );
-        assert!(has(&record, ReasonCode::WtUnpushed));
-        assert_eq!(record.safety.status, SafetyStatus::Unsafe);
-        assert_eq!(record.ahead, 2);
-        assert_eq!(record.behind, 1);
-        assert!(record.has_upstream);
+        assert!(!has(&record, ReasonCode::WtUnpushedBranch));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
 
         let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
         let record = check_worktree(
@@ -1468,12 +1741,12 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             false,
             &default_options(),
         );
-        assert!(!has(&record, ReasonCode::WtUnpushed));
+        assert!(!has(&record, ReasonCode::WtUnpushedBranch));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn wt_detached_requires_a_detached_head_without_upstream() {
+    fn wt_detached_is_only_a_reason_when_the_commit_is_not_in_the_default_branch() {
         let dir = temp_dir("detached");
         backdate(&dir, 30 * 86_400);
         let mut entry = feature_entry(&dir);
@@ -1481,12 +1754,22 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         entry.branch = None;
         let status =
             "# branch.oid 3704a98b0e299445f52e13555002a5ffe7d13814\n# branch.head (detached)\n";
-        let runner = FakeGitRunner::new(calm_rules(status));
+
+        // Unmerged: the commit exists only here, so the detached HEAD is a fact
+        // the reader should see.
+        let runner = FakeGitRunner::new(not_merged_rules(status));
         let record = check_worktree(&runner, &dir, &entry, false, &default_options());
         assert!(has(&record, ReasonCode::WtDetached));
         assert!(record.is_detached);
         assert!(record.branch.is_none());
         assert_eq!(record.safety.status, SafetyStatus::Review);
+
+        // Merged: the commit is preserved in the default branch, so the detached
+        // HEAD is not a reason to keep the directory.
+        let runner = FakeGitRunner::new(calm_rules(status));
+        let record = check_worktree(&runner, &dir, &entry, false, &default_options());
+        assert!(!has(&record, ReasonCode::WtDetached));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
 
         let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
         let record = check_worktree(
@@ -1598,6 +1881,62 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
+    fn a_default_branch_with_a_slash_is_still_asked_as_a_remote_ref() {
+        // `origin/HEAD` can name `release/2.0`. The old prefix test was
+        // `contains('/')`, which read that name as if it were already
+        // remote-qualified and asked only the local `release/2.0`; a stale or
+        // missing local branch then made merged work look unmerged. The prefix
+        // test is now `starts_with("origin/")`, so both halves ask the remote
+        // name first.
+        let dir = temp_dir("slash-default");
+        backdate(&dir, 30 * 86_400);
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        let mut opts = default_options();
+        opts.default_branch = Some("release/2.0".to_string());
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.pop();
+        rules.push((
+            vec![
+                "merge-base".to_string(),
+                "--is-ancestor".to_string(),
+                "--".to_string(),
+                head.to_string(),
+                "origin/release/2.0".to_string(),
+            ],
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
+        ));
+        rules.push(canned(
+            &["cherry", "--", "origin/release/2.0", head],
+            "- 1111111111111111111111111111111111111111\n",
+        ));
+        let range = format!("origin/release/2.0...{head}");
+        rules.push(canned(&["diff", "--name-only", &range, "--"], "a.txt\n"));
+        rules.push(canned(
+            &["diff", "--quiet", head, "origin/release/2.0", "--", "a.txt"],
+            "",
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(&runner, &dir, &feature_entry(&dir), false, &opts);
+        assert_eq!(record.merged_into_default, Some(false));
+        assert!(record.absorbed_into_default);
+        assert!(has(&record, ReasonCode::WtAbsorbed));
+        assert!(!has(&record, ReasonCode::WtUnmerged));
+        assert!(
+            runner.called(&["cherry", "--", "origin/release/2.0", head]),
+            "the remote-qualified name must be asked"
+        );
+        assert!(
+            !runner.called(&["cherry", "--", "release/2.0", head]),
+            "the bare name must not be asked before the remote one"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_squash_merged_branch_is_absorbed_rather_than_unmerged() {
         // `git cherry` printing only `-` lines means every commit has an equivalent
         // patch upstream: the change is in the default branch under a rewritten
@@ -1667,13 +2006,15 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
-    fn a_reverted_change_is_not_absorbed() {
+    fn a_content_change_after_the_merge_is_review_but_the_patch_is_absorbed() {
         // The hole that `git cherry` alone leaves open: the commit that applied the
-        // change still matches its patch-id after another commit undid it, so the
-        // patch check reports "absorbed" while the default branch no longer has the
-        // change. The content confirmation is what catches it, and the reason has to
-        // carry both halves so the reader can see why.
-        let dir = temp_dir("absorbed-then-reverted");
+        // change still matches its patch-id after the content changed, so the patch
+        // answer is still "absorbed" while the default branch no longer holds the
+        // same content. The patch reason keeps its original meaning; a second reason
+        // at Review carries the content answer and keeps the verdict out of Safe. It
+        // must not claim a revert: a later revert and an ordinary edit look the same
+        // to a tree comparison.
+        let dir = temp_dir("absorbed-then-changed");
         backdate(&dir, 30 * 86_400);
         let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
         let mut rules = calm_rules(CLEAN_STATUS);
@@ -1724,21 +2065,22 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         );
         assert_eq!(record.merged_into_default, Some(false));
         assert!(
-            !record.absorbed_into_default,
-            "a reverted change must not be called absorbed"
+            record.absorbed_into_default,
+            "the patch-id is upstream; the content answer is separate"
         );
-        assert!(has(&record, ReasonCode::WtUnmerged));
-        assert!(!has(&record, ReasonCode::WtAbsorbed));
+        assert!(has(&record, ReasonCode::WtAbsorbed));
+        assert!(has(&record, ReasonCode::WtAbsorbedContentChanged));
+        assert!(!has(&record, ReasonCode::WtUnmerged));
         assert_eq!(record.safety.status, SafetyStatus::Review);
         let reason = record
             .safety
             .reasons
             .iter()
-            .find(|reason| reason.code == ReasonCode::WtUnmerged)
-            .expect("unmerged reason");
+            .find(|reason| reason.code == ReasonCode::WtAbsorbedContentChanged)
+            .expect("content-changed reason");
         assert!(
             reason.evidence.contains("equivalent patch")
-                && reason.evidence.contains("no longer match"),
+                && reason.evidence.contains("changed after the merge"),
             "the evidence must show both halves: {}",
             reason.evidence
         );
@@ -1947,10 +2289,46 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
-    fn a_recent_head_commit_fires_recent_activity() {
+    fn a_recent_head_commit_fires_recent_activity_when_the_work_is_not_in_the_default_branch() {
         // The directory is 30 days old; only the commit is fresh. The activity signal
-        // is the HEAD commit time, so this must fire.
+        // is the HEAD commit time, so this must fire while the branch is unmerged.
         let dir = temp_dir("recent");
+        backdate(&dir, 30 * 86_400);
+        let mut opts = default_options();
+        opts.now = SystemTime::now();
+        let recent_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("after epoch")
+            .as_secs()
+            - 2 * 86_400;
+        let mut rules = not_merged_rules(CLEAN_STATUS);
+        for rule in &mut rules {
+            if rule.0
+                == vec![
+                    "log".to_string(),
+                    "-1".to_string(),
+                    "--format=%ct".to_string(),
+                ]
+            {
+                if let Canned::Out(output) = &mut rule.1 {
+                    output.stdout = format!("{recent_secs}\n");
+                }
+            }
+        }
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(&runner, &dir, &feature_entry(&dir), false, &opts);
+        assert!(has(&record, ReasonCode::WtRecentActivity));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_clean_merged_recent_commit_is_attention_not_a_verdict() {
+        // The work is already in the default branch and the worktree is clean, so
+        // the only thing a recent commit says is "used recently". The timestamp
+        // remains on the record for the detail panel; the safety level must not
+        // drop because of it.
+        let dir = temp_dir("recent-merged");
         backdate(&dir, 30 * 86_400);
         let mut opts = default_options();
         opts.now = SystemTime::now();
@@ -1975,8 +2353,9 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         }
         let runner = FakeGitRunner::new(rules);
         let record = check_worktree(&runner, &dir, &feature_entry(&dir), false, &opts);
-        assert!(has(&record, ReasonCode::WtRecentActivity));
-        assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert!(!has(&record, ReasonCode::WtRecentActivity));
+        assert!(record.last_updated_at.is_some());
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2645,9 +3024,35 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     #[test]
     fn an_upstream_without_ahead_behind_is_unknown_not_zero() {
         // Finding 3b: git omits `# branch.ab` when the upstream ref itself is
-        // gone, so "0 commits not pushed" would be a lie.
+        // gone, so "0 commits not pushed" would be a lie. The missing ref only
+        // matters while the work is not in the default branch.
         let dir = temp_dir("upstream-without-ab");
         backdate(&dir, 30 * 86_400);
+
+        // Unmerged: ahead/behind are unknown, so the verdict stays Review; the
+        // clean file counts are still read and reported.
+        let runner = FakeGitRunner::new(not_merged_rules(UPSTREAM_WITHOUT_AB));
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtCannotVerify)
+            .expect("cannot verify reason");
+        assert!(reason.evidence.contains("upstream branch no longer exists"));
+        assert!(has(&record, ReasonCode::WtClean));
+        assert!(!has(&record, ReasonCode::WtUnpushedBranch));
+        assert_eq!(record.ahead, 0);
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+
+        // Merged: the deleted upstream cannot hide any work; the worktree is
+        // clean and its commit is in the default branch, so it is Safe.
         let runner = FakeGitRunner::new(calm_rules(UPSTREAM_WITHOUT_AB));
         let record = check_worktree(
             &runner,
@@ -2656,18 +3061,32 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             false,
             &default_options(),
         );
-        assert!(has(&record, ReasonCode::WtCannotVerify));
-        let reason = record
-            .safety
-            .reasons
-            .iter()
-            .find(|reason| reason.code == ReasonCode::WtCannotVerify)
-            .expect("cannot verify reason");
-        assert!(reason.evidence.contains("upstream branch no longer exists"));
-        assert!(!has(&record, ReasonCode::WtUnpushed));
+        assert!(!has(&record, ReasonCode::WtCannotVerify));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dirty_worktree_with_a_deleted_upstream_is_still_unsafe() {
+        // The regression this pins: the old code skipped the whole status block
+        // when `# branch.ab` was absent, so a dirty worktree was reported as a
+        // Review `cannot_verify` with `dirty_files: 0`. The file counts are not
+        // unknown just because ahead/behind are, and uncommitted changes are the
+        // one thing the worktree deletion would actually destroy.
+        let dir = temp_dir("dirty-upstream-without-ab");
+        backdate(&dir, 30 * 86_400);
+        let runner = FakeGitRunner::new(calm_rules(DIRTY_UPSTREAM_WITHOUT_AB));
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtDirty));
+        assert_eq!(record.dirty_files, 1);
         assert!(!has(&record, ReasonCode::WtClean));
-        assert_eq!(record.ahead, 0);
-        assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert_eq!(record.safety.status, SafetyStatus::Unsafe);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2927,6 +3346,170 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
+    fn a_credential_in_the_worktree_blocks_removal() {
+        // `git worktree remove` deletes ignored files, so a `.env` at the root of
+        // an otherwise clean worktree is exactly the file the Safe verdict must
+        // not miss. The artifact channel had `af.credentials`; this is the
+        // worktree-level counterpart.
+        let dir = temp_dir("worktree-credential");
+        backdate(&dir, 30 * 86_400);
+        std::fs::write(dir.join(".env"), "TOKEN=secret\n").expect("write .env");
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.push(not_tracked(&["ls-files", "--error-unmatch", "--", ".env"]));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtCredentials));
+        assert_eq!(record.safety.status, SafetyStatus::Unsafe);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtCredentials)
+            .expect("credential reason");
+        assert!(
+            reason.evidence.contains(".env"),
+            "the evidence must name the file: {}",
+            reason.evidence
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_tracked_credential_template_is_not_a_worktree_loss() {
+        // `.env.example` is matched by the credential table on purpose: a template
+        // filled in where it stood is a mistake. But a tracked template is already
+        // in Git, so deleting the worktree loses nothing, and blocking on it would
+        // make every repository that commits one Unsafe.
+        let dir = temp_dir("worktree-credential-template");
+        backdate(&dir, 30 * 86_400);
+        std::fs::write(dir.join(".env.example"), "TOKEN=\n").expect("write template");
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.push(canned(
+            &["ls-files", "--error-unmatch", "--", ".env.example"],
+            ".env.example\n",
+        ));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(!has(&record, ReasonCode::WtCredentials));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_untracked_credential_is_unsafe_not_only_review() {
+        // An untracked `.env` is a Review under `wt.untracked`, which the user can
+        // force through. The credential check must run anyway and make it Unsafe.
+        let dir = temp_dir("worktree-credential-untracked");
+        backdate(&dir, 30 * 86_400);
+        std::fs::write(dir.join(".env"), "TOKEN=secret\n").expect("write .env");
+        let status = format!("{CLEAN_STATUS}? .env\n");
+        let mut rules = calm_rules(&status);
+        rules.push(not_tracked(&["ls-files", "--error-unmatch", "--", ".env"]));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtUntracked));
+        assert!(has(&record, ReasonCode::WtCredentials));
+        assert_eq!(record.safety.status, SafetyStatus::Unsafe);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_credential_inside_a_cache_directory_is_left_to_the_artifact_scan() {
+        // The walk skips recognized build and cache directories: they are artifact
+        // candidates, and the artifact scanner checks them for credentials. Walking
+        // every `node_modules` here would make the worktree verdict pay for the
+        // dependency tree twice.
+        let dir = temp_dir("worktree-credential-cache");
+        backdate(&dir, 30 * 86_400);
+        let cache = dir.join("node_modules");
+        std::fs::create_dir_all(&cache).expect("create node_modules");
+        std::fs::write(cache.join(".env"), "TOKEN=secret\n").expect("write .env");
+        let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(!has(&record, ReasonCode::WtCredentials));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dependency_checkout_is_not_scanned_for_worktree_credentials() {
+        // The measured false positive: a Sparkle test public key lives under
+        // `.build/checkouts/.../Tests/Resources/test-pubkey.pem` in most Swift
+        // worktrees. It is a reproducible dependency fixture, not a secret that
+        // the worktree deletion would lose.
+        let dir = temp_dir("worktree-credential-dependency");
+        backdate(&dir, 30 * 86_400);
+        let checkout = dir.join(".build/checkouts/Sparkle/Tests/Resources");
+        std::fs::create_dir_all(&checkout).expect("create checkout");
+        std::fs::write(checkout.join("test-pubkey.pem"), "public test key\n")
+            .expect("write test key");
+        let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(!has(&record, ReasonCode::WtCredentials));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_truncated_worktree_credential_walk_is_review_not_a_pass() {
+        // A partial walk cannot claim the worktree is clean. The bound is time, so
+        // a directory large enough to outlast a zero budget is the fixture.
+        let dir = temp_dir("worktree-credential-truncated");
+        backdate(&dir, 30 * 86_400);
+        for index in 0..2_000 {
+            std::fs::write(dir.join(format!("f{index}.txt")), "x").expect("write");
+        }
+        let mut opts = default_options();
+        opts.credential_scan_timeout = Duration::ZERO;
+        let runner = FakeGitRunner::new(calm_rules(CLEAN_STATUS));
+        let record = check_worktree(&runner, &dir, &feature_entry(&dir), false, &opts);
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtCannotVerify)
+            .expect("cannot verify reason");
+        assert!(
+            reason.evidence.contains("time limit"),
+            "the evidence must say the walk was partial: {}",
+            reason.evidence
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn every_worktree_reason_code_reports_non_empty_text_and_evidence() {
         // GAP-5: one record that carries as many wt.* codes as the decision table
         // can produce at once, so every one of them is proven to render text and
@@ -3011,12 +3594,12 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 "wt.locked",
                 "wt.whitelisted",
                 "wt.dirty",
-                "wt.unpushed",
                 "wt.cannot_verify",
                 "wt.untracked",
                 "wt.agent_active",
-                "wt.recent_activity",
                 "wt.unmerged",
+                "wt.recent_activity",
+                "wt.unpushed_branch",
             ]
         );
         for reason in &record.safety.reasons {

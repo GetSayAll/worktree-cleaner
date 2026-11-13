@@ -26,7 +26,8 @@ export const en = {
     // Intentionally blank until the tagline is decided. The key stays so that
     // landing the copy later is a one-line edit and nothing else has to move.
     tagline: "",
-    readOnlyNote: "Read-only · directories go to the {{trash}}",
+    readOnlyNote:
+      "The scan phase runs only read-only Git commands. Artifact directories are moved to the system {{trash}}; worktrees are permanently removed with git worktree remove.",
     versionNote: "v{{version}}",
     sampleData: "Sample data",
     previewNote: "Browser preview",
@@ -43,10 +44,6 @@ export const en = {
       "Browser preview — this build cannot reach the file system, so the cleanup actions are disabled and the numbers on these pages come from sample data."
   },
   nav: {
-    groups: {
-      audit: "Audit",
-      cleanup: "Cleanup"
-    },
     project: "Project",
     scan: "Scan",
     overview: "Overview",
@@ -70,6 +67,31 @@ export const en = {
       Unsafe: "Blocked"
     }
   },
+  // The rules behind the three verdicts, stated once on the overview and in
+  // shortened form where the reader acts on them. The full decision tables live
+  // in docs/PRODUCT_PLAN.md section 5; this is the reader-facing summary.
+  rules: {
+    title: "Cleanup rules",
+    shortLabel: "Rule:",
+    hint: "Every row follows the same rules; only Safe items are selected by default.",
+    safeBody:
+      "The worktree is clean and its work is in the default branch; or the artifact is rebuildable or empty, and free of protected content.",
+    reviewBody:
+      "Work is unmerged, files are untracked, recent activity could still be lost, or a check did not finish.",
+    unsafeBody: "Main worktree, uncommitted changes, credentials, a lock, tracked files, or the whitelist.",
+    defaultSelected: "Selected by default",
+    defaultUnselected: "Not selected",
+    defaultDisabled: "Cannot be selected",
+    footer:
+      "Worktrees are permanently deleted, but their branch refs are kept; build artifacts go to the system {{trash}} and can be restored. Every item is checked again before execution, and every decision carries a command, a count, or a path as evidence.",
+    worktreesSummary:
+      "Only Safe items are selected by default; Review items must be selected one by one; Unsafe items cannot be selected.",
+    artifactsSummary:
+      "Only rebuildable or empty artifacts with no protected content are deleted. Recent writes or an unfinished check move an item to Review.",
+    welcomeSummary:
+      "After a scan, every item is Safe to delete, Needs review, or Must not delete; only Safe items are selected by default.",
+    planSummary: "Only selected items that pass the re-check run."
+  },
   // One entry per ReasonCode, in the order `src/types.ts` declares them. The core
   // ships the same codes, so a verdict can be rendered in the reader's language
   // instead of the language of the process that found it. `evidence` is not here:
@@ -85,10 +107,14 @@ export const en = {
       locked: "locked by Git",
       dirty: "has uncommitted changes",
       unpushed: "has commits that were never pushed",
+      // The append-only replacement: the old `unpushed` code was Unsafe and is
+      // retained only so audit logs written before the change still render.
+      unpushed_branch: "has commits not pushed to the upstream branch",
       detached: "HEAD is detached",
       no_upstream: "has no upstream branch and is not merged",
       unmerged: "not merged into the default branch",
       untracked: "has untracked files",
+      credentials: "contains what looks like a credential file",
       // No longer produced by a scan: a stash belongs to the repository, not to the
       // worktree being judged. Kept so that audit logs written before it was withdrawn
       // still render.
@@ -100,6 +126,8 @@ export const en = {
       prunable: "the working directory no longer exists",
       merged: "merged into the default branch",
       absorbed: "every commit has an equivalent patch in the default branch",
+      absorbed_content_changed:
+        "the patch is in the default branch, but the files it touched changed afterwards",
       clean: "clean working tree"
     },
     af: {
@@ -219,7 +247,6 @@ export const en = {
     emDash: "—",
     detached: "(detached)",
     detachedHead: "(detached HEAD)",
-    unknownAgent: "unknown agent",
     defaultBranch: "default branch",
     unsafeTooltip: "Must not delete items cannot be selected",
     mainWorktree: (name: string) => `${name} (main worktree)`,
@@ -250,7 +277,7 @@ export const en = {
   },
   time: {
     justNow: "just now",
-    hoursAgo: (n: number) => (n === 1 ? "1 hour ago" : `${n} hours ago`),
+    hoursAgo: (n: number) => `${n} hours ago`,
     oneDayAgo: "1 day ago",
     daysAgo: (n: number) => `${n} days ago`,
     monthsAgo: (n: number) => `${n} months ago`,
@@ -284,7 +311,7 @@ export const en = {
   },
   welcome: {
     title: "Project cleanup audit",
-    lede: "Scan a repository's Git worktrees and build artifacts, and explain why each one can or cannot be deleted.",
+    lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted. Scanning is read-only by default. Artifact directories go to the system {{trash}}; worktrees are permanently removed with git worktree remove.",
     pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "Choose folder",
     chooseFolderTitle: "Open the system folder picker",
@@ -292,15 +319,18 @@ export const en = {
       "The folder picker lives in the desktop app; type the path instead",
     pickerFailed: (message: string) => `The folder picker could not open: ${message}`,
     startScan: "Start scan",
-    dropHint: "You can also drop a project folder here. The scan writes no files.",
+    dropHint: "You can also drop a project folder onto this window. The scan phase writes no files.",
     scanFailed: (message: string) => `The scan did not run: ${message}`,
     promises: {
       readOnlyTitle: "Read-only scan",
-      readOnlyBody: "Runs read-only Git commands only; the repository is never modified.",
+      readOnlyBody:
+        "The check phase runs only read-only Git commands; it does not modify the repository or write into the target directory.",
       evidenceTitle: "Verifiable reasons",
-      evidenceBody: "Every judgment carries a concrete command, path, or count.",
-      trashTitle: "Deletion through the {{trash}}",
-      trashBody: "Directories go to the system {{trash}}; worktrees go through git worktree remove."
+      evidenceBody:
+        'Every judgment comes with evidence: a concrete command, file count, or path. "Looks like junk" is not accepted.',
+      trashTitle: "Two deletion paths",
+      trashBody:
+        "Artifact directories go to the system {{trash}} and can be restored. Worktrees are removed with git worktree remove; that deletion is permanent and does not use the {{trash}}."
     },
     recentTitle: "Recent projects",
     recentHint: "Click to scan",
@@ -310,7 +340,7 @@ export const en = {
   },
   overview: {
     title: "Overview",
-    subtitle: (root: string, branch: string) => `${root} · default branch ${branch}`,
+    subtitle: (branch: string) => `default branch ${branch}`,
     viewWorktrees: "View Worktree",
     viewArtifacts: "View build artifacts",
     stats: {
@@ -347,6 +377,9 @@ export const en = {
   },
   worktrees: {
     title: "Worktree",
+    mainWorkspaceBadge: "Main workspace · Protected",
+    mainWorkspaceHint: (branch: string) =>
+      `The main workspace is the repository itself. It cannot be deleted and never enters the cleanup plan. The merge check is against ${branch ? `the default branch ${branch}` : "the default branch"}, not the branch checked out in the main workspace.`,
     dataSource:
       "Data source: git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
     // `git worktree add` takes any path, so a worktree of the repository the user
@@ -660,14 +693,12 @@ export const en = {
     title: "Cleanup plan",
     lede: "Review each item before executing; this page only describes what will happen — nothing has been executed yet.",
     backToAdjustSelection: "Back to adjust selection",
-    reviewSelectedTitle: "Selected items need review",
-    reviewSelectedBody: (n: number) =>
-      `${n} selected items are still marked Needs review. The executor skips them; only Safe items are deleted. Rescan or clear them from the selection.`,
     stats: {
       removeWorktree: "Remove Worktree",
-      removeWorktreeSub: "git worktree remove",
+      removeWorktreeSub: "git worktree remove · permanent",
       moveToTrash: "Move to {{trash}}",
-      moveToTrashSub: (bundled: number) => `plus ${bundled} items removed with their worktree`,
+      moveToTrashSub: (bundled: number) =>
+        `plus ${bundled} items deleted with their worktree (not recoverable)`,
       reclaimable: "Estimated reclaimable",
       reclaimableSub: "based on sizes measured at scan time",
       // The total omits items whose size could not be measured, so it is a lower
@@ -700,6 +731,8 @@ export const en = {
     checks: {
       title: "Precondition checks (dry run)",
       note: "Checks marked with a dash run again just before each deletion",
+      recheckNotice:
+        "Every item is re-checked before deletion. If it changed or can no longer be verified, it is skipped; the result page names the reason. Selecting an item does not guarantee deletion.",
       pathCheck: (n: number) =>
         `Path check passed: non-empty absolute paths, symlinks resolved, no .. components, none pointing at system directories (${n} items)`,
       whitelistPassed: "Whitelist check passed: no item matches a protection rule",
@@ -713,17 +746,18 @@ export const en = {
       identityNotRun: "Re-check of path, size and last-modified time",
       activityNotRun: "Whether anything was written since this plan was generated"
     },
-    channelA: "Channel A · Remove worktrees",
+    channelA: "Channel A · Remove worktrees permanently",
     items: (n: number) => `${n} items`,
     noWorktrees: "No worktrees selected.",
     needForce: "Needs --force",
+    reviewItem: "Needs review",
     removable: "Removable directly",
     forceNote: (n: number) =>
       `--force also deletes the following untracked files (${n} in total), which are not tracked in Git and cannot be recovered from the repository once deleted:`,
     prunableNote:
       "The working directory is already gone. Only the Git metadata is pruned; no files are touched.",
     cleanNote: "The working tree is clean; no unsaved content will be lost.",
-    channelB: "Channel B · Move to system {{trash}}",
+    channelB: "Channel B · Move artifact directories to {{trash}}",
     trashHeader: (n: number, bytes: string) => `${n} items · ${bytes}`,
     columns: {
       directory: "Directory",
@@ -731,14 +765,23 @@ export const en = {
       size: "Size",
       recoverability: "Recoverability"
     },
-    removedWithWorktree: "Removed with worktree",
+    removedWithWorktree: "Deleted with worktree (not recoverable)",
     recoverable: "Recoverable from {{trash}}",
     noArtifacts: "No artifact directories selected",
     confirmationTitle: "Confirmation before execution",
     confirmationIntro:
       "This operation meets the following high-risk conditions and requires manual confirmation:",
+    permanenceNote:
+      "Worktrees are permanently removed with git and cannot be recovered from the {{trash}}. Only artifact directories go to the {{trash}}.",
     ackConfirm: (n: number) =>
-      `I have reviewed the items listed above, including the untracked files force-deleted in ${n} worktrees`,
+      n > 0
+        ? `I have reviewed the items listed above, including the untracked files force-deleted in ${n} worktrees, and I understand that worktree removal is permanent`
+        : "I have reviewed the items listed above and I understand that worktree removal is permanent",
+    confirmRequired: "Required confirmation",
+    confirmed: "Checked",
+    confirmHint: "Check this box to enable cleanup",
+    confirmRules:
+      "When confirmed: worktrees are permanently deleted and their branch refs are kept; build artifact directories go to the system {{trash}} and can be restored.",
     typeNameBefore: "Type the project directory name",
     typeNameAfter: "to proceed",
     exportTitle: "Plan export (JSON)",
@@ -755,9 +798,19 @@ export const en = {
   },
   result: {
     title: "Result",
+    successTitle: "Cleanup complete",
+    successSummary: (worktrees: number, artifacts: number, size: string) =>
+      `Removed ${worktrees} worktrees, moved ${artifacts} artifact directories to the {{trash}}, and freed ${size}.`,
+    partialTitle: "Cleanup finished with skipped items",
+    partialSummary: (worktrees: number, artifacts: number, size: string, failed: number) =>
+      `Removed ${worktrees} worktrees, moved ${artifacts} artifact directories to the {{trash}}, and freed ${size}. ${failed} selected items were not deleted; the table below says why.`,
     openTrash: "Open {{trash}}",
     trashNotice:
-      "Directories were moved to the system {{trash}} and are recoverable from there; worktrees were removed with git.",
+      "Artifact directories go to the system {{trash}} and are recoverable from there; worktrees are permanently removed with git.",
+    noTrashNotice:
+      "Nothing reached the {{trash}}: every trash move was skipped on re-check. The table below names the reason for each one.",
+    worktreePermanentNotice: (n: number) =>
+      `${n} worktrees were permanently removed with git worktree remove and do not go to the {{trash}}. Their branch refs remain in Git; their working directories and any untracked files do not.`,
     openLog: "Open log",
     logFailedTitle: "The operation log could not be written",
     logFailedBody: (path: string, error: string) =>
@@ -774,7 +827,7 @@ export const en = {
       // Saying so here is what stops "4 succeeded, 1 in the Trash" looking wrong.
       succeeded: "Handled",
       succeededSub: (trashed: number) =>
-        `${trashed} went to the {{trash}}; worktrees are removed by git and do not go there`,
+        `${trashed} went to the {{trash}}; worktrees are permanently removed by git and do not go there`,
       movedToTrash: "Went to {{trash}}",
       movedToTrashSub: "recoverable from {{trash}}",
       skippedFailed: "Not deleted",
@@ -790,22 +843,8 @@ export const en = {
     },
     empty: "No execution records",
     footer:
-      "Failed items do not affect the others; every action is written to the local operation log. Deletions are not permanent, and directory targets can be recovered from {{trash}}.",
-    finishedEmpty: "No cleanup actions have run",
-    finishedNone: (notDeleted: number) =>
-      `Cleanup finished; nothing was deleted — ${notDeleted} ${notDeleted === 1 ? "item was" : "items were"} not executed`,
-    finishedPartial: (handled: number, notDeleted: number) =>
-      `Cleanup finished: ${handled} handled, ${notDeleted} not executed`,
-    finishedAll: (handled: number) => `Cleanup complete: ${handled} handled`,
-    outcomeNoneTitle: "Nothing was deleted",
-    outcomeNoneBody: (notDeleted: number) =>
-      `${notDeleted} ${notDeleted === 1 ? "item was" : "items were"} stopped before removal — by the pre-deletion re-check or by a failed action. The Detail column says why. Rescan the project to build a fresh plan.`,
-    outcomePartialTitle: "Cleanup finished with skipped items",
-    outcomePartialBody: (handled: number, notDeleted: number) =>
-      `${handled} items were handled; ${notDeleted} were not executed. The table below says what happened to each one.`,
-    outcomeDoneTitle: "Cleanup complete",
-    outcomeDoneBody: (handled: number) =>
-      `${handled} items were handled. Directory targets moved to the {{trash}} are recoverable there; worktrees were removed with git.`,
+      "Failed items do not affect the others; every action is written to the local operation log. Artifact directories can be recovered from {{trash}}; worktrees are permanently removed by git and cannot be recovered from there.",
+    complete: "Cleanup complete; rescan to confirm the result",
     viewHistory: "View history",
     backToOverview: "Back to overview"
   },
@@ -826,7 +865,6 @@ export const en = {
   },
   settings: {
     title: "Settings",
-    currentProject: "Current project:",
     scanScopeTitle: "Scan scope",
     extraScanPaths: "Extra scan paths",
     extraScanPathsHint:
@@ -854,13 +892,13 @@ export const en = {
     protectedBranchesHint:
       "Comma-separated, wildcards supported; the default branch is detected and added automatically",
     deletionTitle: "Deletion method",
-    directoryDeletion: "Directory deletion",
+    directoryDeletion: "Artifact directory deletion",
     directoryDeletionHint:
-      "Fixed to the system {{trash}}; this tool provides no permanent deletion and no bypass",
+      "Artifact directories are always moved to the system {{trash}}; this setting cannot be changed or bypassed",
     directoryDeletionOption: "System {{trash}}",
     worktreeDeletion: "Worktree deletion",
     worktreeDeletionHint:
-      "Always via git worktree remove; uses git worktree prune when the directory is gone",
+      "Always via git worktree remove; this permanently deletes the working directory and keeps the branch ref. Uses git worktree prune when the directory is gone",
     worktreeDeletionOption: "git worktree remove (never rm -rf)",
     strongProtection: "Strong protection",
     strongProtectionHint:
@@ -888,9 +926,6 @@ export const en = {
     pathAbbrevBefore: "Paths are shown using abbreviations like",
     pathAbbrevAfter: "; the full absolute path is written out."
   },
-  // The update path. Every line says what the reader is looking at, not what the
-  // updater is doing internally: a failed check is "the check failed", not an
-  // error code, and the download says how much of it is done.
   update: {
     title: "Updates",
     status: "Status",

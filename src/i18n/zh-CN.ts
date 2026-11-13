@@ -22,7 +22,8 @@ export const zhCN = {
     // 暂时留空，等口号定下来。键先留着：文案落地时只需改这一处，别的地方
     // （侧栏布局、两表一致性测试）都不用动。
     tagline: "",
-    readOnlyNote: "只读扫描 · 目录进{{trash}}",
+    readOnlyNote:
+      "扫描阶段只运行只读 Git 命令。产物目录会进系统{{trash}}；工作树由 git worktree remove 永久删除。",
     versionNote: "v{{version}}",
     sampleData: "示例数据",
     previewNote: "浏览器预览",
@@ -36,10 +37,6 @@ export const zhCN = {
       "浏览器预览 —— 这个版本访问不到文件系统，因此清理操作不可用，页面上的数字都来自示例数据。"
   },
   nav: {
-    groups: {
-      audit: "审计",
-      cleanup: "清理"
-    },
     project: "项目",
     scan: "扫描",
     overview: "总览",
@@ -63,6 +60,28 @@ export const zhCN = {
       Unsafe: "禁止"
     }
   },
+  // 三种判定背后的规则：总览页完整写一次，其他页面只写读者当场要做的那一条。
+  // 完整判定表在 docs/PRODUCT_PLAN.md 第 5 节，这里是面向读者的摘要。
+  rules: {
+    title: "清理规则",
+    shortLabel: "规则：",
+    hint: "每一行按同一套规则判定；默认只勾选「可安全删除」。",
+    safeBody: "工作区干净且工作已在默认分支；或可重建或为空、没有受保护内容的构建产物。",
+    reviewBody: "有未合并的工作、未跟踪文件、可能丢失的近期活动，或检查未完成。",
+    unsafeBody: "主工作树、未提交改动、凭据、锁定、已跟踪文件或白名单。",
+    defaultSelected: "默认勾选",
+    defaultUnselected: "默认不选",
+    defaultDisabled: "不可勾选",
+    footer:
+      "工作树永久删除目录，分支保留；构建产物进系统{{trash}}，可以恢复。执行前逐项复检，每条判定都附有命令、数量或路径作为证据。",
+    worktreesSummary:
+      "默认只勾选「可安全删除」；「需人工确认」必须逐项勾选；「禁止删除」不可选。",
+    artifactsSummary:
+      "只删除可重建或为空的产物，且没有受保护内容；近期写入或检查未完成时转为「需人工确认」。",
+    welcomeSummary:
+      "扫描后，每一项会判为「可安全删除」「需人工确认」或「禁止删除」；默认只勾选「可安全删除」。",
+    planSummary: "只执行已勾选且复检通过的条目。"
+  },
   // 每个 ReasonCode 一条，顺序与 `src/types.ts` 一致。核心送来的判定理由因此
   // 用读者自己的语言显示，而不是送出它那个进程的语言。`evidence` 不在这里：
   // 那是命令、计数或路径，保持原样。
@@ -76,10 +95,12 @@ export const zhCN = {
       locked: "已被 Git 锁定",
       dirty: "有未提交的改动",
       unpushed: "有从未推送过的提交",
+      unpushed_branch: "有未推送到上游分支的提交",
       detached: "HEAD 处于游离状态",
       no_upstream: "没有上游分支，且尚未合并",
       unmerged: "未合并进默认分支",
       untracked: "含有未跟踪文件",
+      credentials: "含有疑似凭据文件",
       // 扫描不再产生：stash 属于仓库而不属于被判定 worktree。保留只为让旧审计日志仍能渲染。
       stash: "存在 stash 条目",
       recent_activity: "活动时间窗口内有过提交",
@@ -89,6 +110,7 @@ export const zhCN = {
       prunable: "工作目录已不存在",
       merged: "已合并进默认分支",
       absorbed: "所有提交的改动都已在默认分支中",
+      absorbed_content_changed: "补丁已在默认分支中，但它触及的文件此后又被改过",
       clean: "工作区干净"
     },
     af: {
@@ -200,7 +222,6 @@ export const zhCN = {
     emDash: "—",
     detached: "（游离）",
     detachedHead: "（游离 HEAD）",
-    unknownAgent: "未知代理",
     defaultBranch: "默认分支",
     unsafeTooltip: "禁止删除的条目无法勾选",
     mainWorktree: (name: string) => `${name}（主工作树）`,
@@ -266,22 +287,25 @@ export const zhCN = {
   },
   welcome: {
     title: "项目清理审计",
-    lede: "扫描仓库里的 Git 工作树与构建产物，逐条说明每一项为什么能删、为什么不能删。",
+    lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删。扫描默认只读。产物目录会进系统{{trash}}；工作树由 git worktree remove 永久删除。",
     pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
     chooseFolderUnavailable: "文件夹选择器只在桌面应用里可用，请直接输入路径",
     pickerFailed: (message: string) => `文件夹选择器没能打开：${message}`,
     startScan: "开始扫描",
-    dropHint: "也可以把项目文件夹拖进窗口；扫描阶段不写入任何文件。",
+    dropHint: "也可以把项目文件夹拖进这个窗口。扫描阶段不写任何文件。",
     scanFailed: (message: string) => `扫描没有运行：${message}`,
     promises: {
       readOnlyTitle: "只读扫描",
-      readOnlyBody: "只运行只读 Git 命令，不修改仓库。",
+      readOnlyBody:
+        "检查阶段只运行只读 Git 命令，不修改仓库，也不向目标目录写入任何内容。",
       evidenceTitle: "可核验的理由",
-      evidenceBody: "每条判断都附具体命令、路径或计数。",
-      trashTitle: "删除走{{trash}}",
-      trashBody: "目录进系统{{trash}}；工作树走 git worktree remove。"
+      evidenceBody:
+        "每条判断都带证据：具体命令、文件数量或路径。「看着像垃圾」不算理由。",
+      trashTitle: "两条删除路径",
+      trashBody:
+        "产物目录会进系统{{trash}}，可以恢复；工作树由 git worktree remove 删除，这一步是永久的，不经过{{trash}}。"
     },
     recentTitle: "最近的项目",
     recentHint: "点击即可扫描",
@@ -291,7 +315,7 @@ export const zhCN = {
   },
   overview: {
     title: "总览",
-    subtitle: (root: string, branch: string) => `${root} · 默认分支 ${branch}`,
+    subtitle: (branch: string) => `默认分支 ${branch}`,
     viewWorktrees: "查看工作树",
     viewArtifacts: "查看构建产物",
     stats: {
@@ -326,6 +350,9 @@ export const zhCN = {
   },
   worktrees: {
     title: "工作树",
+    mainWorkspaceBadge: "主工作区 · 受保护",
+    mainWorkspaceHint: (branch: string) =>
+      `主工作区是仓库本身，不能删除，也不会进入清理计划。合并判定以${branch ? `默认分支 ${branch}` : "默认分支"}为准，不以主工作区当前检出的分支为准。`,
     dataSource:
       "数据来源：git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
     outsideRoot: "在所选目录之外",
@@ -619,14 +646,11 @@ export const zhCN = {
     title: "清理计划",
     lede: "执行前逐项复核；本页只说明将要发生什么，尚未执行任何操作。",
     backToAdjustSelection: "返回调整选择",
-    reviewSelectedTitle: "选中的条目需人工确认",
-    reviewSelectedBody: (n: number) =>
-      `有 ${n} 项仍处于「需人工确认」，执行时会被跳过；只有「可安全删除」的条目会真正删除。请重新扫描或取消这些选择。`,
     stats: {
       removeWorktree: "移除工作树",
-      removeWorktreeSub: "git worktree remove",
+      removeWorktreeSub: "git worktree remove · 永久删除",
       moveToTrash: "移入{{trash}}",
-      moveToTrashSub: (bundled: number) => `另有 ${bundled} 项随所属工作树一并移除`,
+      moveToTrashSub: (bundled: number) => `另有 ${bundled} 项随所属工作树一并删除（不可恢复）`,
       reclaimable: "预计可回收",
       reclaimableSub: "依据扫描时测得的体积",
       // 合计里缺少无法测量的条目，所以只是下界；这里把条数摆出来，避免把下界
@@ -657,6 +681,8 @@ export const zhCN = {
     checks: {
       title: "前置条件检查（dry run）",
       note: "标有短横线的检查会在每项删除之前重新运行",
+      recheckNotice:
+        "执行前每项都会复检。已变化或无法确认的条目会被跳过，结果页会说明原因。勾选条目不保证一定删除。",
       pathCheck: (n: number) =>
         `路径检查通过：非空绝对路径、软链接已解析、不含 .. 组件、均不指向系统目录（${n} 项）`,
       whitelistPassed: "白名单检查通过：没有任何条目命中保护规则",
@@ -664,20 +690,22 @@ export const zhCN = {
       duplicateCheck: (n: number) =>
         `重复删除检查通过：${n} 个产物随所属工作树移除，只计一次`,
       // 每条只说「要看什么」，不再重复「尚未运行」：列表里的短横线已经说明了状态，
-      // 复检本身是实现细节，读者拿它做不了什么决策。
+      // `note` 已经说明了时机，两条里各再写一遍就是同一句话说三遍。复检本身是
+      // 实现细节，读者拿它做不了什么决策。
       identityNotRun: "路径、体积与最近修改时间的复检",
       activityNotRun: "计划生成之后有没有新的写入"
     },
-    channelA: "通道 A · 移除工作树",
+    channelA: "通道 A · 永久移除工作树",
     items: (n: number) => `${n} 项`,
     noWorktrees: "没有选中工作树。",
     needForce: "需要 --force",
+    reviewItem: "需人工确认",
     removable: "可直接移除",
     forceNote: (n: number) =>
       `--force 会连同下列未跟踪文件一起删除（共 ${n} 个）：它们没有被 Git 跟踪，删除后无法从仓库里恢复：`,
     prunableNote: "工作目录已经不在了。只清理 Git 元数据，不触碰任何文件。",
     cleanNote: "工作区是干净的，不会丢失任何未保存内容。",
-    channelB: "通道 B · 移入系统{{trash}}",
+    channelB: "通道 B · 将产物目录移入{{trash}}",
     trashHeader: (n: number, bytes: string) => `${n} 项 · ${bytes}`,
     columns: {
       directory: "目录",
@@ -685,13 +713,22 @@ export const zhCN = {
       size: "体积",
       recoverability: "可恢复性"
     },
-    removedWithWorktree: "随工作树移除",
+    removedWithWorktree: "随工作树删除（不可恢复）",
     recoverable: "可从{{trash}}恢复",
     noArtifacts: "没有选中产物目录",
     confirmationTitle: "执行前确认",
     confirmationIntro: "本次操作命中以下高风险条件，需要人工确认：",
+    permanenceNote:
+      "工作树由 git 永久删除，不能从{{trash}}恢复；只有产物目录会进{{trash}}。",
     ackConfirm: (n: number) =>
-      `我已逐条看过上面的内容，包括 ${n} 个工作树中被 --force 删除的未跟踪文件`,
+      n > 0
+        ? `我已逐条看过上面的内容，包括 ${n} 个工作树中被 --force 删除的未跟踪文件，并确认工作树删除是永久的`
+        : "我已逐条看过上面的内容，并确认工作树删除是永久的",
+    confirmRequired: "必须确认",
+    confirmed: "已勾选",
+    confirmHint: "勾选后才能执行清理",
+    confirmRules:
+      "确认后执行：工作树永久删除，分支保留；构建产物目录进系统{{trash}}，可以恢复。",
     typeNameBefore: "请输入项目目录名",
     typeNameAfter: "以继续",
     exportTitle: "计划导出（JSON）",
@@ -707,9 +744,19 @@ export const zhCN = {
   },
   result: {
     title: "执行结果",
+    successTitle: "清理完成",
+    successSummary: (worktrees: number, artifacts: number, size: string) =>
+      `已移除 ${worktrees} 个工作树，将 ${artifacts} 个产物目录移入{{trash}}，释放 ${size}。`,
+    partialTitle: "清理完成，但有跳过项",
+    partialSummary: (worktrees: number, artifacts: number, size: string, failed: number) =>
+      `已移除 ${worktrees} 个工作树，将 ${artifacts} 个产物目录移入{{trash}}，释放 ${size}。有 ${failed} 个已勾选条目未删除，原因见下表。`,
     openTrash: "打开{{trash}}",
     trashNotice:
-      "目录已移入系统{{trash}}，可以从{{trash}}恢复；工作树是通过 git 移除的。",
+      "产物目录会进系统{{trash}}，可以从{{trash}}恢复；工作树由 git 永久删除。",
+    noTrashNotice:
+      "没有任何目录进入{{trash}}：所有产物移动都在复核时被跳过，原因见下表。",
+    worktreePermanentNotice: (n: number) =>
+      `${n} 个工作树已由 git worktree remove 永久删除，不经过{{trash}}。分支引用仍保留在 Git 中；工作目录和其中的未跟踪文件不会保留。`,
     openLog: "打开日志",
     logFailedTitle: "操作日志没能写入",
     logFailedBody: (path: string, error: string) =>
@@ -726,7 +773,7 @@ export const zhCN = {
       // 现在说清成功数里有什么、什么才会进回收站。
       succeeded: "已处理",
       succeededSub: (trashed: number) =>
-        `其中 ${trashed} 个目录进了{{trash}}；工作树由 git 移除，不进{{trash}}`,
+        `其中 ${trashed} 个目录进了{{trash}}；工作树由 git 永久删除，不进{{trash}}`,
       movedToTrash: "进了{{trash}}",
       movedToTrashSub: "可从{{trash}}恢复",
       skippedFailed: "未删除",
@@ -742,21 +789,8 @@ export const zhCN = {
     },
     empty: "没有执行记录",
     footer:
-      "失败的条目不影响其他条目；每个动作都会写入本机操作日志。删除不是永久的，目录类目标可以从{{trash}}恢复。",
-    finishedEmpty: "还没有执行清理",
-    finishedNone: (notDeleted: number) => `清理已结束，没有删除任何内容；${notDeleted} 项未执行`,
-    finishedPartial: (handled: number, notDeleted: number) =>
-      `清理已结束：已处理 ${handled} 项，未执行 ${notDeleted} 项`,
-    finishedAll: (handled: number) => `清理完成：已处理 ${handled} 项`,
-    outcomeNoneTitle: "没有删除任何内容",
-    outcomeNoneBody: (notDeleted: number) =>
-      `${notDeleted} 项都在删除前被拦下（复检未通过或操作失败），原因见下方「说明」列。重新扫描项目可以生成新的计划。`,
-    outcomePartialTitle: "清理结束，有项目未执行",
-    outcomePartialBody: (handled: number, notDeleted: number) =>
-      `已处理 ${handled} 项，未执行 ${notDeleted} 项；每一项的结果见下方表格。`,
-    outcomeDoneTitle: "清理完成",
-    outcomeDoneBody: (handled: number) =>
-      `已处理 ${handled} 项。目录类目标已移入{{trash}}，可从{{trash}}恢复；工作树由 git 移除。`,
+      "失败的条目不影响其他条目；每个动作都会写入本机操作日志。产物目录可以从{{trash}}恢复；工作树由 git 永久删除，不能从{{trash}}恢复。",
+    complete: "清理完成；重新扫描即可确认结果",
     viewHistory: "查看历史记录",
     backToOverview: "返回总览"
   },
@@ -777,7 +811,6 @@ export const zhCN = {
   },
   settings: {
     title: "设置",
-    currentProject: "当前项目：",
     scanScopeTitle: "扫描范围",
     extraScanPaths: "额外扫描路径",
     extraScanPathsHint: "每行一条；留空则使用默认值（~/MySrc、~/dev、~/Projects、~/Code）",
@@ -801,12 +834,12 @@ export const zhCN = {
     protectedBranches: "受保护分支",
     protectedBranchesHint: "逗号分隔，支持通配符；默认分支会被自动识别并加入",
     deletionTitle: "删除方式",
-    directoryDeletion: "目录删除",
-    directoryDeletionHint: "固定为系统{{trash}}；本工具不提供永久删除，也没有绕过开关",
+    directoryDeletion: "产物目录删除",
+    directoryDeletionHint: "产物目录一律移入系统{{trash}}；这项设置不能更改，也没有绕过开关",
     directoryDeletionOption: "系统{{trash}}",
     worktreeDeletion: "工作树删除",
     worktreeDeletionHint:
-      "一律走 git worktree remove；目录已消失时使用 git worktree prune",
+      "一律走 git worktree remove；这会永久删除工作目录并保留分支引用。目录已消失时使用 git worktree prune",
     worktreeDeletionOption: "git worktree remove（绝不 rm -rf）",
     strongProtection: "强保护",
     strongProtectionHint: "开启后，清理前必须手动输入项目目录名",
@@ -832,8 +865,6 @@ export const zhCN = {
     pathAbbrevBefore: "路径以缩写形式显示，例如",
     pathAbbrevAfter: "；写出的始终是完整绝对路径。"
   },
-  // 更新流程。每一句都说明读者看到的是什么，而不是更新器内部在做什么：
-  // 检查失败就说「检查失败」，不写错误码；下载就说下载到多少。
   update: {
     title: "更新",
     status: "状态",

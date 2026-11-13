@@ -4,9 +4,7 @@ import { artifacts, counts, goTo, primaryReason, selectedSummary, snapshot, work
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import StatCard from "../components/StatCard.vue";
-import AppIcon from "../components/AppIcon.vue";
-import EmptyState from "../components/EmptyState.vue";
-import { compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, displayPath, isUnder } from "../format";
+import { basename, compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
 const root = computed(() => snapshot.value?.root ?? "");
@@ -22,10 +20,28 @@ function isOutsideRoot(path: string): boolean {
   return root.value.length > 0 && !isUnder(path, root.value);
 }
 
+/**
+ * The main workspace is not a deletion candidate. It is the repository itself;
+ * the merge check is anchored to the default branch (origin/main), not to the
+ * branch this workspace happens to have checked out. It is shown as a protected
+ * strip rather than as a row in the "largest worktrees" list.
+ */
+const mainWorktree = computed(() => worktrees.value.find((item) => item.is_main) ?? null);
+
+/** The remote-tracking ref the merge check actually uses, for the hint copy. */
+const defaultBranchRef = computed(() => {
+  const branch = snapshot.value?.default_branch;
+  if (!branch) return "";
+  return branch.startsWith("origin/") ? branch : `origin/${branch}`;
+});
+
 // Unknown sizes sort first: an item whose size could not be measured must not be
 // buried at the bottom of a "largest" list (see compareSizeNullsFirst).
 const topWorktrees = computed(() =>
-  [...worktrees.value].sort((a, b) => compareSizeNullsFirst(a.size_bytes, b.size_bytes)).slice(0, 5)
+  [...worktrees.value]
+    .filter((item) => !item.is_main)
+    .sort((a, b) => compareSizeNullsFirst(a.size_bytes, b.size_bytes))
+    .slice(0, 5)
 );
 
 const topArtifacts = computed(() =>
@@ -50,13 +66,10 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
 
 <template>
   <div class="stack page--wide">
-    <div class="page-head">
-      <div class="page-head__lead">
-        <span class="page-head__icon"><AppIcon name="overview" /></span>
-        <div class="page-head__text">
-          <h1>{{ messages.overview.title }}</h1>
-          <p class="page-head__sub mono">{{ messages.overview.subtitle(root, snapshot?.default_branch || messages.common.unknown) }}</p>
-        </div>
+    <div class="spread">
+      <div>
+        <h1>{{ messages.overview.title }}</h1>
+        <p class="faint tiny mono">{{ messages.overview.subtitle(defaultBranchRef || messages.common.unknown) }}</p>
       </div>
     </div>
 
@@ -97,8 +110,19 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
       </p>
     </div>
 
+    <div v-if="mainWorktree" class="main-workspace">
+      <div class="main-workspace__head">
+        <span class="main-workspace__name">{{ basename(mainWorktree.path) }}</span>
+        <span class="chip chip--protected" :title="messages.worktrees.mainWorkspaceHint(defaultBranchRef)">{{ messages.worktrees.mainWorkspaceBadge }}</span>
+        <span class="main-workspace__meta">
+          {{ mainWorktree.branch || messages.common.detached }} · {{ formatBytes(mainWorktree.size_bytes) }} · {{ formatRelTime(mainWorktree.last_updated_at) }}
+        </span>
+      </div>
+      <p class="main-workspace__note">{{ messages.worktrees.mainWorkspaceHint(defaultBranchRef) }}</p>
+    </div>
+
     <div v-for="warning in snapshot?.warnings || []" :key="warning" class="banner banner--warn">
-      <AppIcon name="alert" class="banner__icon" />
+      <span>⚠</span>
       <span>
         <span class="banner__title">{{ messages.overview.warningTitle }}</span>{{ warning }}
       </span>
@@ -110,14 +134,13 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         <button class="btn btn--ghost" @click="goTo('worktrees')">{{ messages.overview.viewAll(worktrees.length) }}</button>
       </div>
       <div class="card__body card__body--flush">
-        <EmptyState v-if="topWorktrees.length === 0" compact icon="branch" :text="messages.worktrees.empty" />
         <!-- The same three lines as the worktree page, without the checkbox: this
              page is a way in, not a place to choose. -->
         <div v-for="item in topWorktrees" :key="item.path" class="item-row item-row--plain">
           <div class="item-row__main">
             <div class="item-row__head">
               <span class="item-row__name" :title="item.path">{{ displayPath(item.path, root) }}</span>
-              <span class="chip">{{ item.agent || messages.common.unknownAgent }}</span>
+              <span v-if="item.agent" class="chip">{{ item.agent }}</span>
             </div>
             <div class="item-row__meta">
               <span>{{ item.branch || messages.common.detached }}</span>
@@ -148,7 +171,6 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         <button class="btn btn--ghost" @click="goTo('artifacts')">{{ messages.overview.viewAll(artifacts.length) }}</button>
       </div>
       <div class="card__body card__body--flush">
-        <EmptyState v-if="topArtifacts.length === 0" compact icon="artifacts" :text="messages.artifacts.empty" />
         <div v-for="item in topArtifacts" :key="item.path" class="item-row item-row--plain">
           <div class="item-row__main">
             <div class="item-row__head">
@@ -172,6 +194,40 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
         </div>
       </div>
     </div>
+
+    <!-- The rules behind the three counts. They sit after the two lists: the
+         overview's job is to start a cleanup, and the pages where a decision is
+         made repeat the one line that governs it. -->
+    <section class="rules">
+      <div class="rules__head">
+        <h2>{{ messages.rules.title }}</h2>
+        <span class="faint tiny">{{ messages.rules.hint }}</span>
+      </div>
+      <div class="rules__grid">
+        <div class="rule">
+          <div class="rule__title">
+            <span class="dot dot--safe" aria-hidden="true"></span>{{ messages.status.label.Safe }}
+          </div>
+          <p class="rule__body">{{ messages.rules.safeBody }}</p>
+          <p class="rule__default">{{ messages.rules.defaultSelected }}</p>
+        </div>
+        <div class="rule">
+          <div class="rule__title">
+            <span class="dot dot--review" aria-hidden="true"></span>{{ messages.status.label.Review }}
+          </div>
+          <p class="rule__body">{{ messages.rules.reviewBody }}</p>
+          <p class="rule__default">{{ messages.rules.defaultUnselected }}</p>
+        </div>
+        <div class="rule">
+          <div class="rule__title">
+            <span class="dot dot--unsafe" aria-hidden="true"></span>{{ messages.status.label.Unsafe }}
+          </div>
+          <p class="rule__body">{{ messages.rules.unsafeBody }}</p>
+          <p class="rule__default">{{ messages.rules.defaultDisabled }}</p>
+        </div>
+      </div>
+      <p class="rules__foot">{{ messages.rules.footer }}</p>
+    </section>
 
     <!-- The two ways into the lists live here, at the bottom, not up in the header
          beside the title: the header scrolls away with the page, and the overview is

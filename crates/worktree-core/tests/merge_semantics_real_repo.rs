@@ -254,21 +254,24 @@ fn every_shape_of_merge_is_judged_against_the_remote() {
     );
 
     // 3. Applied then reverted: the patch-id still matches, which is exactly why
-    //    the patch answer alone is not enough.
+    //    the patch answer alone is not enough. The patch answer stays absorbed; the
+    //    content answer is a second reason at Review.
     let reverted = record(&snapshot, &fixture.reverted);
     assert_eq!(reverted.merged_into_default, Some(false));
     assert!(
-        !reverted.absorbed_into_default,
-        "a reverted change must not be called absorbed: {:?}",
+        reverted.absorbed_into_default,
+        "the patch-id is upstream; the content answer is separate: {:?}",
         codes_text(reverted)
     );
-    assert!(codes(reverted).contains(&"wt.unmerged"));
-    assert!(!codes(reverted).contains(&"wt.absorbed"));
-    let unmerged_evidence = evidence(reverted, ReasonCode::WtUnmerged);
+    assert!(codes(reverted).contains(&"wt.absorbed"));
+    assert!(codes(reverted).contains(&"wt.absorbed_content_changed"));
+    assert!(!codes(reverted).contains(&"wt.unmerged"));
+    assert_eq!(reverted.safety.status, SafetyStatus::Review);
+    let changed_evidence = evidence(reverted, ReasonCode::WtAbsorbedContentChanged);
     assert!(
-        unmerged_evidence.contains("equivalent patch")
-            && unmerged_evidence.contains("no longer match"),
-        "the evidence must show both halves: {unmerged_evidence}"
+        changed_evidence.contains("equivalent patch")
+            && changed_evidence.contains("changed after the merge"),
+        "the evidence must show both halves: {changed_evidence}"
     );
 
     // 4. Published but never applied: no patch upstream, no content either.
@@ -359,9 +362,16 @@ fn the_activity_window_does_not_hold_back_a_finished_branch() {
 
     let inside = record(&snapshot, &two_days);
     assert!(
-        codes(inside).contains(&"wt.recent_activity"),
-        "two days is inside the window: {:?}",
+        !codes(inside).contains(&"wt.recent_activity"),
+        "a clean, already-merged worktree is not downgraded for a recent commit: {:?}",
         codes_text(inside)
     );
-    assert_eq!(inside.safety.status, SafetyStatus::Review);
+    assert_eq!(inside.merged_into_default, Some(true));
+    assert_eq!(
+        inside.safety.status,
+        SafetyStatus::Safe,
+        "the timestamp stays visible, but the verdict does not move: {:?}",
+        codes_text(inside)
+    );
+    assert!(inside.last_updated_at.is_some());
 }

@@ -15,6 +15,7 @@
 // that such a page cannot load.
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { homeDir as resolveHomeDir } from "@tauri-apps/api/path";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -28,6 +29,7 @@ import type {
   ExecutionOutcome,
   HistoryEntry,
   ProjectSnapshot,
+  ResultEntry,
   ScanOptions
 } from "./types";
 
@@ -118,6 +120,20 @@ export async function executePlan(
   return invoke<ExecutionOutcome>("execute_plan", {
     request: { plan, snapshot, ...options }
   });
+}
+
+/**
+ * Listens for one per-item result while the executor is still running.
+ *
+ * The listener is advisory: the final `execute_plan` answer still carries every
+ * row, so a missed event changes an animation, not the result. The browser
+ * preview has no executor and returns `null`.
+ */
+export async function onExecutionProgress(
+  handler: (entry: ResultEntry) => void
+): Promise<(() => void) | null> {
+  if (!isDesktop()) return null;
+  return listen<ResultEntry>("cleanup-progress", (event) => handler(event.payload));
 }
 
 // ---- the audit log ----------------------------------------------------------

@@ -15,8 +15,6 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
-import AppIcon from "../components/AppIcon.vue";
-import EmptyState from "../components/EmptyState.vue";
 import { compareByActionability, compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, shortenPath } from "../format";
 import { messages } from "../i18n";
 
@@ -60,7 +58,7 @@ const groups = computed(() => {
       items,
       bytes: items.reduce((sum, a) => sum + (a.size_bytes ?? 0), 0),
       unknown: items.filter((a) => a.size_bytes === null).length,
-      selectable: items.filter((a) => a.safety.status === "Safe" && bundledOwner(a) === null).map((a) => a.path)
+      selectable: items.filter((a) => a.safety.status !== "Unsafe" && bundledOwner(a) === null).map((a) => a.path)
     };
   });
 });
@@ -103,29 +101,24 @@ function sizeText(item: ArtifactRecord): string {
 
 <template>
   <div class="stack page--wide">
-    <div class="page-head">
-      <div class="page-head__lead">
-        <span class="page-head__icon"><AppIcon name="artifacts" /></span>
-        <div class="page-head__text">
-          <h1>{{ messages.artifacts.title }}</h1>
-          <p class="page-head__sub">{{ messages.artifacts.caption }}</p>
-        </div>
-      </div>
+    <div class="spread">
+      <h1>{{ messages.artifacts.title }}</h1>
+      <span class="faint tiny">{{ " " + messages.artifacts.caption + " " }}</span>
     </div>
 
-    <div class="toolbar">
-      <div class="toolbar__group">
-        <div class="segmented">
-          <button :class="sortMode === 'size' ? 'is-active' : ''" @click="sortMode = 'size'">{{ messages.artifacts.bySize }}</button>
-          <button :class="sortMode === 'time' ? 'is-active' : ''" @click="sortMode = 'time'">{{ messages.artifacts.byLastActivity }}</button>
-        </div>
+    <p class="rules-summary"><strong>{{ messages.rules.shortLabel }}</strong>{{ messages.rules.artifactsSummary }}</p>
+
+    <div class="row-wrap">
+      <div class="segmented">
+        <button :class="sortMode === 'size' ? 'is-active' : ''" @click="sortMode = 'size'">{{ messages.artifacts.bySize }}</button>
+        <button :class="sortMode === 'time' ? 'is-active' : ''" @click="sortMode = 'time'">{{ messages.artifacts.byLastActivity }}</button>
       </div>
-      <div class="toolbar__group">
-        <span class="toolbar__meta nowrap">{{ messages.artifacts.showOnlyLargerThan }}</span>
+      <div class="row-wrap" style="flex: 1; min-width: 240px">
+        <span class="faint tiny nowrap">{{ messages.artifacts.showOnlyLargerThan }}</span>
         <input v-model.number="settings.min_artifact_mb" class="slider" type="range" min="0" max="500" step="10" style="max-width: 200px" />
-        <span class="toolbar__meta numeric nowrap">{{ settings.min_artifact_mb }} {{ messages.units.megabytes }}</span>
+        <span class="tiny numeric nowrap">{{ settings.min_artifact_mb }} {{ messages.units.megabytes }}</span>
       </div>
-      <span class="toolbar__meta toolbar__end">
+      <span class="faint tiny nowrap">
         {{ messages.artifacts.summary(visibleArtifacts.length, statusCount(visibleArtifacts, "Safe"), statusCount(visibleArtifacts, "Review"), statusCount(visibleArtifacts, "Unsafe")) }}
       </span>
     </div>
@@ -133,7 +126,7 @@ function sizeText(item: ArtifactRecord): string {
     <div v-for="group in groups" :key="group.key" class="card">
       <div class="group-head">
         <button class="btn btn--ghost" @click="toggleCollapsed(group.key)">
-          <AppIcon name="chevron" class="group-head__chevron" :class="{ 'is-open': !isCollapsed(group.key) }" />
+          <span>{{ isCollapsed(group.key) ? "▸" : "▾" }}</span>
           <span class="group-head__path">{{ group.label }}</span>
           <span class="faint tiny">{{ messages.artifacts.groupMeta(group.items.length, formatBytes(group.bytes, { approximate: group.unknown > 0 })) }}</span>
         </button>
@@ -204,7 +197,7 @@ function sizeText(item: ArtifactRecord): string {
     </div>
 
     <div v-if="groups.length === 0" class="card">
-      <EmptyState icon="artifacts" :text="messages.artifacts.empty" />
+      <div class="empty">{{ messages.artifacts.empty }}</div>
     </div>
 
     <div class="actionbar">

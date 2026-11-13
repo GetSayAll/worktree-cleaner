@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import {
   acknowledged,
   cleanupPlan,
@@ -7,9 +7,9 @@ import {
   executeCleanup,
   executeError,
   executing,
+  executionProgress,
   goTo,
   projectPath,
-  selectedArtifacts,
   selectedWorktrees,
   settings,
   snapshot
@@ -18,8 +18,6 @@ import { isDesktop } from "../platform";
 
 const desktop = isDesktop();
 import StatCard from "../components/StatCard.vue";
-import AppIcon from "../components/AppIcon.vue";
-import EmptyState from "../components/EmptyState.vue";
 import { basename, displayPath, formatBytes, formatCount, isAbsolutePath, normalizePathKey } from "../format";
 import { messages } from "../i18n";
 
@@ -39,32 +37,48 @@ const trashBytes = computed(() => ({
   unknown: independentMoves.value.filter((item) => item.size_bytes === null).length
 }));
 const forceItems = computed(() => plan.value.worktree_removals.filter((item) => item.force));
+const permanentRemovals = computed(
+  () => plan.value.worktree_removals.filter((item) => !item.command.startsWith("git worktree prune")).length
+);
+const worktreeStatus = computed(
+  () => new Map((snapshot.value?.worktrees ?? []).map((record) => [record.path, record.safety.status]))
+);
+const artifactStatus = computed(
+  () => new Map((snapshot.value?.artifacts ?? []).map((record) => [record.path, record.safety.status]))
+);
+
+type ProgressState = "" | "removed" | "kept";
+
+/** The live result for one row, while the executor is still working. */
+function progressState(path: string, prune = false): ProgressState {
+  const entry = executionProgress.value.find((item) =>
+    prune ? item.action === "prune" : item.target === path
+  );
+  if (!entry) return "";
+  return entry.result === "ok" ? "removed" : "kept";
+}
+
+// Follow the item that just reported. Without this the animation can run on a
+// row far outside the viewport, which tells the reader that something happened
+// but not what. `scrollIntoView` walks up to the pane that actually scrolls.
+watch(
+  () => executionProgress.value.length,
+  async () => {
+    const entry = executionProgress.value.at(-1);
+    if (!entry) return;
+    await nextTick();
+    const row =
+      entry.action === "prune"
+        ? document.querySelector("[data-plan-prune]")
+        : Array.from(document.querySelectorAll("[data-plan-target]")).find(
+            (element) => element.getAttribute("data-plan-target") === entry.target
+          );
+    row?.scrollIntoView({ block: "center" });
+  }
+);
 const needsAck = computed(() => plan.value.ack_reasons.length > 0);
 const needsName = computed(() => settings.require_project_name);
 const projectName = computed(() => basename(projectPath.value));
-
-/**
- * Selected items the executor will refuse.
- *
- * Only Safe items are ever removed (D3/D11). Review items stay selectable so a
- * reader can inspect them, but a plan that showed them as ordinary deletions
- * promised something the executor would not do. This count is the warning
- * between the selection and the result.
- */
-const reviewSelected = computed(() => {
-  const snap = snapshot.value;
-  if (!snap) return 0;
-  const worktrees = snap.worktrees.filter(
-    (item) => selectedWorktrees.value.includes(item.path) && item.safety.status === "Review"
-  ).length;
-  const artifacts = snap.artifacts.filter(
-    (item) =>
-      selectedArtifacts.value.includes(item.path) &&
-      item.safety.status === "Review" &&
-      (item.worktree_path === null || !selectedWorktrees.value.includes(item.worktree_path))
-  ).length;
-  return worktrees + artifacts;
-});
 
 /** Paths the plan is about to touch, used by the path precondition check. */
 const itemPaths = computed(() => [
@@ -144,26 +158,15 @@ async function copyPlan() {
 
 <template>
   <div class="stack page--wide">
-    <div class="page-head">
-      <div class="page-head__lead">
-        <span class="page-head__icon"><AppIcon name="plan" /></span>
-        <div class="page-head__text">
-          <h1>{{ messages.plan.title }}</h1>
-          <p class="page-head__sub">{{ messages.plan.lede }}</p>
-        </div>
+    <div class="spread">
+      <div>
+        <h1>{{ messages.plan.title }}</h1>
+        <p class="faint tiny">{{ messages.plan.lede }}</p>
       </div>
-      <div class="page-head__actions">
-        <button class="btn" @click="goTo('overview')">{{ messages.plan.backToAdjustSelection }}</button>
-      </div>
+      <button class="btn" :disabled="executing" @click="goTo('overview')">{{ messages.plan.backToAdjustSelection }}</button>
     </div>
 
-    <div v-if="reviewSelected > 0" class="banner banner--warn">
-      <AppIcon name="alert" class="banner__icon" />
-      <span>
-        <span class="banner__title">{{ messages.plan.reviewSelectedTitle }}</span>
-        {{ messages.plan.reviewSelectedBody(reviewSelected) }}
-      </span>
-    </div>
+    <p class="rules-summary"><strong>{{ messages.rules.shortLabel }}</strong>{{ messages.rules.planSummary }}</p>
 
     <div class="stat-grid stat-grid--4">
       <StatCard :label="messages.plan.stats.removeWorktree" :value="`${plan.worktree_removals.length}`" :sub="messages.plan.stats.removeWorktreeSub" />
@@ -188,7 +191,7 @@ async function copyPlan() {
     </div>
 
     <div v-for="blocker in plan.blockers" :key="blocker" class="banner banner--danger">
-      <AppIcon name="alert" class="banner__icon" />
+      <span>✕</span>
       <span><span class="banner__title">{{ messages.plan.blockerTitle }}</span>{{ blocker }}</span>
     </div>
 
@@ -200,13 +203,29 @@ async function copyPlan() {
       <div class="card__body">
         <div class="gate">
           <div v-for="gate in gates" :key="gate.label" class="gate__item">
-            <span class="gate__mark" :class="gate.pending ? '' : gate.ok ? 'gate__mark--ok' : 'gate__mark--bad'">
-              <AppIcon :name="gate.pending ? 'dash' : gate.ok ? 'check' : 'close'" />
-            </span>
+            <span class="gate__mark" :class="gate.pending ? '' : gate.ok ? 'gate__mark--ok' : 'gate__mark--bad'">{{ gate.pending ? "–" : gate.ok ? "✓" : "✕" }}</span>
             <span :class="gate.pending ? 'faint' : gate.ok ? 'muted' : ''">{{ gate.label }}</span>
           </div>
         </div>
       </div>
+    </div>
+
+    <div v-if="needsAck" class="card">
+      <div class="card__head"><h2>{{ messages.plan.confirmationTitle }}</h2></div>
+      <div class="card__body">
+        <div class="banner banner--warn">
+          <span>⚠</span>
+          <span class="stack stack--tight">
+            <span>{{ messages.plan.confirmationIntro }}</span>
+            <span v-for="reason in plan.ack_reasons" :key="reason" class="tiny">· {{ reason }}</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="permanentRemovals > 0" class="banner banner--warn">
+      <span>⚠</span>
+      <span>{{ messages.plan.permanenceNote }}</span>
     </div>
 
     <div class="card">
@@ -215,19 +234,26 @@ async function copyPlan() {
         <span class="faint tiny">{{ messages.plan.items(plan.worktree_removals.length) }}</span>
       </div>
       <div class="card__body">
-        <EmptyState v-if="plan.worktree_removals.length === 0" compact icon="branch" :text="messages.plan.noWorktrees" />
+        <div v-if="plan.worktree_removals.length === 0" class="faint tiny">{{ messages.plan.noWorktrees }}</div>
         <div class="stack stack--tight">
           <div
             v-for="item in plan.worktree_removals"
             :key="item.path"
             class="plan-item"
-            :class="item.force ? 'plan-item--force' : ''"
+            :class="{
+              'plan-item--force': item.force,
+              'is-removed': progressState(item.path, item.command.startsWith('git worktree prune')) === 'removed',
+              'is-kept': progressState(item.path, item.command.startsWith('git worktree prune')) === 'kept'
+            }"
+            :data-plan-target="item.command.startsWith('git worktree prune') ? undefined : item.path"
+            :data-plan-prune="item.command.startsWith('git worktree prune') ? 'true' : undefined"
           >
             <div class="plan-item__main">
               <div class="row-wrap">
                 <span class="mono">{{ displayPath(item.path, root) }}</span>
                 <span class="chip">{{ item.branch || messages.common.detached }}</span>
                 <span v-if="item.force" class="badge badge--review">{{ messages.plan.needForce }}</span>
+                <span v-else-if="worktreeStatus.get(item.path) === 'Review'" class="badge badge--review">{{ messages.plan.reviewItem }}</span>
                 <span v-else class="badge badge--safe">{{ messages.plan.removable }}</span>
               </div>
               <div class="code">{{ item.command }}</div>
@@ -266,10 +292,20 @@ async function copyPlan() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in plan.trash_moves" :key="item.path" :class="{ 'is-bundled': item.bundled_with_worktree !== null }">
+            <tr
+              v-for="item in plan.trash_moves"
+              :key="item.path"
+              :class="{
+                'is-bundled': item.bundled_with_worktree !== null,
+                'is-removed': progressState(item.path) === 'removed',
+                'is-kept': progressState(item.path) === 'kept'
+              }"
+              :data-plan-target="item.path"
+            >
               <td class="cell-directory">
                 <div class="row-wrap">
                   <span class="chip">{{ item.artifact_kind }}</span>
+                  <span v-if="artifactStatus.get(item.path) === 'Review'" class="badge badge--review">{{ messages.plan.reviewItem }}</span>
                   <span class="mono">{{ displayPath(item.path, root) }}</span>
                 </div>
               </td>
@@ -281,73 +317,73 @@ async function copyPlan() {
               </td>
             </tr>
             <tr v-if="plan.trash_moves.length === 0">
-              <td colspan="4"><EmptyState compact icon="artifacts" :text="messages.plan.noArtifacts" /></td>
+              <td colspan="4"><div class="empty">{{ messages.plan.noArtifacts }}</div></td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <div v-if="needsAck || needsName" class="card">
-      <div class="card__head"><h2>{{ messages.plan.confirmationTitle }}</h2></div>
-      <div class="card__body stack stack--tight">
-        <div v-if="needsAck" class="banner banner--warn">
-          <AppIcon name="alert" class="banner__icon" />
-          <span class="stack stack--tight">
-            <span>{{ messages.plan.confirmationIntro }}</span>
-            <span v-for="reason in plan.ack_reasons" :key="reason" class="tiny">· {{ reason }}</span>
-          </span>
-        </div>
-        <label v-if="needsAck" class="row-wrap" style="gap: 8px">
-          <input v-model="acknowledged" class="check" type="checkbox" />
-          <span>{{ messages.plan.ackConfirm(forceItems.length) }}</span>
-        </label>
-        <div v-if="needsName" class="field">
-          <label class="field__label">
-            {{ " " + messages.plan.typeNameBefore }} <span class="mono">{{ projectName }}</span> {{ messages.plan.typeNameAfter + " " }}
-          </label>
-          <input v-model="confirmText" class="input input--mono setting-row__control--narrow" style="max-width: 320px" />
-        </div>
-      </div>
-    </div>
-
     <div v-if="showExport" class="card">
       <div class="card__head">
         <h2>{{ messages.plan.exportTitle }}</h2>
-        <button class="btn btn--ghost" @click="copyPlan">{{ copied ? messages.common.copied : messages.plan.copy }}</button>
+        <button class="btn btn--ghost" :disabled="executing" @click="copyPlan">{{ copied ? messages.common.copied : messages.plan.copy }}</button>
       </div>
       <div class="card__body">
         <pre class="code">{{ planJson }}</pre>
       </div>
     </div>
 
-    <div class="actionbar">
-      <div class="actionbar__side">
-        <button class="btn" data-nav-back="artifacts" @click="goTo('artifacts')">
-          {{ messages.plan.backToAdjust }}
-        </button>
+    <div class="actionbar actionbar--plan">
+      <div v-if="hasPlanItems" class="actionbar__recheck">
+        <span aria-hidden="true">⚠</span>
+        <span>{{ messages.plan.checks.recheckNotice }}</span>
       </div>
-      <span class="actionbar__summary faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
-      <div class="actionbar__side" style="margin-left: auto">
-        <!-- Same height as the button beside it: two buttons of different sizes in
-             one row do not read as a pair, and the taller one sets the row height so
-             the shorter one floats. -->
-        <button class="btn btn--lg" @click="showExport = !showExport">
-          {{ showExport ? messages.plan.hideExport : messages.plan.exportPlan }}
-        </button>
-        <button
-          class="btn btn--danger btn--lg"
-          :class="executing ? 'is-busy' : ''"
-          data-action="run-cleanup"
-          :disabled="!canExecute || executing || !desktop"
-          @click="executeCleanup"
-        >
-          <!-- A spinner, because a button that reads "running" and then does nothing
-               for a few seconds is indistinguishable from a hung app. The executor
-               works through the plan item by item, so the wait is real. -->
-          <span v-if="executing" class="spinner" aria-hidden="true"></span>
-          {{ executing ? messages.plan.running : messages.plan.runCleanup }}
-        </button>
+      <div v-if="needsAck || needsName" class="actionbar__confirm">
+        <label v-if="needsAck" class="confirm">
+          <input v-model="acknowledged" class="check check--confirm" type="checkbox" :disabled="executing" />
+          <span class="confirm__body">
+            <span class="confirm__eyebrow">{{ acknowledged ? messages.plan.confirmed : messages.plan.confirmRequired }}</span>
+            <span class="confirm__text">{{ messages.plan.ackConfirm(forceItems.length) }}</span>
+            <span v-if="!acknowledged" class="confirm__hint">{{ messages.plan.confirmHint }}</span>
+          </span>
+        </label>
+        <div v-if="needsName" class="row-wrap" style="gap: 8px">
+          <span class="field__label">
+            {{ " " + messages.plan.typeNameBefore }} <span class="mono">{{ projectName }}</span> {{ messages.plan.typeNameAfter + " " }}
+          </span>
+          <input v-model="confirmText" class="input input--mono" style="max-width: 240px" :disabled="executing" />
+        </div>
+        <p class="confirm__rules">{{ messages.plan.confirmRules }}</p>
+      </div>
+      <div class="actionbar__row">
+        <div class="actionbar__side">
+          <button class="btn" data-nav-back="artifacts" :disabled="executing" @click="goTo('artifacts')">
+            {{ messages.plan.backToAdjust }}
+          </button>
+        </div>
+        <span class="actionbar__summary faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
+        <div class="actionbar__side" style="margin-left: auto">
+          <!-- Same height as the button beside it: two buttons of different sizes in
+               one row do not read as a pair, and the taller one sets the row height so
+               the shorter one floats. -->
+          <button class="btn btn--lg" :disabled="executing" @click="showExport = !showExport">
+            {{ showExport ? messages.plan.hideExport : messages.plan.exportPlan }}
+          </button>
+          <button
+            class="btn btn--danger btn--lg"
+            :class="executing ? 'is-busy' : ''"
+            data-action="run-cleanup"
+            :disabled="!canExecute || executing || !desktop"
+            @click="executeCleanup"
+          >
+            <!-- A spinner, because a button that reads "running" and then does nothing
+                 for a few seconds is indistinguishable from a hung app. The executor
+                 works through the plan item by item, so the wait is real. -->
+            <span v-if="executing" class="spinner" aria-hidden="true"></span>
+            {{ executing ? messages.plan.running : messages.plan.runCleanup }}
+          </button>
+        </div>
       </div>
     </div>
 

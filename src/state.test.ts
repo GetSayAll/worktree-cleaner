@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { mockRoot, mockSnapshot } from "./mock/snapshot";
 import { assess } from "./types";
-import type { ExecutionOutcome } from "./types";
+import type { ExecutionOutcome, ResultEntry } from "./types";
 import { basename, formatBytes, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
 import { messages } from "./i18n";
 import { primaryReason } from "./state";
@@ -28,10 +28,12 @@ async function freshStateWithExecutor(
   state: typeof import("./state");
   plans: unknown[];
   logActivity: ReturnType<typeof vi.fn>;
+  progressHandlers: Array<(entry: ResultEntry) => void>;
 }> {
   vi.resetModules();
   const plans: unknown[] = [];
   const logActivity = vi.fn(async () => undefined);
+  const progressHandlers: Array<(entry: ResultEntry) => void> = [];
   vi.doMock("./platform", () => ({
     isDesktop: () => true,
     // The message tables resolve their platform wording through this, so a mock
@@ -47,10 +49,14 @@ async function freshStateWithExecutor(
     // The activity log is written fire-and-forget, so a mock that collects it is
     // enough to prove the calls happen without turning every test into a file.
     logActivity,
+    onExecutionProgress: async (handler: (entry: ResultEntry) => void) => {
+      progressHandlers.push(handler);
+      return () => {};
+    },
     readActivity: async () => []
   }));
   const state = await import("./state");
-  return { state, plans, logActivity };
+  return { state, plans, logActivity, progressHandlers };
 }
 
 /** Undoes `freshStateWithExecutor` so the next test sees the real boundary. */
@@ -442,6 +448,120 @@ describe("an unmeasurable size travels as unknown", () => {
   });
 });
 
+describe("the snapshot follows the executor", () => {
+  it("drops removed worktrees and artifacts and clears the stale selection", async () => {
+    // The scan is a photograph; the executor's answer is what actually left. The
+    // sidebar counted the old photograph forever because nothing applied the
+    // answer to it. Removed worktrees, independently trashed artifacts, and the
+    // artifacts bundled with a removed worktree all disappear; a skipped artifact
+    // stays, and the selection does not keep pointing at rows that are gone.
+    const { state } = await freshStateWithExecutor({
+      entries: [
+        {
+          action: "worktree-remove",
+          target: codex,
+          result: "ok",
+          detail_code: "worktree.removed",
+          detail_args: {},
+          detail: null,
+          size_bytes: 1
+        },
+        {
+          action: "trash-move",
+          target: dist,
+          result: "ok",
+          detail_code: "artifact.trashed",
+          detail_args: {},
+          detail: null,
+          size_bytes: 2
+        },
+        {
+          action: "trash-move",
+          target: venv,
+          result: "skipped",
+          detail_code: "artifact.no_longer_safe",
+          detail_args: { reason: "af.recent_activity" },
+          detail: null,
+          size_bytes: 3
+        }
+      ],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.selectedWorktrees.value = [codex];
+    state.selectedArtifacts.value = [dist, venv];
+    await state.executeCleanup();
+    unmockPlatform();
+
+    expect(state.snapshot.value?.worktrees.some((record) => record.path === codex)).toBe(false);
+    expect(state.snapshot.value?.artifacts.some((record) => record.path === dist)).toBe(false);
+    expect(state.snapshot.value?.artifacts.some((record) => record.path === `${codex}/target`)).toBe(false);
+    expect(state.snapshot.value?.artifacts.some((record) => record.path === venv)).toBe(true);
+    expect(state.selectedWorktrees.value).toEqual([]);
+    expect(state.selectedArtifacts.value).toEqual([]);
+    expect(state.cleanupPlan.value.worktree_removals).toHaveLength(0);
+    expect(state.cleanupPlan.value.trash_moves).toHaveLength(0);
+  });
+
+  it("collects per-item results while the run is still open", async () => {
+    const entry: ResultEntry = {
+      action: "trash-move",
+      target: dist,
+      result: "ok",
+      detail_code: "artifact.trashed",
+      detail_args: {},
+      detail: null,
+      size_bytes: 1
+    };
+    const { state, progressHandlers } = await freshStateWithExecutor({
+      entries: [entry],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.selectedArtifacts.value = [dist];
+
+    const run = state.executeCleanup();
+    // The listener is registered before the IPC call; the test hands it the
+    // same entry the executor later returns.
+    progressHandlers[0]?.(entry);
+    expect(state.executionProgress.value).toEqual([entry]);
+    await run;
+    unmockPlatform();
+    expect(state.lastResult.value).toEqual([entry]);
+  });
+
+  it("a prune removes the prunable worktree, not the repository root", async () => {
+    // The `prune` entry names the repository because that is where the command
+    // runs. Using that target as the removed path would delete the main worktree
+    // from the screenshot; the plan's prune item carries the actual path.
+    const { state } = await freshStateWithExecutor({
+      entries: [
+        {
+          action: "prune",
+          target: mockRoot,
+          result: "ok",
+          detail_code: "worktree.pruned",
+          detail_args: {},
+          detail: null,
+          size_bytes: null
+        }
+      ],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.selectedWorktrees.value = [gone];
+    state.selectedArtifacts.value = [];
+    await state.executeCleanup();
+    unmockPlatform();
+
+    expect(state.snapshot.value?.worktrees.some((record) => record.path === gone)).toBe(false);
+    expect(state.snapshot.value?.worktrees.some((record) => record.path === mockRoot)).toBe(true);
+  });
+});
+
 describe("the activity log", () => {
   it("records what the reader confirmed, not what happened afterwards", async () => {
     // The deletions are already in the operation log. This line is the other
@@ -597,6 +717,31 @@ describe("primaryReason", () => {
       { code: "wt.locked", severity: "Unsafe", text: "locked", evidence: "porcelain marks it locked" }
     ]);
     expect(primary?.code).toBe("wt.locked");
+  });
+});
+
+describe("the execution lock", () => {
+  it("refuses navigation, a reset, and a new scan while cleanup is running", async () => {
+    // Navigation is disabled in the shell, but the guard also lives here: a
+    // disabled button is a visual state, not a security boundary, and a second
+    // scan or a project switch during `execute_plan` would race the deletions.
+    const state = await freshState();
+    state.snapshot.value = mockSnapshot;
+    state.executing.value = true;
+
+    state.goTo("overview");
+    expect(state.view.value, "navigation is ignored").toBe("welcome");
+
+    state.resetToWelcome();
+    expect(state.snapshot.value, "the snapshot is still there").toEqual(mockSnapshot);
+
+    await state.startScan("/tmp/another-project");
+    expect(state.projectPath.value, "no second scan starts").toBe("");
+    expect(state.scanState.running).toBe(false);
+
+    state.executing.value = false;
+    state.goTo("overview");
+    expect(state.view.value, "navigation resumes when execution ends").toBe("overview");
   });
 });
 

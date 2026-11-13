@@ -30,8 +30,8 @@ use crate::path::{validate_path_for_deletion, DeletionContext};
 use crate::reason::{ReasonCode, SafetyStatus};
 use crate::worktree::{check_worktree, WorktreeCheckOptions};
 use crate::{
-    ArtifactRecord, CleanupPlan, DetailArg, DetailCode, ExecutionResult, HistoryAction,
-    HistoryEntry, ProjectSnapshot, ResultEntry, TrashMoveItem, WorktreeRecord, WorktreeRemovalItem,
+    CleanupPlan, DetailArg, DetailCode, ExecutionResult, HistoryAction, HistoryEntry,
+    ProjectSnapshot, ResultEntry, WorktreeRecord,
 };
 
 /// Injection points for one execution run.
@@ -93,14 +93,30 @@ pub fn execute_plan(
     snapshot: &ProjectSnapshot,
     opts: &ExecuteOptions,
 ) -> ExecutionOutcome {
-    let runner = ProcessGitRunner::new(opts.git_timeout);
+    execute_plan_with_progress(plan, snapshot, opts, |_| {})
+}
 
+/// Runs a plan and reports each item as soon as its result is known.
+///
+/// The executor is serial (D14), so one callback per item is enough to drive a
+/// live list. The full [`ExecutionOutcome`] remains the authority; a consumer
+/// that misses an event still gets every row when the call returns.
+pub fn execute_plan_with_progress<F>(
+    plan: &CleanupPlan,
+    snapshot: &ProjectSnapshot,
+    opts: &ExecuteOptions,
+    mut on_entry: F,
+) -> ExecutionOutcome
+where
+    F: FnMut(&ResultEntry),
+{
+    let runner = ProcessGitRunner::new(opts.git_timeout);
     let whitelist: Vec<PathBuf> = opts
         .whitelist
         .iter()
         .map(|rule| crate::path::expand_tilde(rule))
         .collect();
-    let mut audit = Audit::new();
+    let mut audit = Audit::with_observer(&mut on_entry);
     let mut any_worktree_removed = false;
     // The worktrees this run actually removed, so a bundled artifact can be reported
     // against a fact rather than against a claim in the plan. Without it, a plan that
@@ -112,22 +128,100 @@ pub fn execute_plan(
     // ---- Channel A: worktrees ----
     for item in &plan.worktree_removals {
         let target = item.path.as_str();
-        let record = match check_worktree_item(item, snapshot, opts, &runner, &whitelist) {
-            Ok(record) => record,
-            Err(skip) => {
-                push(
-                    &mut audit,
-                    HistoryAction::WorktreeRemove,
-                    target,
-                    ExecutionResult::Skipped,
-                    skip.detail,
-                    &skip.args,
-                    skip.size_bytes,
-                    skip.reason,
-                );
-                continue;
-            }
+        let Some(record) = snapshot.worktrees.iter().find(|w| w.path == item.path) else {
+            push(
+                &mut audit,
+                HistoryAction::WorktreeRemove,
+                target,
+                ExecutionResult::Skipped,
+                DetailCode::WorktreeNotInScan,
+                &[],
+                None,
+                None,
+            );
+            continue;
         };
+
+        // ---- path re-validation (D10) ----
+        let parent = Path::new(&record.path)
+            .parent()
+            .map_or_else(|| PathBuf::from(&snapshot.root), Path::to_path_buf);
+        let context = DeletionContext::new(parent).with_whitelist(whitelist.clone());
+        if validate_path_for_deletion(Path::new(&record.path), &context).is_err() {
+            push(
+                &mut audit,
+                HistoryAction::WorktreeRemove,
+                target,
+                ExecutionResult::Skipped,
+                DetailCode::PreconditionFailed,
+                &[],
+                record.size_bytes,
+                primary_reason(record),
+            );
+            continue;
+        }
+
+        // ---- identity and activity re-check (D11) ----
+        let rechecked = check_worktree(
+            &runner,
+            Path::new(&snapshot.root),
+            &worktree_entry_for(record),
+            record.is_main,
+            &WorktreeCheckOptions {
+                default_branch: snapshot.default_branch.clone(),
+                recent_activity_days: opts.recent_activity_days,
+                untracked_as_unsafe: opts.untracked_as_unsafe,
+                whitelist: whitelist.clone(),
+                now: opts.now,
+                size_bytes: record.size_bytes,
+                // Carried over rather than re-measured: the count is a repository-wide
+                // fact and no longer feeds the verdict, so re-reading it here would only
+                // invent a difference for a field the decision does not use.
+                repository_stash_count: Some(record.stash_count),
+                credential_scan_timeout: Duration::from_secs(5),
+            },
+        );
+        if let Some(change) = worktree_change(record, &rechecked) {
+            push(
+                &mut audit,
+                HistoryAction::WorktreeRemove,
+                target,
+                ExecutionResult::Skipped,
+                DetailCode::WorktreeChanged,
+                &[
+                    ("field", DetailArg::Text(change.field.to_string())),
+                    ("before", change.before),
+                    ("after", change.after),
+                ],
+                record.size_bytes,
+                primary_reason(record),
+            );
+            continue;
+        }
+        // A plan carries the items the reader explicitly selected. A Safe item
+        // runs while the re-check still says Safe. A Review item runs only
+        // because the reader selected it, and only while the re-check still says
+        // Review; an Unsafe item never runs. This is what makes the Review level
+        // a confirmation instead of a dead end. Any change in the level or in a
+        // decision-relevant field was already caught above.
+        if !runs_at_planned_level(record.safety.status, rechecked.safety.status) {
+            push(
+                &mut audit,
+                HistoryAction::WorktreeRemove,
+                target,
+                ExecutionResult::Skipped,
+                DetailCode::WorktreeNoLongerSafe,
+                &[(
+                    "reason",
+                    primary_reason(&rechecked).map_or(DetailArg::Unknown, |code| {
+                        DetailArg::Text(code.as_str().to_string())
+                    }),
+                )],
+                record.size_bytes,
+                primary_reason(record),
+            );
+            continue;
+        }
 
         // ---- execute ----
         if record.is_prunable {
@@ -237,22 +331,152 @@ pub fn execute_plan(
             continue;
         }
 
-        let record = match check_artifact_item(item, snapshot, opts, &runner, &whitelist) {
-            Ok(record) => record,
-            Err(skip) => {
+        let Some(record) = snapshot.artifacts.iter().find(|a| a.path == item.path) else {
+            push(
+                &mut audit,
+                HistoryAction::TrashMove,
+                target,
+                ExecutionResult::Skipped,
+                DetailCode::ArtifactNotInScan,
+                &[],
+                None,
+                None,
+            );
+            continue;
+        };
+
+        let context = DeletionContext::new(PathBuf::from(&record.project_root))
+            .with_whitelist(whitelist.clone());
+        if validate_path_for_deletion(Path::new(&record.path), &context).is_err() {
+            push(
+                &mut audit,
+                HistoryAction::TrashMove,
+                target,
+                ExecutionResult::Skipped,
+                DetailCode::PreconditionFailed,
+                &[],
+                record.size_bytes,
+                primary_reason_artifact(record),
+            );
+            continue;
+        }
+
+        // ---- re-check the artifact decision (D11) ----
+        let Some(spec) = lookup_kind(
+            Path::new(&record.path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default(),
+        ) else {
+            push(
+                &mut audit,
+                HistoryAction::TrashMove,
+                target,
+                ExecutionResult::Skipped,
+                DetailCode::ArtifactNotAKnownKind,
+                &[],
+                record.size_bytes,
+                primary_reason_artifact(record),
+            );
+            continue;
+        };
+        // ---- re-check, and say which of four things happened ----
+        //
+        // "Gone", "cannot be read", "changed" and "no longer safe" all used to
+        // report "changed since the plan was generated". They are one answer for
+        // four situations, and the first two were not even true: a failed
+        // `read_dir` came back from the size walk as zero bytes, the size was part
+        // of the comparison, and a run that recorded 80703 files re-read 0 told
+        // the reader they had changed something they had not touched.
+        //
+        // `symlink_metadata` rather than `exists()`, because `exists()` cannot
+        // tell a missing directory from an unreadable one — the same EACCES /
+        // NotFound conflation that `worktree.rs` already had to fix.
+        match std::fs::symlink_metadata(&record.path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 push(
                     &mut audit,
                     HistoryAction::TrashMove,
                     target,
                     ExecutionResult::Skipped,
-                    skip.detail,
-                    &skip.args,
-                    skip.size_bytes,
-                    skip.reason,
+                    DetailCode::ArtifactVanished,
+                    &[],
+                    record.size_bytes,
+                    primary_reason_artifact(record),
                 );
                 continue;
             }
-        };
+            Err(_) => {
+                push(
+                    &mut audit,
+                    HistoryAction::TrashMove,
+                    target,
+                    ExecutionResult::Skipped,
+                    DetailCode::ArtifactUnmeasurable,
+                    &[],
+                    record.size_bytes,
+                    primary_reason_artifact(record),
+                );
+                continue;
+            }
+            Ok(_) => {}
+        }
+
+        let (rechecked, _notes) = check_artifact(
+            &runner,
+            Path::new(&record.project_root),
+            Path::new(&record.path),
+            spec,
+            &ArtifactScanOptions {
+                max_depth: 1,
+                per_dir_timeout: opts.per_dir_timeout,
+                recent_activity_days: opts.recent_activity_days,
+                whitelist: whitelist.clone(),
+                now: opts.now,
+                budget_deadline: None,
+                credential_budget: None,
+            },
+        );
+        if let Some(change) = artifact_change(record, &rechecked) {
+            push(
+                &mut audit,
+                HistoryAction::TrashMove,
+                target,
+                ExecutionResult::Skipped,
+                DetailCode::ArtifactChanged,
+                &[
+                    ("field", DetailArg::Text(change.field.to_string())),
+                    ("before", change.before),
+                    ("after", change.after),
+                ],
+                record.size_bytes,
+                primary_reason_artifact(record),
+            );
+            continue;
+        }
+        // Same rule as Channel A: a Review artifact is executable only because
+        // the reader selected it, and only while the re-check still says Review.
+        // The level and the decision-relevant fields were compared above; this
+        // gate is what previously turned every explicitly selected Review item
+        // into a silent skip.
+        if !runs_at_planned_level(record.safety.status, rechecked.safety.status) {
+            push(
+                &mut audit,
+                HistoryAction::TrashMove,
+                target,
+                ExecutionResult::Skipped,
+                DetailCode::ArtifactNoLongerSafe,
+                &[(
+                    "reason",
+                    primary_reason_artifact(&rechecked).map_or(DetailArg::Unknown, |code| {
+                        DetailArg::Text(code.as_str().to_string())
+                    }),
+                )],
+                record.size_bytes,
+                primary_reason_artifact(record),
+            );
+            continue;
+        }
 
         // ---- execute ----
         match move_to_trash(&record.path) {
@@ -346,16 +570,29 @@ fn move_to_trash(path: &str) -> Result<(), trash::Error> {
 /// Every action produces exactly one of each, and writing them through one
 /// place is what stops the two from drifting apart: the line the user reads in
 /// the result view and the line the audit log keeps come from the same call.
-struct Audit {
+struct Audit<'a> {
     entries: Vec<ResultEntry>,
     history: Vec<HistoryEntry>,
+    observer: Option<&'a mut dyn FnMut(&ResultEntry)>,
 }
 
-impl Audit {
+impl Audit<'_> {
+    #[cfg(test)]
     const fn new() -> Self {
         Self {
             entries: Vec::new(),
             history: Vec::new(),
+            observer: None,
+        }
+    }
+}
+
+impl<'a> Audit<'a> {
+    fn with_observer(observer: &'a mut dyn FnMut(&ResultEntry)) -> Self {
+        Self {
+            entries: Vec::new(),
+            history: Vec::new(),
+            observer: Some(observer),
         }
     }
 }
@@ -375,7 +612,7 @@ fn push(
         .iter()
         .map(|(name, value)| ((*name).to_string(), value.clone()))
         .collect();
-    audit.entries.push(ResultEntry {
+    let entry = ResultEntry {
         action,
         target: target.to_string(),
         result,
@@ -383,7 +620,8 @@ fn push(
         detail_args: detail_args.clone(),
         detail: None,
         size_bytes,
-    });
+    };
+    audit.entries.push(entry.clone());
     audit.history.push(HistoryEntry {
         at: crate::timefmt::format_rfc3339(SystemTime::now()),
         action,
@@ -396,220 +634,9 @@ fn push(
         detail_args,
         detail: None,
     });
-}
-
-/// Marks a plan item the executor would skip.
-///
-/// The same struct feeds the skip decision and the execution log. Keeping one
-/// answer for "why would this not run?" is what stops the reason shown in the
-/// result from drifting from the reason the executor acted on.
-struct PlanCheckSkip {
-    detail: DetailCode,
-    args: Vec<(&'static str, DetailArg)>,
-    /// The record's most severe reason, for the execution log's `reason` column.
-    reason: Option<ReasonCode>,
-    size_bytes: Option<u64>,
-}
-
-fn changed_args(change: &FieldChange) -> Vec<(&'static str, DetailArg)> {
-    vec![
-        ("field", DetailArg::Text(change.field.to_string())),
-        ("before", change.before.clone()),
-        ("after", change.after.clone()),
-    ]
-}
-
-fn reason_args(reason: Option<ReasonCode>) -> Vec<(&'static str, DetailArg)> {
-    vec![(
-        "reason",
-        reason.map_or(DetailArg::Unknown, |code| {
-            DetailArg::Text(code.as_str().to_string())
-        }),
-    )]
-}
-
-/// The worktree checks the executor runs before a removal.
-///
-/// D10's path validation, D11's identity/activity comparison, and the "only Safe
-/// runs" rule are one sequence. Splitting them between two functions is how the
-/// plan and the executor would end up disagreeing about what "will run" means.
-fn check_worktree_item<'a>(
-    item: &WorktreeRemovalItem,
-    snapshot: &'a ProjectSnapshot,
-    opts: &ExecuteOptions,
-    runner: &ProcessGitRunner,
-    whitelist: &[PathBuf],
-) -> Result<&'a WorktreeRecord, PlanCheckSkip> {
-    let Some(record) = snapshot.worktrees.iter().find(|w| w.path == item.path) else {
-        return Err(PlanCheckSkip {
-            detail: DetailCode::WorktreeNotInScan,
-            args: Vec::new(),
-            reason: None,
-            size_bytes: None,
-        });
-    };
-
-    // ---- path re-validation (D10) ----
-    let parent = Path::new(&record.path)
-        .parent()
-        .map_or_else(|| PathBuf::from(&snapshot.root), Path::to_path_buf);
-    let context = DeletionContext::new(parent).with_whitelist(whitelist.to_vec());
-    if validate_path_for_deletion(Path::new(&record.path), &context).is_err() {
-        return Err(PlanCheckSkip {
-            detail: DetailCode::PreconditionFailed,
-            args: Vec::new(),
-            reason: primary_reason(record),
-            size_bytes: record.size_bytes,
-        });
+    if let Some(observer) = audit.observer.as_mut() {
+        observer(&entry);
     }
-
-    // ---- identity and activity re-check (D11) ----
-    let rechecked = check_worktree(
-        runner,
-        Path::new(&snapshot.root),
-        &worktree_entry_for(record),
-        record.is_main,
-        &WorktreeCheckOptions {
-            default_branch: snapshot.default_branch.clone(),
-            recent_activity_days: opts.recent_activity_days,
-            untracked_as_unsafe: opts.untracked_as_unsafe,
-            whitelist: whitelist.to_vec(),
-            now: opts.now,
-            size_bytes: record.size_bytes,
-            // Carried over rather than re-measured: the count is a repository-wide
-            // fact and no longer feeds the verdict, so re-reading it here would only
-            // invent a difference for a field the decision does not use.
-            repository_stash_count: Some(record.stash_count),
-        },
-    );
-    if let Some(change) = worktree_change(record, &rechecked) {
-        return Err(PlanCheckSkip {
-            detail: DetailCode::WorktreeChanged,
-            args: changed_args(&change),
-            reason: primary_reason(record),
-            size_bytes: record.size_bytes,
-        });
-    }
-    // A plan carries only Safe items; if the re-check says anything else, the
-    // plan is stale in a way the identity above did not catch, and it must not
-    // run. The executor reports it as skipped.
-    if rechecked.safety.status != SafetyStatus::Safe {
-        return Err(PlanCheckSkip {
-            detail: DetailCode::WorktreeNoLongerSafe,
-            args: reason_args(primary_reason(&rechecked)),
-            reason: primary_reason(record),
-            size_bytes: record.size_bytes,
-        });
-    }
-
-    Ok(record)
-}
-
-/// The artifact checks the executor runs before a Trash move.
-fn check_artifact_item<'a>(
-    item: &TrashMoveItem,
-    snapshot: &'a ProjectSnapshot,
-    opts: &ExecuteOptions,
-    runner: &ProcessGitRunner,
-    whitelist: &[PathBuf],
-) -> Result<&'a ArtifactRecord, PlanCheckSkip> {
-    let Some(record) = snapshot.artifacts.iter().find(|a| a.path == item.path) else {
-        return Err(PlanCheckSkip {
-            detail: DetailCode::ArtifactNotInScan,
-            args: Vec::new(),
-            reason: None,
-            size_bytes: None,
-        });
-    };
-
-    let context = DeletionContext::new(PathBuf::from(&record.project_root))
-        .with_whitelist(whitelist.to_vec());
-    if validate_path_for_deletion(Path::new(&record.path), &context).is_err() {
-        return Err(PlanCheckSkip {
-            detail: DetailCode::PreconditionFailed,
-            args: Vec::new(),
-            reason: primary_reason_artifact(record),
-            size_bytes: record.size_bytes,
-        });
-    }
-
-    // ---- re-check the artifact decision (D11) ----
-    let Some(spec) = lookup_kind(
-        Path::new(&record.path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default(),
-    ) else {
-        return Err(PlanCheckSkip {
-            detail: DetailCode::ArtifactNotAKnownKind,
-            args: Vec::new(),
-            reason: primary_reason_artifact(record),
-            size_bytes: record.size_bytes,
-        });
-    };
-    // "Gone", "cannot be read", "changed" and "no longer safe" all used to report
-    // "changed since the plan was generated". They are one answer for four
-    // situations, and the first two were not even true: a failed `read_dir` came
-    // back from the size walk as zero bytes, the size was part of the comparison,
-    // and a run that recorded 80703 files re-read 0 told the reader they had
-    // changed something they had not touched.
-    //
-    // `symlink_metadata` rather than `exists()`, because `exists()` cannot tell a
-    // missing directory from an unreadable one — the same EACCES / NotFound
-    // conflation that `worktree.rs` already had to fix.
-    match std::fs::symlink_metadata(&record.path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(PlanCheckSkip {
-                detail: DetailCode::ArtifactVanished,
-                args: Vec::new(),
-                reason: primary_reason_artifact(record),
-                size_bytes: record.size_bytes,
-            });
-        }
-        Err(_) => {
-            return Err(PlanCheckSkip {
-                detail: DetailCode::ArtifactUnmeasurable,
-                args: Vec::new(),
-                reason: primary_reason_artifact(record),
-                size_bytes: record.size_bytes,
-            });
-        }
-        Ok(_) => {}
-    }
-
-    let (rechecked, _notes) = check_artifact(
-        runner,
-        Path::new(&record.project_root),
-        Path::new(&record.path),
-        spec,
-        &ArtifactScanOptions {
-            max_depth: 1,
-            per_dir_timeout: opts.per_dir_timeout,
-            recent_activity_days: opts.recent_activity_days,
-            whitelist: whitelist.to_vec(),
-            now: opts.now,
-            budget_deadline: None,
-            credential_budget: None,
-        },
-    );
-    if let Some(change) = artifact_change(record, &rechecked) {
-        return Err(PlanCheckSkip {
-            detail: DetailCode::ArtifactChanged,
-            args: changed_args(&change),
-            reason: primary_reason_artifact(record),
-            size_bytes: record.size_bytes,
-        });
-    }
-    if rechecked.safety.status != SafetyStatus::Safe {
-        return Err(PlanCheckSkip {
-            detail: DetailCode::ArtifactNoLongerSafe,
-            args: reason_args(primary_reason_artifact(&rechecked)),
-            reason: primary_reason_artifact(record),
-            size_bytes: record.size_bytes,
-        });
-    }
-
-    Ok(record)
 }
 
 /// One decision-relevant field that no longer matches the plan.
@@ -630,6 +657,20 @@ fn bytes_or_unknown(bytes: Option<u64>) -> DetailArg {
 
 fn flag_or_unknown(value: Option<bool>) -> DetailArg {
     value.map_or(DetailArg::Unknown, DetailArg::Flag)
+}
+
+/// Whether the re-check still permits the item at the level the reader planned.
+///
+/// `Safe` runs only while it is still `Safe`. `Review` is the level the product
+/// plan describes as "needs confirmation": the reader confirms it by selecting it
+/// for the plan, so it runs only while it is still `Review`. `Unsafe` never runs.
+/// A change to another level is already reported by `worktree_change` /
+/// `artifact_change`; this gate is the second half of that rule.
+const fn runs_at_planned_level(before: SafetyStatus, after: SafetyStatus) -> bool {
+    matches!(
+        (before, after),
+        (SafetyStatus::Safe, SafetyStatus::Safe) | (SafetyStatus::Review, SafetyStatus::Review)
+    )
 }
 
 /// The decision-relevant fields of a worktree, compared one at a time.
@@ -940,6 +981,30 @@ mod tests {
     // ---- plan / snapshot agreement -----------------------------------------
 
     #[test]
+    fn progress_reports_every_entry_once_in_execution_order() {
+        // The UI listens to this callback to animate each row while the run is
+        // still going. It must see every entry the final outcome contains, in
+        // the same order, even when the item is skipped before any file is
+        // touched.
+        let snapshot = snapshot_with("/repo", Vec::new(), Vec::new());
+        let mut plan = plan_with_worktree("/repo/missing-worktree");
+        plan.trash_moves = plan_with_trash_move("/repo/missing-artifact", None).trash_moves;
+
+        let mut seen: Vec<(HistoryAction, String, ExecutionResult)> = Vec::new();
+        let outcome = execute_plan_with_progress(&plan, &snapshot, &execute_options(), |entry| {
+            seen.push((entry.action, entry.target.clone(), entry.result));
+        });
+
+        let expected: Vec<_> = outcome
+            .entries
+            .iter()
+            .map(|entry| (entry.action, entry.target.clone(), entry.result))
+            .collect();
+        assert_eq!(seen, expected);
+        assert_eq!(seen.len(), 2);
+    }
+
+    #[test]
     fn a_worktree_missing_from_the_snapshot_is_skipped() {
         // A plan that arrives without its "before" is refused rather than
         // executed blind (D11): the snapshot is the re-check baseline.
@@ -1029,10 +1094,9 @@ mod tests {
     }
 
     #[test]
-    fn an_artifact_whose_name_is_not_a_known_kind_refuses_the_run() {
+    fn an_artifact_whose_name_is_not_a_known_kind_is_skipped() {
         // The plan says `dist`; the directory on disk is no longer one of the
-        // known artifact names. The re-check refuses it, and one of one items is
-        // a 100% difference: nothing runs.
+        // known artifact names. The re-check refuses it before any deletion.
         let dir = tempfile::TempDir::new().expect("temp dir");
         let root = dir.path().join("repo");
         let target = root.join("not-a-known-artifact");
@@ -1057,6 +1121,30 @@ mod tests {
     }
 
     // ---- identity ----------------------------------------------------------
+
+    #[test]
+    fn a_review_item_runs_only_because_the_reader_selected_it_and_only_while_it_stays_review() {
+        assert!(runs_at_planned_level(
+            SafetyStatus::Safe,
+            SafetyStatus::Safe
+        ));
+        assert!(
+            runs_at_planned_level(SafetyStatus::Review, SafetyStatus::Review),
+            "Review means the reader confirms it by selecting it; the executor must not turn that into a dead end"
+        );
+        assert!(
+            !runs_at_planned_level(SafetyStatus::Safe, SafetyStatus::Review),
+            "an item that became Review after the plan was generated needs a new decision"
+        );
+        assert!(
+            !runs_at_planned_level(SafetyStatus::Review, SafetyStatus::Unsafe),
+            "a Review item that became Unsafe never runs"
+        );
+        assert!(
+            !runs_at_planned_level(SafetyStatus::Unsafe, SafetyStatus::Unsafe),
+            "an Unsafe item is never executable, even if a hand-written plan names it"
+        );
+    }
 
     #[test]
     fn worktree_change_names_the_field_that_moved() {
@@ -1207,7 +1295,9 @@ mod tests {
             Some(ReasonCode::AfRebuildable),
         );
 
-        let Audit { entries, history } = audit;
+        let Audit {
+            entries, history, ..
+        } = audit;
         assert_eq!(entries.len(), 1);
         assert_eq!(history.len(), 1);
         assert_eq!(entries[0].action, history[0].action);
@@ -1287,6 +1377,5 @@ mod tests {
         assert_eq!(options.recent_activity_days, crate::DEFAULT_ACTIVITY_DAYS);
         assert!(!options.untracked_as_unsafe);
         assert!(options.whitelist.is_empty());
-        assert_eq!(options.per_dir_timeout, Duration::from_mins(5));
     }
 }

@@ -19,7 +19,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::Deserialize;
-use worktree_core::cleanup::{execute_plan as core_execute, ExecuteOptions, ExecutionOutcome};
+use tauri::Emitter;
+use worktree_core::cleanup::{
+    execute_plan_with_progress as core_execute, ExecuteOptions, ExecutionOutcome,
+};
 use worktree_core::log;
 use worktree_core::{
     scan_project as core_scan, ActivityAction, ActivityEvent, CleanupPlan, DetailArg, HistoryEntry,
@@ -88,11 +91,22 @@ fn execution_options(request: &ExecuteRequest) -> ExecuteOptions {
 }
 
 /// Runs a confirmed plan.
+///
+/// Every item's result is also emitted as `cleanup-progress` while the blocking
+/// executor is still working. The returned outcome is authoritative; the event
+/// is what lets the plan page animate each row without waiting for the last item.
 #[tauri::command]
-async fn execute_plan(request: ExecuteRequest) -> Result<ExecutionOutcome, String> {
+async fn execute_plan(
+    app: tauri::AppHandle,
+    request: ExecuteRequest,
+) -> Result<ExecutionOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let options = execution_options(&request);
-        core_execute(&request.plan, &request.snapshot, &options)
+        core_execute(&request.plan, &request.snapshot, &options, |entry| {
+            // A missed animation is not a reason to fail a deletion that has
+            // already happened. The full outcome carries the same rows.
+            let _ = app.emit("cleanup-progress", entry);
+        })
     })
     .await
     .map_err(|error| format!("the execution task did not finish: {error}"))

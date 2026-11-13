@@ -63,14 +63,14 @@ bug. D17–D24 are form-factor and repository-wide constraints.
 | D2 | The level of a record is decided by the **most severe** entry in `reasons`. No independent scoring | Every level must trace back to concrete evidence | Unit test: the presence of any Unsafe reason forces the whole record to Unsafe |
 | D3 | Failures downgrade: a timeout, a permission error, or a non-zero command exit produces `Review`, **never `Safe`** | Without evidence you cannot call something safe | Inject a timeout and assert the level is Review and carries `cannot_verify` |
 | D4 | The main worktree is never deletable, even when clean | Deleting the main worktree deletes the repository | Assert the main worktree carries `wt.main` and is Unsafe |
-| D5 | Directories are removed only through the system Trash. **No permanent delete, no bypass switch** | Deleting inside a user's directories must be recoverable | On macOS, a deleted item can be found in the Trash and put back |
-| D6 | Worktrees are removed only with `git worktree remove` / `git worktree prune`. Raw `rm -rf` on a worktree directory is forbidden | Git metadata must stay consistent | `git worktree list` shows no leftovers after removal; no bare-delete call exists in the code paths |
+| D5 | Artifact directories are removed only through the system Trash. **No permanent delete of artifact directories, no bypass switch.** Worktree directories are governed by D6 and are permanently removed with `git worktree remove` | Artifact directories inside a user's workspace must be recoverable; worktrees must keep Git metadata consistent, and removing their working directory with Git is permanent | On macOS, a deleted artifact directory can be found in the Trash and put back; the plan and result state that worktree removal is permanent and does not use the Trash |
+| D6 | Worktrees are removed only with `git worktree remove` / `git worktree prune`. Raw `rm -rf` on a worktree directory is forbidden. This removal is permanent: the working directory and any untracked files are deleted, and the branch ref remains | Git metadata must stay consistent, and the reader must not mistake worktree removal for a recoverable Trash move | `git worktree list` shows no leftovers after removal; no bare-delete call exists in the code paths; the confirmation and result copy name the permanence |
 | D7 | An artifact directory name is only a candidate hint. The verdict must rest on: whether Git tracks it, whether it holds authored content, its activity, and whether it is a symlink escaping the project | "It is called build, so delete it" destroys source code | Counter-example test: a `build/` directory containing tracked files must be Unsafe |
 | D8 | An artifact directory must never be treated as a project root and walked into | Treating `node_modules` as a project root deletes package-internal `dist/`, leaving a tree that looks installed but is corrupt and needs a network restore | Counter-example test: a `node_modules` containing `package.json` must not be recognised as a project root |
 | D9 | Every decision carries four elements: `code` + `severity` + `text` + `evidence` | "A verifiable reason" is the core promise of this product | Struct fields are not optional; every reason in the UI can be expanded to show its evidence |
 | D10 | Before deletion, the path must pass the eight checks **in order**, and verification may only tighten — a resolved path never grants permission the literal path lacked. Protection is decided on a case-folded comparison key, so a protected location is refused in **any** spelling of it (macOS ignores case, and `realpath` does not correct it), and on Windows a component Win32 would read as a different name is refused outright | Guards against symlink escape, spelling tricks, and empty-variable collapse | The whole fuzz corpus is rejected — including the case variants and both canonical spellings of every symlinked protected location; the ancestor-symlink case is rejected; and the precedence of the checks is pinned by a test that applies two rules at once and asserts which one is reported |
 | D11 | Between plan generation and execution, the target identity (path + size + mtime) and its activity are re-checked | Guards against "safe when planned, changed when executed" | Modify the target after planning and assert the item is skipped |
-| D12 | Default selection: `Safe` is selected, `Review` is not, `Unsafe` checkboxes are disabled | Defaults must be conservative | Both the UI and the execution layer have tests for this |
+| D12 | Default selection: `Safe` is selected, `Review` is not, `Unsafe` checkboxes are disabled. A `Review` item runs only when the reader explicitly selects it, and only while the re-check still returns `Review` with unchanged decision fields; `Unsafe` never runs | Defaults must be conservative, and "needs confirmation" must remain actionable instead of turning every explicitly confirmed item into a silent skip | Both the UI and the execution layer have tests for the default, the explicit Review path, and the refusal of `Unsafe` |
 | D13 | High-risk confirmation: 5 or more items, or any `--force`, or more than 10 GB freed in one run requires an explicit manual acknowledgement | Large actions need a human pause | The plan object exposes `ack_reasons`; the execute button stays disabled until acknowledged |
 | D14 | Execution is serial. A failure on one item does not affect the others. No concurrent deletion | Failures must stay attributable; no confusing partial success | Single-failure test: the remaining items still complete |
 | D15 | The log is written locally only, never sent anywhere, and records time / action / target / reason / result / size | After-the-fact traceability is the basis for trust | Assert on log contents; no network call exists anywhere in the code |
@@ -79,7 +79,7 @@ bug. D17–D24 are form-factor and repository-wide constraints.
 | D18 | Deletion and writing may only be performed by a local process, and only when driven by a plan object. No form may let a web page trigger a filesystem write directly | Execution authority must live locally and stay reviewable | Form A has no write path; Form B's `execute` accepts only a plan object |
 | D19 | Form B's daemon must: bind to `127.0.0.1` only; generate a random token on every start; strictly validate `Origin` and `Host` against DNS rebinding; never use a wildcard CORS policy; and require in-UI confirmation in addition to the token for destructive endpoints | A local port is reachable from the browser, so a malicious page can send requests | `lsof` shows no externally reachable listener; requests without a token and cross-origin requests are rejected; execution without confirmation is refused |
 | D20 | `snapshot.json` must carry `schema_version` and is the only contract between the CLI and the web page. On a higher version the page must say the viewer needs an upgrade; it must never guess at fields | Once published, an interface cannot assume both ends upgrade together | Round-trip test on the contract; feed a higher version and assert a clear error |
-| D21 | No form may weaken the existing constraints: D5 (Trash only) and D6 (`git worktree remove` only) hold in every form | Changing the form is not a reason to relax safety | One verification record per form, each covering D5 and D6 |
+| D21 | No form may weaken the existing constraints: D5 (artifact directories through the Trash only) and D6 (`git worktree remove` only) hold in every form | Changing the form is not a reason to relax safety | One verification record per form, each covering D5 and D6 |
 | D22 | The report web page must open with no network and no server (assets inlined) and must not introduce a runtime backend dependency | The availability of a read-only form should not depend on the environment | Open it offline over `file://` and complete a full review |
 | D23 | **English for everything that ships as open source.** Code, comments, identifiers, documentation, commit messages, file names, and user-visible strings in the repository are English, and English is the default and the source locale. The one exception is UI locale data under `src/i18n/`: the English source table plus one translated table per additional locale, keys identical to the source table, file names and keys in English. Content deliberately kept out of the open-source distribution may be written in Chinese | This is an international open-source project; a mixed-language repository is not reviewable by the community it targets | A scan of tracked files finds no non-English natural language outside `src/i18n/`; every commit message reads in English; a test fails when any locale table's keys differ from `en.ts` |
 | D24 | **The disk-hygiene audit is advisory and never an input to a deletion decision.** It is read-only (D1), it reports `Unknown` — never "met" — for every rule it cannot observe from inside one repository, and no part of the cleanup path may read it. A rule's level is the worst finding it has; `Ok` means a check ran and found nothing. The rule set is the one in `docs/DISK_HYGIENE.md`, and its ids, its situations and its copy are pinned to that document by test | A cleanup verdict and a policy report answer different questions. Letting one move the other would either block a removal for a reason the user cannot act on in that step, or read a policy breach as permission to delete. And a rule reported as met when nothing was checked is D3's failure mode wearing a different hat | `cleanup.rs` builds a plan from worktree and artifact records only; a plan built alongside a report full of violations is unchanged. A test asserts the audit's rule ids equal the policy document's table, and that only the rules the document itself marks unobservable are reported `Unknown` |
@@ -336,7 +336,7 @@ log writing.
 
 **Acceptance criteria**
 
-1. macOS: after deletion the item can be found in the Trash and put back (D5);
+1. macOS: after deletion an artifact directory can be found in the Trash and put back (D5); worktree removal is reported as permanent;
 2. after `git worktree remove`, `git worktree list` shows no leftovers and `prune`
    runs as a follow-up (D6);
 3. a worktree with untracked files **refuses to execute** until confirmed; after
@@ -391,17 +391,17 @@ guarantee is named next to it.
 
 | Stage | Criterion | Status |
 |---|---|---|
-| P0 | 1 · `cargo test` green | Met — 228 unit tests plus four integration files (11 + 5 + 5 + 4) |
-| P0 | 2 · every `wt.*` reason code has a test case | Met — all 15 codes in the decision table have a positive and a negative case, every reason asserts non-empty `text` and `evidence`, and `wt.stash` — retained for old audit logs, no longer emitted — has a test asserting it cannot reach a record |
+| P0 | 1 · `cargo test` green | Met — 242 unit tests plus five integration files (11 + 2 + 5 + 6 + 4) |
+| P0 | 2 · every `wt.*` reason code has a test case | Met — all 18 emitted codes in the decision table have a positive and a negative case, every reason asserts non-empty `text` and `evidence`, and `wt.stash` — retained for old audit logs, no longer emitted — has a test asserting it cannot reach a record |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 86 entries. The floor is set to the current count rather than left at 60, so the corpus cannot shrink unnoticed; a generated property test covers 20,000 random paths on top |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
 | P0 | 5 · `cargo clippy -- -D warnings` | Met, and widened into a real gate: `pnpm lint:rust` runs the format check and `cargo clippy --workspace --all-targets`, with `clippy::all`, `clippy::pedantic`, the rustc `unused` group and `unsafe_code` denied in `[workspace.lints]`. `clippy::nursery` stays a warning because those lints are experimental. The ten `pedantic` lints that remain allowed each carry their reason in `Cargo.toml` |
 | P1 | 1 · a tracked `build/` is `Unsafe`, evidence naming the match count | Met — unit, plus a real repository where `dist/` is committed despite an ignore rule |
 | P1 | 2 · `node_modules` is not recognised as a project root | Met — the walk never descends into a directory it has recognised as an artifact, and a real scan reports one record per worktree |
-| P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met — `.git` through `af.nested_git`, credentials through `af.credentials`. Credentials needed a code of their own: they are usually Git-*ignored*, which is precisely the case `af.authored_content` cannot see |
+| P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met — `.git` through `af.nested_git`, credentials through `af.credentials`. Credentials needed a code of their own: they are usually Git-*ignored*, which is precisely the case `af.authored_content` cannot see. The worktree root has its own bounded `wt.credentials` check, because `git worktree remove` deletes ignored files too |
 | P1 | 4 · an escaping symlink is `Unsafe` with the target in evidence | Met |
 | P1 | 5 · a size-measurement timeout is reported honestly | **Renegotiated** — the criterion asked for `Review`; the verdict is now left alone and the size is recorded as `null` with a warning (decision 5) |
-| P1 | 6 · every `af.*` reason code has a test case | Met — all 10 codes |
+| P1 | 6 · every `af.*` reason code has a test case | Met — all 11 codes |
 | P2 | CLI and snapshot contract criteria | Blocked — P2 not started |
 | P3 | 1 · offline over `file://`, a full review can be completed (D22) | Met for the sample data. Dropping in a snapshot file waits on P2, which has no output to drop |
 | P3 | 2 · the page matches the JSON item for item | Blocked — nothing to compare against until P2 |
@@ -410,7 +410,7 @@ guarantee is named next to it.
 | P3 | 5 · the exported plan is accepted by the CLI directly | Blocked — no CLI yet |
 | P3 | 6 · `src/mock/` is not referenced by production code | **Renegotiated** — the preview is part of the shipped bundle, so `mock/` stays by design and its pages are labelled as sample data; `vue-tsc --noEmit` is at zero errors and the build passes (decision 7) |
 | P3 | 7 · the hygiene page calls a rule met only where a check ran, and reports what it cannot see as not checked (D24) | Met — the audit's rule list, its situations and its copy are pinned to `docs/DISK_HYGIENE.md` by a Rust test that compiles the document in and a front-end test that walks both locale tables; the seven rules no scan can observe report `not checked` with the audit's own reason; `cleanup.rs` does not read the report, and a plan is unchanged by it |
-| P4 | 1 · macOS: the item is found in the Trash afterwards (D5) | Met — an integration test moves a real directory through the real Trash and takes it back out |
+| P4 | 1 · macOS: the artifact directory is found in the Trash afterwards (D5), and worktree removal is reported as permanent | Met — an integration test moves a real directory through the real Trash and takes it back out; the result copy names worktree removal as permanent |
 | P4 | 2 · no leftovers after `git worktree remove`, with `prune` as a follow-up (D6) | Met |
 | P4 | 3 · untracked files force confirmation, then `--force` | Met — `--force` is re-derived from the re-check and never parsed out of the plan, and the plan page shows the file list line by line before it lets the run start |
 | P4 | 4 · a whitelist hit blocks the item | Met |
@@ -445,7 +445,7 @@ message):
 
 **Forbidden**:
 
-- providing any deletion path that bypasses the Trash;
+- providing any artifact deletion path that bypasses the Trash;
 - moving decision logic into the front end;
 - turning `cannot_verify` / `uncertain` into `Safe`, and equally into `Ok` in the
   hygiene report;
@@ -773,9 +773,11 @@ was checked to fail without the fix:
    `WorktreeRecord.absorbed_into_default` carries the fact separately from
    `merged_into_default` because they are different facts, and `wt.no_upstream` treats
    an absorbed branch as merged. §5's decision table gained the row, and every locale
-   table gained the message. The revert hole was accepted rather than closed: a commit
-   applied and then reverted still matches its patch-id, so the detail shows the count
-   and the ref it was compared against, not a claimed commit.
+   table gained the message. The revert hole was initially accepted rather than
+   closed: a commit applied and then reverted still matches its patch-id, so the detail
+   shows the count and the ref it was compared against, not a claimed commit. Decision
+   3 below closes it with the content comparison, and the 2026-11-11 decision gives
+   the content-changed case its own reason code.
 
    Tiers C and D of `docs/WORKTREE_TRIAGE.md` stay out of the core: they are
    judgements about a diff's value, and 19 of the 22 branches that survived the
@@ -792,7 +794,7 @@ was checked to fail without the fix:
    page and the nav badge count — and the banner decides nothing about deletion; it
    only says why the pile will come back.
 
-3. **The activity window is three days, and a reverted change is no longer absorbed.**
+3. **The activity window is three days, and a reverted change is no longer called safe.**
    Two follow-ups to the decision above, both chosen after measuring what the tool
    would and would not have selected on a real machine.
 
@@ -811,13 +813,64 @@ was checked to fail without the fix:
    undoes it — so matching the patch proved only that the patch *had been* applied.
    `content_still_present` now asks whether the default branch holds the same content
    for the files the branch touched (`git diff <head> <target> -- <that file list>`,
-   the list coming from `<target>...<head>`). A revert makes the two sides differ and
-   the branch stays `Review`; the reason carries both halves so the reader can see
-   that the patch matched and the content did not. The comparison is deliberately
-   strict — if the default branch changed one of those files again after the merge,
-   the answer is "cannot confirm", which costs a re-read instead of a silent
-   deletion — and it refuses to confirm past 200 touched files rather than build a
-   command line it cannot reason about.
+   the list coming from `<target>...<head>`). A revert makes the two sides differ; the
+   patch answer remains `wt.absorbed`, the content answer is
+   `wt.absorbed_content_changed` at `Review`, and the overall verdict is `Review`.
+   The reason carries both halves so the reader can see that the patch matched and the
+   content did not. The comparison is deliberately strict — if the default branch
+   changed one of those files again after the merge, the answer is "cannot confirm",
+   which costs a re-read instead of a silent deletion — and it refuses to confirm past
+   200 touched files rather than build a command line it cannot reason about.
+
+**Decided (2026-11-11)**
+
+1. **A recent commit on a clean, already-merged worktree is attention, not a
+   verdict.** `last_updated_at` still carries the HEAD time to the detail panel, but
+   `wt.recent_activity` is emitted only when something could still be lost: the
+   worktree is dirty, untracked, or its work is not in the default branch. Measuring
+   the previous rule on one machine put 47 clean-and-merged worktrees in `Review`
+   for no reason beyond a commit inside the three-day window.
+
+2. **Unpushed commits are a branch fact, not a worktree fact.** `git worktree remove`
+   keeps every branch ref, and the product never runs `git branch -d`, so `ahead > 0`
+   cannot make the directory unsafe. The append-only rule forbids changing the old
+   `wt.unpushed` code from `Unsafe` to `Review`, so `wt.unpushed` is deprecated and no
+   longer emitted, and the new `wt.unpushed_branch` is the `Review` code: it is not
+   emitted at all when the work is already merged or absorbed, and its evidence names
+   the upstream and says the ref is kept. This is the same reasoning that removed
+   `wt.stash` from the verdict: the thing that could be lost lives outside the
+   directory being deleted.
+
+3. **A deleted upstream does not hide the file counts.** Git omits `# branch.ab` when
+   the upstream ref is gone, but still prints the changed and untracked entries. The
+   old code skipped the whole status block, so a dirty worktree became a `Review`
+   `cannot_verify` with `dirty_files: 0` — the wrong direction. The counts are now
+   read from the same output; only the ahead/behind answer is unknown, and it adds
+   `wt.cannot_verify` only when the work is not already merged or absorbed.
+
+4. **Absorption keeps its patch-id meaning, and a content change has its own code.**
+   `wt.absorbed` still means "every commit has an equivalent patch in the default
+   branch" and stays `Safe`; the append-only rule forbids redefining it as "patch and
+   content". When the patch-id matches but the files changed afterwards,
+   `absorbed_into_default` stays `true`, `wt.absorbed` is emitted, and
+   `wt.absorbed_content_changed` is emitted beside it at `Review`. The Review reason
+   is what keeps the overall verdict out of `Safe`. It is not `wt.unmerged`, which
+   claimed something the check did not establish, and not a revert, which a tree
+   comparison cannot distinguish from an ordinary edit.
+
+5. **The worktree verdict checks credentials too.** `git worktree remove` deletes
+   ignored files, so a clean worktree can still contain the one thing that must not be
+   destroyed silently. When the tracked files are clean, the root is walked with the
+   same name table as `af.credentials`, skipping the recognised artifact directories
+   (the artifact scanner checks those) and the reproducible dependency and build trees
+   such as `.build/checkouts` and `SourcePackages`. A hit is `wt.credentials` /
+   `Unsafe`; a partial walk is `Review`; a credential-looking file Git tracks does not
+   block, because it is in the repository, not in the directory being deleted.
+
+6. **A default branch containing `/` is still asked as `origin/<name>`.** The prefix
+   test was `contains('/')`, which read `release/2.0` as if it were already
+   remote-qualified. Both the ancestry and the patch check now use
+   `starts_with("origin/")`, so `release/2.0` is asked as `origin/release/2.0` first.
 
 **Decided (2026-11-05)**
 

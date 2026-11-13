@@ -201,17 +201,19 @@ describe("the app shell", () => {
         size_bytes: 1
       }
     ];
+    state.resultSummary.value = { freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 2 };
     state.view.value = "result";
     await nextTick();
 
-    const banner = host.querySelector<HTMLElement>(".banner.banner--warn");
-    expect(banner, "the no-deletion outcome banner is missing").not.toBeNull();
-    expect(banner?.textContent).toContain("Nothing was deleted");
-    expect(banner?.textContent).toContain("2 items were stopped");
-    expect(host.querySelector(".banner.banner--safe")).toBeNull();
-    expect(host.querySelector(".actionbar__summary")?.textContent).toContain("nothing was deleted");
+    const hero = host.querySelector<HTMLElement>(".result-hero");
+    expect(hero, "the no-deletion outcome summary is missing").not.toBeNull();
+    expect(hero?.classList.contains("result-hero--partial")).toBe(true);
+    expect(hero?.textContent).toContain("Cleanup finished with skipped items");
+    expect(hero?.textContent).toContain("2");
+    expect(host.querySelector(".result-hero--success")).toBeNull();
 
     state.lastResult.value = [];
+    state.resultSummary.value = { freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 0 };
     state.projectPath.value = "";
     state.view.value = "welcome";
     state.snapshot.value = null;
@@ -234,15 +236,18 @@ describe("the app shell", () => {
         size_bytes: 1
       }
     ];
+    state.resultSummary.value = { freed: 1, freed_unknown: 0, trashed: 1, removed: 0, failed: 0 };
     state.view.value = "result";
     await nextTick();
 
-    const banner = host.querySelector<HTMLElement>(".banner.banner--safe");
-    expect(banner, "the successful outcome banner is missing").not.toBeNull();
-    expect(banner?.textContent).toContain("Cleanup complete");
-    expect(host.querySelector(".banner.banner--warn")).toBeNull();
+    const hero = host.querySelector<HTMLElement>(".result-hero");
+    expect(hero, "the successful outcome summary is missing").not.toBeNull();
+    expect(hero?.classList.contains("result-hero--success")).toBe(true);
+    expect(hero?.textContent).toContain("Cleanup complete");
+    expect(host.querySelector(".result-hero--partial")).toBeNull();
 
     state.lastResult.value = [];
+    state.resultSummary.value = { freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 0 };
     state.projectPath.value = "";
     state.view.value = "welcome";
     state.snapshot.value = null;

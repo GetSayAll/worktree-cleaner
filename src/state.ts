@@ -21,6 +21,7 @@ import {
   isDesktop,
   logActivity,
   logPath,
+  onExecutionProgress,
   readActivity,
   readHistory,
   scanProject
@@ -112,6 +113,8 @@ export const executeError = ref<string | null>(null);
 /** Set when the executor could not write the audit log: the actions still ran. */
 export const logError = ref<string | null>(null);
 export const executing = ref(false);
+/** Results that have arrived while the execution is still running, in order. */
+export const executionProgress = ref<ResultEntry[]>([]);
 
 /**
  * Whether the pages are showing the sample snapshot.
@@ -163,13 +166,11 @@ function loadSettings() {
 /**
  * Moves installs that still hold the old scan defaults onto the current ones.
  *
- * `active_days: 7` and `per_dir_timeout_sec: 30` were the defaults before the
- * initial-check fix. A stored settings object wins over a changed default, so
- * without this migration the scan would keep using 7 days and 30 seconds on
- * every existing install — exactly the values that made the initial scan call
- * recently written build output `Review`. Only the exact old pair is migrated;
- * a user who changed either value keeps their choice, and the separate version
- * key makes the migration one-time.
+ * A stored settings object wins over a changed default. Existing installs still
+ * held 7 days and 30 seconds, so changing the default alone would never reach
+ * the scan that made recently written build output `Review`. Only the exact old
+ * pair is migrated; a user who changed either value keeps their choice, and the
+ * separate version key makes the migration one-time.
  */
 function migrateSettings(store: Storage, stored: Partial<Settings>) {
   const version = Number(store.getItem(SETTINGS_VERSION_KEY) ?? "0");
@@ -332,6 +333,7 @@ export function recordSettingChange(key: string, before: string, after: string):
 }
 
 export async function startScan(path: string) {
+  if (executing.value) return;
   const target = path.trim();
   if (!target) return;
 
@@ -415,6 +417,7 @@ export function cancelScan() {
 }
 
 export function resetToWelcome() {
+  if (executing.value) return;
   clearTimers();
   scanState.running = false;
   snapshot.value = null;
@@ -429,6 +432,7 @@ export function resetToWelcome() {
 }
 
 export function goTo(next: ViewKey) {
+  if (executing.value) return;
   if (next === "scanning") return;
   if (next === "history") void refreshHistory();
   view.value = next;
@@ -720,24 +724,6 @@ function buildPlan(): CleanupPlan {
 }
 
 /**
- * The knobs the executor receives.
- *
- * A setting that shaped the scan and is then replaced by a default here would
- * mean one thing on the way in and another on the way out; keeping the object in
- * one place is what stops the scan and the run from disagreeing.
- */
-function executeKnobs(logPathValue: string | null) {
-  return {
-    recent_activity_days: settings.active_days,
-    untracked_as_unsafe: settings.untracked_is_unsafe,
-    whitelist: settings.whitelist_paths,
-    per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
-    git_timeout_ms: GIT_TIMEOUT_MS,
-    log_path: logPathValue
-  };
-}
-
-/**
  * Runs the confirmed plan.
  *
  * Nothing is simulated here: the core re-checks every item, executes what still
@@ -774,14 +760,83 @@ export async function executeCleanup() {
     forced: plan.worktree_removals.filter((item) => item.force).length,
     typed_name: confirmText.value.trim() !== ""
   });
+  executionProgress.value = [];
+  let unlisten: (() => void) | null = null;
   try {
-    const outcome = await executePlan(plan, current, executeKnobs(await logPath()));
+    // The live list is an enhancement, not a condition for running: if the
+    // event channel is unavailable, the final outcome still carries every row.
+    unlisten = await onExecutionProgress((entry) => {
+      executionProgress.value = [...executionProgress.value, entry];
+    }).catch(() => null);
+    const outcome = await executePlan(plan, current, {
+      recent_activity_days: settings.active_days,
+      untracked_as_unsafe: settings.untracked_is_unsafe,
+      whitelist: settings.whitelist_paths,
+      // The same two budgets the scan used. The re-check measures the very same
+      // directories, so a setting that shaped the scan and was then replaced by a
+      // default here would mean one thing on the way in and another on the way out.
+      per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+      git_timeout_ms: GIT_TIMEOUT_MS,
+      // `null` disables the audit log, which the user is then told about.
+      log_path: await logPath()
+    });
     await applyOutcome(outcome, plan);
   } catch (error) {
     executeError.value = error instanceof Error ? error.message : String(error);
   } finally {
+    unlisten?.();
     executing.value = false;
   }
+}
+
+/**
+ * Applies the executor's removals to the snapshot on screen.
+ *
+ * The scan is a photograph of the moment it ran, and the executor's answer is the
+ * only authoritative record of what actually left. Keeping the removed rows makes
+ * the sidebar keep counting files that are already gone; filtering them here is
+ * what makes the numbers follow the cleanup. The next full scan is still the
+ * authority on everything that was skipped, which is why the selection is cleared
+ * rather than left pointing at rows whose safety was re-checked at execution time.
+ */
+function applyRemovalsToSnapshot(outcome: ExecutionOutcome, plan: CleanupPlan) {
+  const current = snapshot.value;
+  if (!current) return;
+
+  // A prune entry names the repository, not the worktree: `git worktree prune`
+  // runs once in the main worktree and cleans every stale registration. Removing
+  // the entry's target would remove the main working tree from the screenshot, so
+  // the pruned paths come from the plan items whose command is the prune.
+  const pruned = outcome.entries.some(
+    (entry) => entry.action === "prune" && entry.result === "ok"
+  )
+    ? plan.worktree_removals
+        .filter((item) => item.command.startsWith("git worktree prune"))
+        .map((item) => item.path)
+    : [];
+  const removedWorktrees = new Set([
+    ...outcome.entries
+      .filter((entry) => entry.result === "ok" && entry.action === "worktree-remove")
+      .map((entry) => entry.target),
+    ...pruned
+  ]);
+  const removedArtifacts = new Set(
+    outcome.entries
+      .filter((entry) => entry.result === "ok" && entry.action === "trash-move")
+      .map((entry) => entry.target)
+  );
+
+  const worktrees = current.worktrees.filter((record) => !removedWorktrees.has(record.path));
+  const remainingWorktrees = new Set(worktrees.map((record) => record.path));
+  const artifacts = current.artifacts.filter(
+    (record) =>
+      !removedArtifacts.has(record.path) &&
+      (record.worktree_path === null || remainingWorktrees.has(record.worktree_path))
+  );
+
+  snapshot.value = { ...current, worktrees, artifacts };
+  selectedWorktrees.value = [];
+  selectedArtifacts.value = [];
 }
 
 /** Turns the executor's answer into what the result page shows. */
@@ -789,7 +844,7 @@ async function applyOutcome(outcome: ExecutionOutcome, plan: CleanupPlan) {
   // A whitelist-blocked item never reaches the executor — it was filtered out of
   // both channels before the plan was built — so it is added back here as its own
   // skipped row. Leaving it out would make the plan page's count disagree with
-  // the rows on this one.
+  // the rows on this one. Read it before the snapshot filter clears the selection.
   const blocked: ResultEntry[] = blockedPaths.value.map((path) => ({
     action: "trash-move",
     target: path,
@@ -800,6 +855,7 @@ async function applyOutcome(outcome: ExecutionOutcome, plan: CleanupPlan) {
     size_bytes: null
   }));
 
+  applyRemovalsToSnapshot(outcome, plan);
   lastResult.value = [...outcome.entries, ...blocked];
   resultSummary.value = summarise(lastResult.value, plan);
   logError.value = outcome.log_error;

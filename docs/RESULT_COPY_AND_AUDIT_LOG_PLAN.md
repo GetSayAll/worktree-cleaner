@@ -178,11 +178,13 @@ a string.
 
 ## 3. Reason codes already exist — only the table is missing
 
-This part needs no Rust change at all. `ReasonCode` (`reason.rs:29-88`) is a full
-enum with `#[serde(rename = "...")]`, 27 codes in two families:
+This part needs no Rust change at all. `ReasonCode`
+(`crates/worktree-core/src/reason.rs`) is a full enum with
+`#[serde(rename = "...")]`, 31 codes in two families:
 
-- `wt.*` (16): `main`, `locked`, `dirty`, `unpushed`, `detached`, `no_upstream`,
-  `unmerged`, `untracked`, `stash`, `recent_activity`, `agent_active`,
+- `wt.*` (20): `main`, `locked`, `dirty`, `unpushed`, `unpushed_branch`,
+  `detached`, `no_upstream`, `unmerged`, `absorbed`, `absorbed_content_changed`,
+  `untracked`, `credentials`, `stash`, `recent_activity`, `agent_active`,
   `cannot_verify`, `whitelisted`, `prunable`, `merged`, `clean`
 - `af.*` (11): `git_tracked`, `nested_git`, `authored_content`, `credentials`,
   `symlink_outside`, `whitelisted`, `recent_activity`, `cannot_verify`, `empty`,
@@ -197,7 +199,7 @@ render `reason.text` through it, falling back to the raw text for a code the
 table does not know (so a newer core with an older UI still says something
 true). `evidence` keeps rendering verbatim underneath.
 
-Build entries for all 27 codes even though a few may never appear on screen: the
+Build entries for all 31 codes even though a few may never appear on screen: the
 locale test that asserts both tables carry the same keys extends naturally to
 this table, and a missing entry becomes a test failure rather than a silent
 English string on a Chinese screen.
@@ -422,7 +424,7 @@ Phase 3 is the one that needs the most care: it changes a frozen contract, and
    (`cleanup.rs:348`) while the scan uses the configured depth. The size walk
    does not read `max_depth`, so identity is unaffected, but the constant should
    be confirmed as deliberate.
-4. **Whether every reason code needs copy.** §3 proposes all 27. If some can
+4. **Whether every reason code needs copy.** §3 proposes all 31. If some can
    never reach the interface, dropping them keeps the table smaller — but then the
    key-parity test has to be told which ones are exempt.
 

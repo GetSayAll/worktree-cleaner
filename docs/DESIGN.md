@@ -178,8 +178,8 @@ Every page except the welcome screen starts with the same header:
 
 The icon names the page and repeats the section's navigation mark, so the reader
 always knows which section they are in. The page-head tile is neutral, not
-accent-filled; the sidebar and welcome marks are the app icon — the same blue
-rounded-square branch mark as the Dock icon — and are the only brand-colored tiles.
+accent-filled; the sidebar mark is the app icon — the same blue rounded-square
+branch mark as the Dock icon — and is the only brand-colored mark.
 
 Below the header a page composes, in order:
 
