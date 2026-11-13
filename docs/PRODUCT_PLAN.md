@@ -151,7 +151,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 
 ### 9. Settings
 
-- **Scan scope**: additional scan paths (one per line), maximum scan depth, per-directory timeout, whole-scan budget.
+- **Scan scope**: additional scan paths (one per line), maximum scan depth, per-directory timeout (default 300 s), whole-scan budget.
 - **Protection rules**: whitelist paths (matched directories are never deleted under any circumstances), protected branch names (the default branch is auto-detected and displayed by default), agent directories to protect.
 - **Decision thresholds**: activity days (default 3), artifact display size threshold (default 10 MB), whether "untracked files" count as unsafe (counts by default).
 - **Deletion method**: Trash (default and not changeable, with the note "this tool does not provide permanent deletion").
@@ -320,9 +320,9 @@ Decision table:
 | `af.cannot_verify` | a Git call failed, or the size computation or directory listing did not complete, or the credential walk hit its entry bound | Review | `could not complete the check` |
 | `af.empty` | the directory contains no files **and the size measurement completed** — an unmeasurable directory also reports a file count of zero, and "could not measure" is not "empty" | Safe (positive) | `it contains no files` |
 | `af.git_ignored` | the directory as a whole is ignored by gitignore | Safe (positive) | `ignored by .gitignore` |
-| `af.rebuildable` | matches a known rebuildable artifact type | Safe (positive) | `can be rebuilt via npm install / cargo build` |
+| `af.rebuildable` | matches a known rebuildable artifact type, with a build manifest at or above the directory and inside the project | Safe (positive) | `can be rebuilt via npm install / cargo build` |
 
-The necessary and sufficient condition for **Safe**: matches a rebuildable type, is gitignore-ignored or untracked, has no tracked files, no nested repository, no credential files, is not an out-of-bounds symlink, had no writes within the recent activity period, and the checks completed fully.
+The necessary and sufficient condition for **Safe**: matches a rebuildable type, is gitignore-ignored or untracked, has no tracked files, no nested repository, no credential files, is not an out-of-bounds symlink, had no writes within the recent activity period, and the checks completed fully. Rebuildability is proven by a manifest at or above the artifact and inside the project: a package manifest in a monorepo subdirectory counts, while a manifest above the project root does not.
 
 **Key counterexample (must be written into the tests)**: a directory named `build/` must never be deleted if it contains files tracked by git — some projects commit build artifacts into the repository, so deleting it is losing source code. An artifact name is only a "candidate", not a "criterion."
 
@@ -432,6 +432,8 @@ Item 6 also guards against accidents such as "a variable being empty during conc
 - The plan records each target's identity (path + size + modification time, optionally inode).
 - Re-check the identity before execution; if it doesn't match, skip the item and require a rescan.
 - For artifacts at the "Safe" level, re-run the activity check once before execution; if it has become active, suspend the item and hand it back to the user for confirmation.
+
+**Initial scan / re-check consistency.** The scan and the re-check apply the same rules. If their verdicts disagree on more than **10%** of the records both passes judge, that is a defect in the initial scan: the scan logic is corrected, not the user blocked or asked to resolve it. `Review` → `Review` is agreement; only a changed verdict counts. The 10% is a quality bar for the scanner, not a runtime gate on the cleanup.
 
 **What this guarantees, and what it does not.** The re-check closes the gap between planning and execution for the facts the plan was built from — the path, the size, the modification time, the level, and the activity window. It does not, and cannot, close the window between the re-check and the system call itself. In that window two things are outside our control, and the contract states them rather than implying otherwise:
 
@@ -575,4 +577,28 @@ The core functionality cannot be accomplished in a pure browser, so there is no 
 
 - The web page can read a `schema_version` equal to or lower than the one it supports; on encountering a higher version, it must clearly warn "the viewer needs to be upgraded" and must not guess at fields.
 - The remaining fields map one-to-one to `ProjectSnapshot` in `src/types.ts`.
+
+### 10.6 How Form C is distributed, and how it updates itself
+
+Form C is the form that ships. Two rules make it installable by anybody, without
+a development environment:
+
+1. **One download, no prerequisites.** macOS gets a `.dmg` with a universal
+   application inside; Windows gets one NSIS installer for the current user. The
+   application carries its own runtime: there is nothing to install, nothing to
+   keep up to date and no server to run. The one dependency is `git`, which the
+   tool asks for the repository's state and which a person using worktrees
+   already has.
+2. **The application updates itself.** At launch it checks the project's own
+   release page once, and if a newer version exists it says which version it
+   found and offers the download and the restart. Every published artifact is
+   signed, and the signature is verified against a public key inside the
+   application, so an artifact that does not verify is refused rather than
+   installed.
+
+The update check is the only request the application makes. There is no
+telemetry, no usage data and no machine identifier — the promise the tool makes
+about the user's files has to hold for the network too, not only for the disk.
+
+This is D25 in `DEV_CONTRACT.md`; `docs/RELEASE.md` has the release process.
 

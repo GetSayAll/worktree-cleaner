@@ -65,6 +65,14 @@ pub enum ScanError {
     NotAGitRepository(String),
     #[error("git could not be queried: {0}")]
     GitFailed(String),
+    /// Git itself could not be started.
+    ///
+    /// Its own variant, because "Git is not installed" is a different answer from
+    /// "the repository could not be read", and a person can do something about
+    /// the first one. The desktop shell is started from Finder or Explorer, so
+    /// the `PATH` it inherits is not always the one a terminal would have.
+    #[error("Git was not found on this machine. Install Git, then try again.")]
+    GitMissing,
 }
 
 /// How recently a worktree must have been committed to before it stops being a
@@ -109,7 +117,7 @@ impl Default for ScanOptions {
     fn default() -> Self {
         Self {
             max_depth: 6,
-            per_dir_timeout_ms: 30_000,
+            per_dir_timeout_ms: 300_000,
             scan_budget_ms: 600_000,
             recent_activity_days: DEFAULT_ACTIVITY_DAYS,
             untracked_as_unsafe: false,
@@ -520,7 +528,13 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
 
     let listing = runner
         .run(&root, &["worktree", "list", "--porcelain", "-z"])
-        .map_err(|error| ScanError::GitFailed(error.to_string()))?;
+        .map_err(|error| {
+            if error.is_missing_program() {
+                ScanError::GitMissing
+            } else {
+                ScanError::GitFailed(error.to_string())
+            }
+        })?;
     if !listing.success() {
         return Err(ScanError::NotAGitRepository(format!(
             "git worktree list failed: {}",

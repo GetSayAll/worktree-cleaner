@@ -78,6 +78,21 @@ pub trait GitRunner {
     fn run(&self, repo: &Path, args: &[&str]) -> Result<GitOutput, GitError>;
 }
 
+impl GitError {
+    /// Whether the failure was that the program could not be started at all.
+    ///
+    /// The usual cause is that Git is not installed, or is not on the `PATH` the
+    /// desktop shell inherited. That is a different answer from "the command
+    /// failed", and it is one the reader can act on: install Git, then try
+    /// again. A timeout or a non-zero exit is not this.
+    pub fn is_missing_program(&self) -> bool {
+        match self {
+            Self::Io { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
+            Self::Timeout { .. } | Self::Failed { .. } => false,
+        }
+    }
+}
+
 /// Runs real Git processes with a per-command timeout.
 #[derive(Debug, Clone)]
 pub struct ProcessGitRunner {
@@ -329,6 +344,30 @@ mod tests {
             .run(Path::new("/repo"), &["status"])
             .expect_err("uncanned call must fail");
         assert!(error.to_string().contains("no canned response"));
+    }
+
+    #[test]
+    fn a_missing_program_is_told_apart_from_a_command_that_failed() {
+        // The two mean different things to the reader: "install Git" and "the
+        // repository could not be read" are different sentences.
+        let missing = GitError::Io {
+            command: "git status".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "git"),
+        };
+        assert!(missing.is_missing_program());
+
+        let failed = GitError::Failed {
+            command: "git status".to_string(),
+            code: Some(128),
+            stderr: "not a git repository".to_string(),
+        };
+        assert!(!failed.is_missing_program());
+
+        let timed_out = GitError::Timeout {
+            command: "git status".to_string(),
+            seconds: 5,
+        };
+        assert!(!timed_out.is_missing_program());
     }
 
     #[test]

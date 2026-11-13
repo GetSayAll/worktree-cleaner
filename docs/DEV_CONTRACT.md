@@ -83,6 +83,8 @@ bug. D17–D24 are form-factor and repository-wide constraints.
 | D22 | The report web page must open with no network and no server (assets inlined) and must not introduce a runtime backend dependency | The availability of a read-only form should not depend on the environment | Open it offline over `file://` and complete a full review |
 | D23 | **English for everything that ships as open source.** Code, comments, identifiers, documentation, commit messages, file names, and user-visible strings in the repository are English, and English is the default and the source locale. The one exception is UI locale data under `src/i18n/`: the English source table plus one translated table per additional locale, keys identical to the source table, file names and keys in English. Content deliberately kept out of the open-source distribution may be written in Chinese | This is an international open-source project; a mixed-language repository is not reviewable by the community it targets | A scan of tracked files finds no non-English natural language outside `src/i18n/`; every commit message reads in English; a test fails when any locale table's keys differ from `en.ts` |
 | D24 | **The disk-hygiene audit is advisory and never an input to a deletion decision.** It is read-only (D1), it reports `Unknown` — never "met" — for every rule it cannot observe from inside one repository, and no part of the cleanup path may read it. A rule's level is the worst finding it has; `Ok` means a check ran and found nothing. The rule set is the one in `docs/DISK_HYGIENE.md`, and its ids, its situations and its copy are pinned to that document by test | A cleanup verdict and a policy report answer different questions. Letting one move the other would either block a removal for a reason the user cannot act on in that step, or read a policy breach as permission to delete. And a rule reported as met when nothing was checked is D3's failure mode wearing a different hat | `cleanup.rs` builds a plan from worktree and artifact records only; a plan built alongside a report full of violations is unchanged. A test asserts the audit's rule ids equal the policy document's table, and that only the rules the document itself marks unobservable are reported `Unknown` |
+| D25 | **The desktop build updates itself, and that check is the only request the app ever makes.** The feed is the project's own release page; every artifact is signed with the updater's private key, and the public key ships inside the app, so an artifact that does not verify is refused rather than installed. The check runs once per launch, silently: a failure leaves the app working and says nothing until the Settings page is opened. Nothing is uploaded — no telemetry, no usage data, no machine identification — and the browser preview never checks, because it cannot install anything | An app that deletes directories has to be updatable without the reader going to fetch a download by hand, and it has to be able to say that what it downloads is the build this project published. A check that phones home is a different promise than the one this tool makes about the user's files | The app starts with an update on the feed and offers it, naming the version; the same feed with a corrupted signature is refused; the app makes no other request, which the interface says on the update row |
+| D26 | **The initial scan and the execution re-check apply the same rules, and their verdicts must agree on at least 90% of records.** A larger difference is a defect in the initial scan: the scanner is corrected, not the user blocked or asked to resolve it. `Review` → `Review` is agreement; only a changed verdict counts. The comparison is over the records both passes judge, not over a hand-picked plan | The first answer has to be trustworthy. A re-check that keeps overturning the scan means the scan was not answering the same question, and a runtime gate would only hide that defect while making the user pay for it | A recorded comparison over a real project re-checks every record and reports the mismatch; the SwiftPM manifest regression that produced `af.cannot_verify` on every `.build/out` is covered by scanner tests, and the real-project measurement is 0 mismatches in 261 records (173 artifacts + 88 worktrees) |
 
 ---
 
@@ -282,7 +284,10 @@ measurement, Git tracking status, boundary detection.
 4. an escaping symlink is `Unsafe` with `af.symlink_outside`, and its evidence names
    the target path;
 5. a size-measurement timeout produces `Review`, and the UI shows `unknown`, not `0 B`;
-6. every `af.*` reason code has a test case.
+6. every `af.*` reason code has a test case;
+7. a build manifest at or above the artifact — for example `Apps/Web/package.json` above
+   `Apps/Web/node_modules`, or `Package.swift` above `.build/out` — proves rebuildability;
+   a manifest above the project root does not.
 
 ### P2 · CLI skeleton and the snapshot JSON contract
 
@@ -378,7 +383,7 @@ and the optional Tauri desktop shell (Form C).
 
 ### Current coverage status
 
-Last updated 2026-10-24. "Met" means a passing automated check exists and would
+Last updated 2026-11-05. "Met" means a passing automated check exists and would
 fail if the behaviour regressed. "Blocked" means the criterion belongs to a
 deliverable that does not exist yet. Three rows are marked **renegotiated**: the
 criterion as written cannot hold in the design that shipped, and the replacement
@@ -415,6 +420,7 @@ guarantee is named next to it.
 | P4 | 8 · Windows: the Recycle Bin path verified separately (D16) | Blocked — no Windows machine has run it; open item 1 |
 | P5 | daemon and browser-UI criteria | Blocked — P5 not started |
 | P6 | wrap-up criteria | Partly met — settings persist on the device, the history page reads the real log, the language picker ships, and the prototype wording is gone. Plan export copies JSON to the clipboard rather than writing a file. Appearance has `pnpm test:theme` and the page grid `pnpm test:layout`, both in a real browser (decision 5) |
+| P6 | 5 · the desktop build updates itself (D25) | Partly met — the updater is wired to the release feed with signature verification, the check runs once per launch and is silent on failure, and the state machine is covered by `src/update.test.ts`; the browser preview refuses to pretend it can. The end-to-end half — an install from a real published release, and a feed whose signature does not verify — waits for the first release and is on the checklist in `docs/RELEASE.md` |
 
 The rule for every row: a criterion counts as met only when a test in the
 repository fails if the behaviour regresses.
@@ -812,6 +818,36 @@ was checked to fail without the fix:
    the answer is "cannot confirm", which costs a re-read instead of a silent
    deletion — and it refuses to confirm past 200 touched files rather than build a
    command line it cannot reason about.
+
+**Decided (2026-11-05)**
+
+1. **The desktop app updates itself (D25).** `tauri-plugin-updater` reads
+   `latest.json` from the project's own release page; the artifact is verified
+   against the public key that ships in `tauri.conf.json`, and an artifact that
+   does not verify is refused. The check runs once per launch, silently, and the
+   Settings page carries the whole path: check, download with a progress
+   percentage, install, restart. `src/update.ts` holds the state machine and
+   `src/update.test.ts` covers it. Nothing else in the app talks to the network,
+   which is what D15 already said about the log.
+
+2. **The version has one source.** `package.json` is the only file that writes
+   the version down; the build injects it (`vite.config.ts` → `__APP_VERSION__`),
+   the interface shows it, and `src/version.test.ts` fails when the manifests
+   disagree. It used to be five places, and a release that forgot one shipped an
+   app claiming a version it was not.
+
+3. **A release is a tag, a workflow and a person.** `.github/workflows/release.yml`
+   builds the two platforms, signs them, writes `latest.json` from the
+   signatures the build produced, and creates a **draft** release. Publishing is a
+   human act: the artifact is installed and checked first. `docs/RELEASE.md` has
+   the checklist, the secrets and the manual passes that a machine cannot do.
+
+4. **The packaging is explicit per platform.** `tauri.macos.conf.json` builds a
+   universal `.app` and a `.dmg` and declares macOS 11.3 as the floor (the
+   front end is compiled for Safari 16, and a WebView older than that renders a
+   blank window); `tauri.windows.conf.json` builds one NSIS installer for the
+   current user, because MSI cannot update itself. The updater's feed publishes
+   the same universal macOS archive under both architecture keys.
 
 **Open**
 

@@ -321,7 +321,7 @@ impl Default for HygieneOptions {
             worktree_cap: WORKTREE_CAP,
             ceiling_days: CEILING_DAYS,
             cache_slot_cap_bytes: CACHE_SLOT_CAP_BYTES,
-            per_dir_timeout: Duration::from_secs(30),
+            per_dir_timeout: Duration::from_mins(5),
             budget_deadline: None,
             volume: None,
             creation_override: None,
