@@ -19,6 +19,7 @@ import { reactive } from "vue";
 import { en } from "./en";
 import { zhCN } from "./zh-CN";
 import { hostOs, type HostOs } from "../platform";
+import { APP_VERSION } from "../version";
 
 /** The message table's shape. `en` is the source of truth for it. */
 export type Messages = typeof en;
@@ -46,7 +47,7 @@ const TABLES: Record<Locale, Messages> = { en, "zh-CN": zhCN };
  * `messages` is a plain string table by the time any component sees it.
  */
 function tokensFor(locale: Locale, os: HostOs): Record<string, string> {
-  return { trash: TABLES[locale].platform.trash[os] };
+  return { trash: TABLES[locale].platform.trash[os], version: APP_VERSION };
 }
 
 /** Every `{{token}}` in `value`, replaced. A string with no token is returned as it is. */

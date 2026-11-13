@@ -1,11 +1,27 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+
+/**
+ * The version, read from `package.json`.
+ *
+ * It is injected rather than imported so that the number in the running app and
+ * the number in `Cargo.toml` and `tauri.conf.json` cannot drift apart: the build
+ * takes it from the one file that is the source of truth. `src/version.ts` reads
+ * it back through the `__APP_VERSION__` constant.
+ */
+const pkg = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8")
+) as { version: string };
 
 export default defineConfig({
   plugins: [vue()],
   clearScreen: false,
   server: { port: 2430, strictPort: true },
   envPrefix: ["VITE_", "TAURI_"],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version)
+  },
   build: {
     rollupOptions: {
       output: {

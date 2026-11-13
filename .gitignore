@@ -4,5 +4,6 @@
 /.tauri
 /src-tauri/gen
 /.workbuddy
+/release
 *.log
 .DS_Store

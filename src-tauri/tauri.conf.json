@@ -28,21 +28,41 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "app"
-    ],
+    "targets": ["app", "dmg"],
+    "createUpdaterArtifacts": true,
     "category": "DeveloperTool",
+    "publisher": "GetSayAll",
+    "copyright": "Copyright © 2026 GetSayAll",
+    "license": "GPL-3.0-only",
+    "licenseFile": "../LICENSE",
+    "homepage": "https://github.com/GetSayAll/worktree-cleaner",
     "shortDescription": "Audit and clean Git worktrees and build artifacts safely",
+    "longDescription": "Worktree Cleaner scans a repository, lists every Git worktree and build artifact directory, and explains item by item why each one can or cannot be deleted. Scanning is read-only; deletions go through git worktree remove and the system Trash or Recycle Bin.",
     "icon": [
-      "icons/icon.png",
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/128x128@2x.png"
-    ]
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../ATTRIBUTION.md": "ATTRIBUTION.md",
+      "../public/fonts/LICENSE-Inter.txt": "LICENSE-Inter.txt",
+      "../public/fonts/LICENSE-JetBrainsMono.txt": "LICENSE-JetBrainsMono.txt"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRGMEQ2MkM2NDkyNzM2RDUKUldUVk5pZEp4bUlOVDlQMW53Ynh2ZmdBc29VZU4yNGRCQ1VjK0dlRm51eGl2c3QvVVB0bm5YT2UK",
+      "endpoints": [
+        "https://github.com/GetSayAll/worktree-cleaner/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

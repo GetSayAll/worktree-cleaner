@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import { hostOs, isDesktop, systemAccent } from "./platform";
+import { checkForUpdates } from "./update";
 import "./styles.css";
 
 // Which host is drawing the window. The stylesheet needs it for one thing: on
@@ -28,3 +29,20 @@ createApp(App).mount("#app");
 void systemAccent().then((accent) => {
   if (accent) document.documentElement.style.setProperty("--accent", accent);
 });
+
+/**
+ * The update check, a few seconds after the window is up.
+ *
+ * Not before: the app is usable while this waits, and the window that the user
+ * is looking at should not wait for the network. Not on every page change
+ * either: one check per launch is enough, and the Settings page has a button for
+ * the times when a check right now is what is wanted.
+ *
+ * A failure is quiet. A build that cannot reach the release feed is a build that
+ * still works, and a banner about it on every launch would be noise.
+ */
+if (desktop) {
+  window.setTimeout(() => {
+    void checkForUpdates();
+  }, 3000);
+}

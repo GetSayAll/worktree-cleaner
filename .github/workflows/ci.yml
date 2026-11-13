@@ -1,0 +1,91 @@
+# The gate for every change.
+#
+# The repository's own rules are the gate — `pnpm test`, `pnpm lint:rust` and
+# the browser checks — so this workflow only runs them. A red build here means
+# the rules are red, not that the workflow disagrees with them.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Test and gate (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Front-end tests
+        run: pnpm test
+
+      - name: Rust gate
+        run: pnpm lint:rust
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Layout in a real browser
+        run: pnpm test:layout
+
+      - name: Theme in a real browser
+        run: pnpm test:theme
+
+  windows:
+    name: Compile and test (Windows)
+    # The app ships for Windows, so the code has to compile there. The lints are
+    # not run here: a lint that only fires on one platform is a rule that is not
+    # yet a rule, and the macOS job is where the gate lives.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Front-end tests
+        run: pnpm test
+
+      - name: Compile every target
+        run: cargo check --workspace --all-targets

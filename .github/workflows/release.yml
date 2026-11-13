@@ -1,0 +1,167 @@
+# A release, from a tag to a draft on the Releases page.
+#
+# The workflow builds, signs and assembles; it does not publish. The release is
+# created as a draft so that a person can install the artifact, check it, and
+# only then press publish. The updater reads `latest.json` from a published
+# release, so a draft is invisible to the updater — which is exactly right: an
+# update that nobody has tested must not reach anybody's machine.
+#
+# Signing needs secrets that are set up in the repository settings:
+#   TAURI_SIGNING_PRIVATE_KEY            the updater's private key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   its password, if it has one
+#   APPLE_CERTIFICATE                    the Developer ID certificate, base64
+#   APPLE_CERTIFICATE_PASSWORD           its password
+#   APPLE_SIGNING_IDENTITY               "Developer ID Application: …"
+#   APPLE_ID                             the Apple ID that owns the team
+#   APPLE_PASSWORD                       the app-specific password for it
+#   APPLE_TEAM_ID                        the team the certificate belongs to
+#
+# `docs/RELEASE.md` has the same list with the steps to create each value.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to build (for example v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # One universal macOS build rather than one per architecture: the
+          # updater asks for the key of the architecture it is running on, and
+          # the manifest publishes the same universal archive under both keys.
+          - label: macOS (universal)
+            os: macos-14
+            target: universal-apple-darwin
+            platform: darwin
+            arch: universal
+          - label: Windows (x64)
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build and bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Collect the artifacts
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          node scripts/release-assets.mjs collect \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --version "$VERSION" \
+            --bundle "target/${{ matrix.target }}/release/bundle" \
+            --out release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    name: Assemble the draft release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: The tag and the version
+        id: version
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION=$(node -p "require('./package.json').version")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Make sure the tag exists
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          git fetch --tags --force
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "tag $TAG already exists"
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "created tag $TAG"
+          fi
+
+      - name: Write the updater manifest
+        shell: bash
+        run: |
+          node scripts/release-assets.mjs manifest \
+            --dir release \
+            --version "${{ steps.version.outputs.version }}" \
+            --tag "${{ steps.version.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --out release/latest.json
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          gh release create "$TAG" \
+            --draft \
+            --title "Worktree Cleaner $VERSION" \
+            --generate-notes \
+            release/*
