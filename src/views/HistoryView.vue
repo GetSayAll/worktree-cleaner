@@ -4,8 +4,6 @@ import { activity, history, historyError } from "../state";
 import { activityText, detailText, formatBytes, formatTimestamp, homePath, reasonCopy } from "../format";
 import type { ActivityEvent, HistoryEntry } from "../types";
 import { messages } from "../i18n";
-import AppIcon from "../components/AppIcon.vue";
-import EmptyState from "../components/EmptyState.vue";
 
 type FilterKey = "all" | "worktree-remove" | "trash-move" | "activity";
 
@@ -85,17 +83,12 @@ async function copyAll() {
 
 <template>
   <div class="stack page--wide">
-    <div class="page-head">
-      <div class="page-head__lead">
-        <span class="page-head__icon"><AppIcon name="history" /></span>
-        <div class="page-head__text">
-          <h1>{{ messages.history.title }}</h1>
-          <p class="page-head__sub">{{ messages.history.lede }}</p>
-        </div>
+    <div class="spread">
+      <div>
+        <h1>{{ messages.history.title }}</h1>
+        <p class="faint tiny">{{ messages.history.lede }}</p>
       </div>
-      <div class="page-head__actions">
-        <button class="btn" @click="copyAll">{{ copied ? messages.common.copied : messages.history.copyLog }}</button>
-      </div>
+      <button class="btn" @click="copyAll">{{ copied ? messages.common.copied : messages.history.copyLog }}</button>
     </div>
 
     <p v-if="historyError" class="notice notice--unsafe">{{ messages.history.readFailed(historyError) }}</p>
@@ -140,7 +133,7 @@ async function copyAll() {
               <div class="tiny muted">{{ detailText(row.entry.detail_code, row.entry.detail_args, row.entry.detail) }}</div>
             </div>
           </div>
-          <EmptyState v-if="filtered.length === 0" icon="history" :text="messages.history.empty" />
+          <div v-if="filtered.length === 0" class="empty">{{ messages.history.empty }}</div>
         </div>
       </div>
     </div>

@@ -5,8 +5,6 @@ import { snapshot } from "../state";
 import { displayPath, hygieneRuleKey, hygieneText } from "../format";
 import { messages } from "../i18n";
 import StatCard from "../components/StatCard.vue";
-import AppIcon from "../components/AppIcon.vue";
-import EmptyState from "../components/EmptyState.vue";
 
 // The policy page: what the audit found, and the wiring that keeps it from
 // coming back. Every level here was decided in `crates/worktree-core/src/hygiene.rs`
@@ -135,16 +133,13 @@ function ruleFix(rule: HygieneRule): string {
 
 <template>
   <div class="stack page--wide">
-    <div class="page-head">
-      <div class="page-head__lead">
-        <span class="page-head__icon"><AppIcon name="hygiene" /></span>
-        <div class="page-head__text">
-          <h1>{{ messages.hygiene.title }}</h1>
-          <p class="page-head__sub">
-            {{ messages.hygiene.metOf(counts.ok, rules.length) }}
-            <span v-if="report"> · {{ messages.hygiene.policyRef }}</span>
-          </p>
-        </div>
+    <div class="spread">
+      <div>
+        <h1>{{ messages.hygiene.title }}</h1>
+        <p class="faint tiny">
+          {{ messages.hygiene.metOf(counts.ok, rules.length) }}
+          <span v-if="report"> · {{ messages.hygiene.policyRef }}</span>
+        </p>
       </div>
     </div>
 
@@ -180,7 +175,6 @@ function ruleFix(rule: HygieneRule): string {
     </div>
 
     <div v-if="counts.violation > 0" class="banner banner--danger">
-      <AppIcon name="alert" class="banner__icon" />
       <span>
         <span class="banner__title">{{ messages.hygiene.level.violation }}</span>
         {{ messages.hygiene.violationBanner(counts.violation) }}
@@ -221,7 +215,7 @@ function ruleFix(rule: HygieneRule): string {
     </div>
 
     <div v-if="groups.length === 0" class="card">
-      <EmptyState icon="hygiene" :text="messages.hygiene.findings.empty" />
+      <div class="empty">{{ messages.hygiene.findings.empty }}</div>
     </div>
 
     <!-- Accepted exceptions: the finding stays visible, with the date it stops
