@@ -56,7 +56,11 @@ jobs:
       NOTARY_KEY_ID: JG5HB3CLJ3
       NOTARY_ISSUER_ID: a93df79e-a999-45de-95da-daf9b09bd6f0
     steps:
+      # A dispatch rebuilds a tag, so the build uses the tagged commit rather
+      # than whatever the default branch has become since.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: pnpm/action-setup@v4
 
@@ -196,7 +200,11 @@ jobs:
     name: Build Windows (x64)
     runs-on: windows-latest
     steps:
+      # A dispatch rebuilds a tag, so the build uses the tagged commit rather
+      # than whatever the default branch has become since.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: pnpm/action-setup@v4
 
@@ -245,6 +253,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The version guard and the updater manifest both read the tagged
+          # tree, never the branch that happens to be current.
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
