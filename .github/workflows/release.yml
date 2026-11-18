@@ -6,17 +6,25 @@
 # release, so a draft is invisible to the updater — which is exactly right: an
 # update that nobody has tested must not reach anybody's machine.
 #
-# Signing needs secrets that are set up in the repository settings:
-#   TAURI_SIGNING_PRIVATE_KEY            the updater's private key
-#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   its password, if it has one
-#   APPLE_CERTIFICATE                    the Developer ID certificate, base64
-#   APPLE_CERTIFICATE_PASSWORD           its password
-#   APPLE_SIGNING_IDENTITY               "Developer ID Application: …"
-#   APPLE_ID                             the Apple ID that owns the team
-#   APPLE_PASSWORD                       the app-specific password for it
-#   APPLE_TEAM_ID                        the team the certificate belongs to
+# macOS signing does not copy the private key anywhere. The job reads the team's
+# existing Match storage and the team's notary key from private repositories
+# pinned to a commit, and builds a temporary keychain for the length of the
+# build. What this file reveals is those repository names and pins; no key
+# material is here, and the secret values are unreadable through the API and
+# masked in logs.
 #
-# `docs/RELEASE.md` has the same list with the steps to create each value.
+# The credentials therefore exist as secrets in the `mac-release` environment,
+# which a pull request can never read:
+#
+#   RELEASE_CREDENTIALS_DEPLOY_KEY   read-only deploy key for the credential repository
+#   APPLE_SIGNING_MATCH_DEPLOY_KEY   read-only deploy key for the Match storage
+#   RELEASE_AGE_IDENTITY             age identity of this repository's CI recipient
+#   TAURI_SIGNING_PRIVATE_KEY        the updater key; the first release needs it,
+#                                    because the app checks for updates at launch
+#
+# `docs/RELEASE.md` §3.3 has the same list with the steps to obtain each value.
+# The packaging itself lives in `scripts/release-macos-dmg.sh`, which is also
+# what a person runs on a Mac; this workflow only supplies the credentials.
 
 name: Release
 
@@ -34,26 +42,159 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.label }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # One universal macOS build rather than one per architecture: the
-          # updater asks for the key of the architecture it is running on, and
-          # the manifest publishes the same universal archive under both keys.
-          - label: macOS (universal)
-            os: macos-15
-            target: universal-apple-darwin
-            platform: darwin
-            arch: universal
-          - label: Windows (x64)
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            platform: windows
-            arch: x86_64
+  macos:
+    name: Build macOS (universal)
+    runs-on: macos-15
+    # A protected environment, so the signing secrets are never exposed to a
+    # `pull_request` run of a public repository.
+    environment: mac-release
+    env:
+      RELEASE_CREDENTIALS_REPO: HD838A/remotemic-notary-secrets
+      RELEASE_CREDENTIALS_COMMIT: c1885f62ed175b6f28bd61d3232377ce594e4fd4
+      MATCH_REPO: HD838A/apple-signing-match
+      MATCH_COMMIT: 2e271768593821611c54f3d1b376f39e503f53be
+      NOTARY_KEY_ID: JG5HB3CLJ3
+      NOTARY_ISSUER_ID: a93df79e-a999-45de-95da-daf9b09bd6f0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # A universal build needs both architectures; `universal-apple-darwin` is
+      # a Tauri target, not a rustup one.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+
+      - run: pnpm install --frozen-lockfile
+
+      # 127 front-end and contract tests take a second; the Rust gate is what
+      # `ci.yml` already ran on this commit.
+      - name: Test the sources that are about to be packaged
+        run: pnpm test
+
+      # The credential checkouts live inside the workspace, and the packaging
+      # script refuses to build from a tree with local changes.
+      - name: Keep the private checkouts out of git status
+        run: printf '/.private-release/\n' >> .git/info/exclude
+
+      - name: Check out the release credentials (readonly, pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.RELEASE_CREDENTIALS_REPO }}
+          ref: ${{ env.RELEASE_CREDENTIALS_COMMIT }}
+          path: .private-release/remotemic-notary-secrets
+          ssh-key: ${{ secrets.RELEASE_CREDENTIALS_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Check out the Match identities (readonly, pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MATCH_REPO }}
+          ref: ${{ env.MATCH_COMMIT }}
+          path: .private-release/apple-signing-match
+          ssh-key: ${{ secrets.APPLE_SIGNING_MATCH_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Verify the pinned checkouts
+        run: |
+          set -euo pipefail
+          credentials=.private-release/remotemic-notary-secrets
+          match=.private-release/apple-signing-match
+          test "$(git -C "$credentials" rev-parse HEAD)" = "$RELEASE_CREDENTIALS_COMMIT"
+          test "$(git -C "$match" rev-parse HEAD)" = "$MATCH_COMMIT"
+          # Checkout leaves a detached HEAD; Match clones this path with
+          # `--branch main`, so the branch has to exist here.
+          git -C "$match" update-ref refs/heads/main "$MATCH_COMMIT"
+          git -C "$match" symbolic-ref HEAD refs/heads/main
+
+      - name: Install age
+        run: command -v age >/dev/null 2>&1 || brew install age
+
+      # Match imports Apple's public intermediates before it installs anything.
+      # When those URLs are blocked, the failure reads as "Could not install
+      # WWDR certificate" and looks like a credentials problem; say what it is.
+      - name: Check that Apple serves its intermediate certificates
+        run: |
+          set -euo pipefail
+          reachable=0
+          for alias in G2 G3 G4 G5; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+              "https://www.apple.com/certificateauthority/AppleWWDRCA$alias.cer" || true)
+            echo "AppleWWDRCA$alias.cer -> ${code:-no response}"
+            [ "$code" = "200" ] && reachable=1
+          done
+          if [ "$reachable" = "0" ]; then
+            echo "::error::No Apple intermediate certificate is reachable from this runner; Match cannot import the signing identity."
+            exit 1
+          fi
+
+      - name: Stage the CI age identity
+        env:
+          RELEASE_AGE_IDENTITY: ${{ secrets.RELEASE_AGE_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_AGE_IDENTITY" ]; then
+            echo "::error::RELEASE_AGE_IDENTITY is not configured in the mac-release environment."
+            echo "Without it this build would be unsigned; stopping instead."
+            exit 1
+          fi
+          umask 077
+          identity="$RUNNER_TEMP/release.agekey"
+          printf '%s' "$RELEASE_AGE_IDENTITY" > "$identity"
+          chmod 600 "$identity"
+          test "$(stat -f '%Lp' "$identity")" = 600
+          echo "AGE_IDENTITY_FILE=$identity" >> "$GITHUB_ENV"
+
+      # Tauri looks for the notary key while it bundles and notarizes the app,
+      # so the key is decrypted once, here, and lives for the rest of the job.
+      - name: Decrypt the notary key
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/AuthKey_$NOTARY_KEY_ID.p8"
+          age -d -i "$AGE_IDENTITY_FILE" -o "$key" \
+            .private-release/remotemic-notary-secrets/AuthKey_JG5HB3CLJ3.p8.worktree-cleaner.age
+          chmod 600 "$key"
+          {
+            echo "APPLE_API_KEY=$NOTARY_KEY_ID"
+            echo "APPLE_API_ISSUER=$NOTARY_ISSUER_ID"
+            echo "APPLE_API_KEY_PATH=$key"
+          } >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize and collect
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # Match clones the pinned local checkout instead of reaching GitHub
+          # again, and the ciphertexts are the ones this repository's CI
+          # recipient can open.
+          MATCH_GIT_URL: file://${{ github.workspace }}/.private-release/apple-signing-match
+          P8_ENCRYPTED_FILE: ${{ github.workspace }}/.private-release/remotemic-notary-secrets/AuthKey_JG5HB3CLJ3.p8.worktree-cleaner.age
+          MATCH_PASSWORD_ENCRYPTED_FILE: ${{ github.workspace }}/.private-release/remotemic-notary-secrets/match-password.worktree-cleaner.age
+        run: |
+          set -euo pipefail
+          ALLOW_ISOLATED_RELEASE_KEYCHAIN=1 \
+            .private-release/remotemic-notary-secrets/run-with-isolated-release-keychain.sh -- \
+            ./scripts/release-macos-dmg.sh --skip-gate --updater
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-darwin-universal
+          path: release/
+          if-no-files-found: error
+
+  windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -66,7 +207,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -79,34 +220,28 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm tauri build --target ${{ matrix.target }}
+        run: pnpm tauri build --target x86_64-pc-windows-msvc
 
       - name: Collect the artifacts
         shell: bash
         run: |
           VERSION=$(node -p "require('./package.json').version")
           node scripts/release-assets.mjs collect \
-            --platform "${{ matrix.platform }}" \
-            --arch "${{ matrix.arch }}" \
+            --platform windows \
+            --arch x86_64 \
             --version "$VERSION" \
-            --bundle "target/${{ matrix.target }}/release/bundle" \
+            --bundle "target/x86_64-pc-windows-msvc/release/bundle" \
             --out release
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          name: release-windows-x86_64
           path: release/
           if-no-files-found: error
 
   publish:
     name: Assemble the draft release
-    needs: build
+    needs: [macos, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -129,19 +264,28 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Make sure the tag exists
+      - name: Verify the tag exists and matches the version
         env:
           TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
+          set -euo pipefail
+          # A dispatch rebuilds a tag that exists; it must never bring one into
+          # being. A mistyped tag would otherwise publish a release for a commit
+          # nobody chose.
           git fetch --tags --force
-          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "tag $TAG already exists"
-          else
-            git tag "$TAG"
-            git push origin "$TAG"
-            echo "created tag $TAG"
+          if ! git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG does not exist. Push the tag to release; a dispatch only rebuilds an existing one."
+            exit 1
           fi
+          # The artifact names and the update feed both derive from these two
+          # values, so a mismatch ships a release nobody can update into.
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::Tag $TAG does not match package.json version $VERSION."
+            exit 1
+          fi
+          echo "tag $TAG -> $(git rev-parse --short "$TAG")"
 
       - name: Write the updater manifest
         shell: bash

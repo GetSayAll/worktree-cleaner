@@ -54,33 +54,39 @@ only in the repository's secret store, and it is worth giving it one if the
 account allows it — a regenerated key means a new public key, so the change has
 to happen before the first release, not after.
 
-### 2.2 The Apple Developer ID certificate
+### 2.2 The Apple Developer ID identity and the notary key
 
-The app is notarized, or macOS will not open it on somebody else's machine.
+The app is signed with a **Developer ID Application** identity and notarized,
+or macOS will not open it on somebody else's machine.
 
-1. In the Apple Developer portal, create a **Developer ID Application**
-   certificate (not a development certificate).
-2. Export it as a `.p12` with a password.
-3. Put it in the repository as a secret, base64-encoded:
+The team already owns that identity, with its private key. **Do not create a
+second certificate for this app**: one Developer ID Application identity signs
+every app of the team, and a redundant certificate is a second key to protect and
+eventually revoke. On a Mac that signs interactively it is enough that the
+identity is in the login keychain:
 
-   ```bash
-   base64 -i "Developer ID Application: GetSayAll (TEAMID).p12" | tr -d '\n' \
-     | gh secret set APPLE_CERTIFICATE
-   gh secret set APPLE_CERTIFICATE_PASSWORD --body '<the p12 password>'
-   gh secret set APPLE_SIGNING_IDENTITY --body 'Developer ID Application: GetSayAll (TEAMID)'
-   ```
+```bash
+security find-identity -v -p codesigning | grep "Developer ID Application"
+```
 
-4. Create an **app-specific password** for the Apple ID that owns the team, and
-   put it in with the Apple ID and the team id:
+Notarization uses an App Store Connect **team API key**, not an Apple ID with an
+app-specific password: a key does not break when a password changes, has no 2FA,
+and can be revoked on its own. The key id, the issuer id and the `.p8` are kept
+outside this repository, in the team's own credential store. Never copy the
+`.p8` into this repository, a workflow file, or a shell profile.
 
-   ```bash
-   gh secret set APPLE_ID --body 'you@example.com'
-   gh secret set APPLE_PASSWORD --body '<the app-specific password>'
-   gh secret set APPLE_TEAM_ID --body 'TEAMID'
-   ```
+`scripts/release-macos-dmg.sh` takes them from the environment:
 
-Without these, the workflow still builds, but the `.dmg` is unsigned and
-Gatekeeper refuses it on any machine but this one.
+| Variable | Value |
+|---|---|
+| `APPLE_API_KEY_PATH` | a decrypted `.p8`, mode `600`, on a temporary path |
+| `APPLE_API_KEY` | the key id |
+| `APPLE_API_ISSUER` | the issuer id |
+| `APPLE_SIGNING_IDENTITY` | `Developer ID Application: … (TEAMID)` |
+
+Without them the script stops before it builds. A build without them is
+unsigned, and Gatekeeper refuses it on every machine but the one that made it.
+
 
 ### 2.3 The Windows code-signing certificate
 
@@ -105,6 +111,47 @@ published it.
 
 ## 3. Cutting the release
 
+Two ways to produce the same DMG. Both run `scripts/release-macos-dmg.sh`; the
+only difference is where the credentials come from.
+
+### 3.1 On a Mac, with the credentials in the environment
+
+The one command that is a release:
+
+```bash
+./scripts/release-macos-dmg.sh
+```
+
+It refuses to start unless the four `APPLE_*` variables of §2.2 are set and the
+`.p8` is mode `600`. Then, in order: checks the tree is clean and the version
+agrees in `package.json`, `src-tauri/tauri.conf.json` and `Cargo.toml`; runs the
+gate (`pnpm test`, `pnpm lint:rust`); builds a universal app with
+`pnpm tauri build --target universal-apple-darwin`; lets Tauri sign and notarize
+the app and staple it; notarizes and staples the DMG; verifies both with
+`codesign`, `stapler` and `spctl`; and collects the result into `release/` with
+a `SHA256SUMS` beside it.
+
+Flags, for the cases that need them:
+
+| Flag | Effect |
+|---|---|
+| `--skip-gate` | skip `pnpm test` and `pnpm lint:rust` (CI runs them in its own job) |
+| `--updater` | also build `Worktree-Cleaner_<version>_macos_universal.app.tar.gz` and its `.sig`; needs `TAURI_SIGNING_PRIVATE_KEY` |
+| `--allow-dirty` | build from a tree with local changes, for a trial only |
+| `--out <dir>` | collect somewhere other than `release/` |
+
+The script never publishes. A tag, a push and a draft release stay separate,
+deliberate steps.
+
+On a Mac that holds the credentials, stage them for the duration of that one
+command rather than exporting them into a shell. The team keeps a small wrapper
+that decrypts the `.p8` into a mode-`600` temporary file, exports the three
+`APPLE_API_KEY*` variables plus the signing identity, and deletes the file when
+the command exits — on success, failure and interrupt alike. It lives with the
+credentials, not here; its own documentation has the invocation.
+
+### 3.2 From a tag, in CI
+
 ```bash
 # 1. The version, in the one file that writes it down.
 $EDITOR package.json            # "version": "0.1.0" -> "0.2.0"
@@ -128,6 +175,80 @@ writes `latest.json` and creates a **draft** release.
 A release can also be built by hand from the workflow page ("Run workflow"),
 which is the way to rebuild a tag that already exists.
 
+The workflow signs only once the secrets of §3.3 exist. Until then a tagged
+build stops at a step that says which value is missing, rather than producing an
+unsigned DMG that Gatekeeper rejects on every other machine.
+
+### 3.3 What CI needs before it can sign
+
+The runner starts with no keychain and no `.p8`. Instead of copying the
+certificate into a secret, the job reads the team's existing Match storage and
+notary key from private repositories pinned to a commit, and builds a temporary
+keychain for the length of the build. One private key, one place.
+
+What this buys and what it costs: no second copy of the Developer ID key exists,
+and the repository names and pins below are public — they already are, in the
+public release workflow of the team's other macOS app. What is *not* public is
+any value: the secrets API answers `403` without admin, GitHub masks secret
+values in logs, and a `pull_request` run of this repository cannot read the
+`mac-release` environment at all.
+
+| Secret | What it is |
+|---|---|
+| `RELEASE_CREDENTIALS_DEPLOY_KEY` | read-only deploy key for the credential repository |
+| `APPLE_SIGNING_MATCH_DEPLOY_KEY` | read-only deploy key for the Match storage |
+| `RELEASE_AGE_IDENTITY` | the age identity of this repository's CI recipient |
+| `TAURI_SIGNING_PRIVATE_KEY` | the updater key of §2.1 — required, see below |
+
+The credential repository holds one ciphertext pair per consumer, encrypted to
+that consumer's recipient: the release Mac's pair, the original CI pair, and now
+`AuthKey_JG5HB3CLJ3.p8.worktree-cleaner.age` plus
+`match-password.worktree-cleaner.age` for this repository. A compromised or
+retired consumer is removed by deleting its pair and its recipient, without
+re-encrypting anything for the others.
+
+The updater key is not optional here. `main.ts` calls `checkForUpdates()` at
+launch, so a build without a signed updater archive and a published `latest.json`
+ships an app whose update path fails every time it starts. The macOS job therefore
+always runs the script with `--updater`, and the publish job writes `latest.json`
+from the `.sig` the build produced.
+
+```bash
+gh secret set RELEASE_AGE_IDENTITY --env mac-release < /path/to/ci-age-identity.txt
+gh secret set RELEASE_CREDENTIALS_DEPLOY_KEY --env mac-release < /path/to/credentials_deploy_key
+gh secret set APPLE_SIGNING_MATCH_DEPLOY_KEY --env mac-release < /path/to/match_deploy_key
+```
+
+The `mac-release` environment already exists and accepts only `v*` tags. Keep it
+that way: an unprotected environment on a public repository is a secret-leak
+path, not a formality.
+
+Two properties of this route are worth knowing before the first run:
+
+- **It depends on Apple serving its intermediate certificates.** `fastlane match`
+  downloads `https://www.apple.com/certificateauthority/AppleWWDRCAG*.cer` and
+  imports them. Those four URLs answer `403` from some networks, even though
+  `https://www.apple.com/` itself answers `200`. The workflow checks them first
+  and fails with a message that says so, instead of the misleading
+  `Could not install WWDR certificate`.
+- **It does not run on this Mac.** The identity is already in the login keychain
+  here, so local packaging never calls Match. A local Match failure says nothing
+  about the workflow.
+
+The workflow pins the credential repository and the Match storage to exact
+commits (`env:` under the `macos` job). Bump both when either repository changes,
+or the run keeps using the old script.
+
+The macOS job then runs the same script a person runs:
+
+```bash
+./scripts/release-macos-dmg.sh --skip-gate
+```
+
+— with `CODE_SIGN_IDENTITY` and the notary key supplied by the isolated-keychain
+wrapper, which the script accepts in place of `APPLE_SIGNING_IDENTITY` and
+`APPLE_API_KEY_PATH`.
+
 ---
 
 ## 4. Before the draft is published
@@ -137,9 +258,12 @@ release, and each one has caught something.
 
 ### 4.1 The macOS app
 
-- [ ] Download the `.dmg` from the draft, open it, and drag the app to
-      **Applications**. It opens without a warning about an unknown developer —
-      that is what notarization is for.
+- [ ] Download the `.dmg` from the draft. It shows the license agreement of
+      `bundle.licenseFile` before it mounts — accepting it is the first click a
+      user meets, and `hdiutil attach` cancelled by that screen is why an
+      automated mount of this image fails.
+- [ ] Drag the app to **Applications**. It opens without a warning about an
+      unknown developer — that is what notarization is for.
 - [ ] `spctl -a -vv "/Applications/Worktree Cleaner.app"` says `accepted` and
       names the team.
 - [ ] The app scans a real repository and the verdicts are the ones the
