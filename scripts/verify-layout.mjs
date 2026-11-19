@@ -163,6 +163,24 @@ async function stopChrome(child) {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }
 
+/**
+ * Removes Chrome's scratch profile, and never fails the check with it.
+ *
+ * Chrome's helper processes can still be writing into the directory after the
+ * main process has exited, and Node then reports ENOTEMPTY halfway through the
+ * recursive removal. The layout assertions have already passed at that point,
+ * so a tidy-up race must not turn a green check red: the retries cover the
+ * ordinary case, and anything still held afterwards is the system temp
+ * cleaner's business.
+ */
+function removeUserDataDir(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    // A leftover temporary directory is not a layout finding.
+  }
+}
+
 /** Wait until the SPA has mounted and is idle for two animation frames. */
 async function settle(cdp) {
   let ready = false;
@@ -369,7 +387,7 @@ async function main() {
     }
   } finally {
     await stopChrome(child);
-    rmSync(userDataDir, { recursive: true, force: true });
+    removeUserDataDir(userDataDir);
   }
 
   if (failures.length > 0) {

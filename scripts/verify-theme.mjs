@@ -205,6 +205,22 @@ async function stopChrome(child) {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }
 
+/**
+ * Removes Chrome's scratch profile, and never fails the check with it.
+ *
+ * The same teardown race the layout check hit: helper processes outlive the main
+ * one briefly, and the recursive removal reports ENOTEMPTY after every colour
+ * assertion has already passed. Retry the ordinary case, and let a directory the
+ * system will clear later stay where it is.
+ */
+function removeUserDataDir(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    // A leftover temporary directory is not a colour finding.
+  }
+}
+
 /** Wait until the SPA has mounted and is idle for two animation frames. */
 async function settle(cdp) {
   let ready = false;
@@ -369,7 +385,7 @@ async function main() {
   } finally {
     ws.close();
     await stopChrome(child);
-    rmSync(userDataDir, { recursive: true, force: true });
+    removeUserDataDir(userDataDir);
   }
 }
 
