@@ -705,6 +705,96 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
     })
 }
 
+/// Helpers the unit tests share across modules.
+///
+/// `#[cfg(test)]` rather than a public module, so none of this reaches the shipped
+/// API. The integration tests under `tests/` compile against the built crate and
+/// cannot see it, so `tests/common/mod.rs` keeps its own copy of `open_for_times`
+/// — the one thing here worth duplicating rather than exporting.
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime};
+
+    /// Opens a file or a directory so its timestamps can be set.
+    ///
+    /// Windows needs two things that `File::open` does not supply, and without them
+    /// a fixture silently keeps the mtime it was created with:
+    ///
+    /// * `FILE_FLAG_BACKUP_SEMANTICS` — `CreateFileW` refuses a *directory* without
+    ///   it, so every directory was skipped and a thirty-day-old tree stayed
+    ///   "written moments ago".
+    /// * `FILE_WRITE_ATTRIBUTES` — `SetFileTime` needs write access to the
+    ///   attributes; a read-only handle answers `ERROR_ACCESS_DENIED`.
+    ///
+    /// Neither call is unsafe: they only set arguments passed to `CreateFileW`.
+    pub fn open_for_times(path: &Path) -> std::io::Result<std::fs::File> {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt as _;
+
+            /// `FILE_WRITE_ATTRIBUTES`, from `winnt.h`.
+            const FILE_WRITE_ATTRIBUTES: u32 = 0x0000_0100;
+            /// `FILE_FLAG_BACKUP_SEMANTICS`, from `winbase.h`.
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+
+            std::fs::OpenOptions::new()
+                .write(true)
+                .access_mode(FILE_WRITE_ATTRIBUTES)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+                .open(path)
+        }
+        #[cfg(not(windows))]
+        {
+            std::fs::File::open(path)
+        }
+    }
+
+    /// Sets one path's access and modification times `seconds_ago` in the past.
+    ///
+    /// Fails loudly: a fixture that could not be dated does not test what it says
+    /// it tests. Ignoring the error here is what let sixty Windows tests judge a
+    /// thirty-day-old tree as "changed today" and pass for the wrong reason —
+    /// quietly, which is worse than failing.
+    pub fn stamp(path: &Path, seconds_ago: u64) {
+        let target = SystemTime::now() - Duration::from_secs(seconds_ago);
+        let times = std::fs::FileTimes::new()
+            .set_accessed(target)
+            .set_modified(target);
+        let file = open_for_times(path).expect("open for set_times");
+        file.set_times(times).expect("set mtime");
+    }
+
+    /// Stamps every entry under `root`, and `root` itself, `days` in the past.
+    ///
+    /// The activity check compares the newest mtime in the tree against the real
+    /// clock, so a fixture written moments ago always lands inside the window. A
+    /// test about a different signal has to move the tree out of it.
+    pub fn backdate_tree(root: &Path, days: u64) {
+        let seconds = days * 86_400;
+        let mut stack = vec![root.to_path_buf()];
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        while let Some(dir) = stack.pop() {
+            dirs.push(dir.clone());
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if entry.metadata().is_ok_and(|meta| meta.is_dir()) {
+                    stack.push(path);
+                } else {
+                    stamp(&path, seconds);
+                }
+            }
+        }
+        // A directory is stamped after its children so nothing re-dates it.
+        for dir in dirs.into_iter().rev() {
+            stamp(&dir, seconds);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod common;
+
 use worktree_core::git::ProcessGitRunner;
 use worktree_core::reason::{ReasonCode, SafetyStatus};
 use worktree_core::worktree::{
@@ -436,7 +438,7 @@ fn a_bulk_directory_touch_does_not_make_a_worktree_recent() {
     // Phase 2: touch the directory itself, the way a backup or an indexer does.
     // Nothing in the repository changed, so nothing about the verdict may change.
     let now = SystemTime::now();
-    let dir = std::fs::File::open(&feature).expect("open worktree dir");
+    let dir = common::open_for_times(&feature).expect("open worktree dir");
     dir.set_times(
         std::fs::FileTimes::new()
             .set_accessed(now)

@@ -1233,6 +1233,7 @@ mod tests {
     use super::*;
     use crate::git::testing::{Canned, FakeGitRunner};
     use crate::git::GitOutput;
+    use crate::testing::backdate_tree;
     use crate::{ReasonCode, SafetyStatus};
 
     fn opts() -> ArtifactScanOptions {
@@ -1276,43 +1277,6 @@ mod tests {
         std::fs::create_dir_all(&artifact).expect("create artifact");
         std::fs::write(artifact.join("index.js"), "module.exports = 1;\n").expect("write file");
         (dir, root, artifact)
-    }
-
-    /// Stamps every entry under `root`, and `root` itself, `days` in the past.
-    ///
-    /// The activity check compares the newest mtime in the tree against the real
-    /// clock, so a fixture written moments ago always lands inside the window.
-    /// A test that is about a different signal has to move the tree out of it.
-    fn backdate_tree(root: &Path, days: u64) {
-        let target = SystemTime::now() - Duration::from_secs(days * 86_400);
-        let times = || {
-            std::fs::FileTimes::new()
-                .set_accessed(target)
-                .set_modified(target)
-        };
-        let mut stack = vec![root.to_path_buf()];
-        let mut dirs: Vec<PathBuf> = Vec::new();
-        while let Some(dir) = stack.pop() {
-            dirs.push(dir.clone());
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let is_dir = entry.metadata().is_ok_and(|meta| meta.is_dir());
-                if is_dir {
-                    stack.push(path);
-                } else if let Ok(file) = std::fs::File::open(&path) {
-                    let _ = file.set_times(times());
-                }
-            }
-        }
-        // A directory is stamped after its children so nothing re-dates it.
-        for dir in dirs.into_iter().rev() {
-            if let Ok(file) = std::fs::File::open(&dir) {
-                let _ = file.set_times(times());
-            }
-        }
     }
 
     #[test]
@@ -1428,7 +1392,11 @@ mod tests {
 
         assert_eq!(
             credential_in_within(dir.path(), CREDENTIAL_SCAN_LIMIT, Duration::from_secs(10)),
-            CredentialScan::Complete(Some("left-pad/.env".to_string()))
+            // Written with the platform's separator: the evidence is a path the
+            // reader may be shown, and Windows spells it `left-pad\.env`.
+            CredentialScan::Complete(Some(
+                ["left-pad", ".env"].join(std::path::MAIN_SEPARATOR_STR)
+            ))
         );
     }
 
@@ -1946,9 +1914,12 @@ mod tests {
             &opts(),
         );
         assert_eq!(record.safety.status, SafetyStatus::Safe);
+        // The evidence is a path minus the project root, so it carries whatever
+        // separator the walk used: `Apps/Web/package.json` on Unix,
+        // `Apps\Web\package.json` on Windows.
+        let marker = ["Apps", "Web", "package.json"].join(std::path::MAIN_SEPARATOR_STR);
         assert!(record.safety.reasons.iter().any(|reason| {
-            reason.code == ReasonCode::AfRebuildable
-                && reason.evidence.contains("Apps/Web/package.json")
+            reason.code == ReasonCode::AfRebuildable && reason.evidence.contains(&marker)
         }));
     }
 
@@ -2595,7 +2566,7 @@ mod tests {
         let root = dir.path().to_path_buf();
         let spelled_differently = PathBuf::from(root.to_string_lossy().replace('\\', "/"));
 
-        let kept = owning_roots(&[root.clone(), spelled_differently.clone()]);
+        let kept = owning_roots(&[root.clone(), spelled_differently]);
         assert_eq!(kept.len(), 1, "{kept:?}");
         assert!(same_directory(&kept[0], &root));
         assert!(

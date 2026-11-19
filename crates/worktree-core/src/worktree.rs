@@ -1295,15 +1295,12 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
 
     /// Backdates a directory's mtime so "recent activity" can be tested.
     ///
-    /// A read-only descriptor is enough: `futimens` needs the file to exist, not to be
-    /// opened for writing (and a directory cannot be).
+    /// The platform-specific part lives in `crate::testing::stamp`: Windows will not
+    /// open a directory without `FILE_FLAG_BACKUP_SEMANTICS` and will not set its
+    /// times without `FILE_WRITE_ATTRIBUTES`, which is why every test that needs an
+    /// old tree failed there.
     fn backdate(path: &Path, seconds_ago: u64) {
-        let target = SystemTime::now() - Duration::from_secs(seconds_ago);
-        let file = std::fs::File::open(path).expect("open dir for set_times");
-        let times = std::fs::FileTimes::new()
-            .set_accessed(target)
-            .set_modified(target);
-        file.set_times(times).expect("set directory mtime");
+        crate::testing::stamp(path, seconds_ago);
     }
 
     fn feature_entry(dir: &Path) -> WorktreeEntry {
