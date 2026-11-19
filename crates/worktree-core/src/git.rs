@@ -18,6 +18,12 @@
 //!   that exported them), an inherited value would silently redirect every
 //!   `git -C <repo>` call to the wrong repository.
 //!
+//! One property that is not about reading: on Windows the child is started with
+//! `CREATE_NO_WINDOW`. The release build is a GUI-subsystem binary with no console, and
+//! Windows hands a console — a window, drawn by Windows Terminal on Windows 11 — to
+//! every console-subsystem child of a process that has none, so without the flag each
+//! Git call in a scan would open a terminal of its own.
+//!
 //! Scanning code must only pass read-only verbs (`status`, `worktree list`,
 //! `merge-base`, `stash list`, `ls-files`, `log`, `rev-parse`, `symbolic-ref`). The
 //! transport itself does not enforce that: the executor stage owns write commands and
@@ -34,6 +40,12 @@ pub const DEFAULT_GIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Poll interval while waiting for a child process.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// `CREATE_NO_WINDOW` from `winbase.h`: a console that is never shown. Windows creates a
+/// console for a console-subsystem child of a process that has none, and the release
+/// build is such a process (see `src-tauri/src/main.rs`).
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Output of a finished Git command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,7 +128,8 @@ impl Default for ProcessGitRunner {
 impl GitRunner for ProcessGitRunner {
     fn run(&self, repo: &Path, args: &[&str]) -> Result<GitOutput, GitError> {
         let command = display_command(repo, args);
-        let mut child = Command::new("git")
+        let mut process = Command::new("git");
+        process
             .arg("-C")
             .arg(repo)
             .args(args)
@@ -127,12 +140,21 @@ impl GitRunner for ProcessGitRunner {
             .env_remove("GIT_INDEX_FILE")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|source| GitError::Io {
-                command: command.clone(),
-                source,
-            })?;
+            .stderr(Stdio::piped());
+
+        // The pipes above are the only channel the runner reads; the child needs no
+        // console, and on Windows one would otherwise be created with a window.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+
+            process.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = process.spawn().map_err(|source| GitError::Io {
+            command: command.clone(),
+            source,
+        })?;
 
         let stdout_pipe = child.stdout.take().ok_or_else(|| GitError::Io {
             command: command.clone(),
