@@ -205,6 +205,25 @@ async function stopChrome(child) {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }
 
+/**
+ * Removes the throwaway Chrome profile, without turning teardown into a verdict.
+ *
+ * Chrome's helper processes outlive the parent by a moment and the profile is a
+ * directory they are still closing, so a plain `rmSync` sometimes answers
+ * ENOTEMPTY — the same race that failed a layout run whose pages had all passed.
+ * The retries cover it (Node backs off on ENOTEMPTY), and a refusal that survives
+ * them is printed rather than thrown: a directory left in the temp folder is not a
+ * theme problem, and a gate that goes red for something else is a gate people
+ * learn to ignore.
+ */
+function removeProfile(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch (error) {
+    console.warn(`could not remove the temporary profile at ${dir}: ${error.message}`);
+  }
+}
+
 /** Wait until the SPA has mounted and is idle for two animation frames. */
 async function settle(cdp) {
   let ready = false;
@@ -369,7 +388,7 @@ async function main() {
   } finally {
     ws.close();
     await stopChrome(child);
-    rmSync(userDataDir, { recursive: true, force: true });
+    removeProfile(userDataDir);
   }
 }
 
