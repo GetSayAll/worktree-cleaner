@@ -50,6 +50,14 @@ jobs:
       - name: Rust gate
         run: pnpm lint:rust
 
+      # The gate checked that the crate compiles and passed its lints, and never
+      # ran a single test: the decision tables, the deletion guards and the executor
+      # — the whole product — were verified on the developer's machine or not at
+      # all. `-p worktree-core` rather than `--workspace`, because the Tauri shell
+      # has no tests and linking it would cost minutes.
+      - name: Rust tests
+        run: cargo test -p worktree-core
+
       - name: Production build
         run: pnpm build
 
@@ -87,5 +95,13 @@ jobs:
       - name: Front-end tests
         run: pnpm test
 
+      # Not `cargo test` here yet. Fifteen of the crate's tests do not pass on
+      # Windows: twelve are written against Unix path shapes (`/Users/andy/…` is not
+      # an absolute path here, so `accepts_an_ordinary_project_path` and eleven
+      # neighbours assert the wrong thing before they reach the rule they are about),
+      # two match `/` separators in the evidence they compare, and one drives a
+      # generative corpus of Unix paths. They fail loudly rather than being skipped,
+      # because a skipped test is coverage this job would claim and not have;
+      # porting them is its own change.
       - name: Compile every target
         run: cargo check --workspace --all-targets

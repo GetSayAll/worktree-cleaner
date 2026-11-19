@@ -147,12 +147,53 @@ pub fn days_ago_secs(days: u64) -> u64 {
         .as_secs()
 }
 
+/// Opens a file or a directory so its timestamps can be set.
+///
+/// On Windows this takes two flags that `File::open` does not supply, and the
+/// helpers below were silently failing without them:
+///
+/// * `FILE_FLAG_BACKUP_SEMANTICS` — without it `CreateFileW` refuses a *directory*
+///   outright, so every directory in the fixture was skipped and the tree stayed
+///   "written moments ago". Sixty tests then judged a thirty-day-old fixture as
+///   changed today.
+/// * `FILE_WRITE_ATTRIBUTES` — `SetFileTime` needs write access to the attributes,
+///   not a read-only handle, and answers `ERROR_ACCESS_DENIED` for one.
+///
+/// Nothing here is unsafe: both only set the arguments passed to `CreateFileW`.
+pub fn open_for_times(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        /// `FILE_WRITE_ATTRIBUTES`, from `winnt.h`.
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x0000_0100;
+        /// `FILE_FLAG_BACKUP_SEMANTICS`, from `winbase.h`.
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+
+        std::fs::OpenOptions::new()
+            .write(true)
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::File::open(path)
+    }
+}
+
 /// Stamps every entry under `root`, and `root` itself, `days` in the past.
 ///
 /// The activity check reads the newest mtime in the tree against the real clock
 /// and does not offer a way to inject the file system's timestamps, so a fixture
 /// built moments ago is always inside the window; a test about another signal
 /// has to move the tree out of it.
+///
+/// A file that cannot be dated is skipped rather than fatal — this walks whole
+/// repositories, `.git` included, and one transient lock must not fail a fixture
+/// that is about something else. The unit tests use `crate::testing::backdate_tree`,
+/// which panics instead: its fixtures are small and entirely under the test's control,
+/// so a stamp that did not happen there is a bug in the helper, not bad luck.
 pub fn backdate_tree(root: &Path, days: u64) {
     let target = SystemTime::now() - Duration::from_secs(days * 86_400);
     let times = || {
@@ -172,14 +213,14 @@ pub fn backdate_tree(root: &Path, days: u64) {
             let is_dir = entry.metadata().is_ok_and(|meta| meta.is_dir());
             if is_dir {
                 stack.push(path);
-            } else if let Ok(file) = std::fs::File::open(&path) {
+            } else if let Ok(file) = open_for_times(&path) {
                 let _ = file.set_times(times());
             }
         }
     }
     // A directory is stamped after its children so nothing re-dates it.
     for dir in dirs.into_iter().rev() {
-        if let Ok(file) = std::fs::File::open(&dir) {
+        if let Ok(file) = open_for_times(&dir) {
             let _ = file.set_times(times());
         }
     }
