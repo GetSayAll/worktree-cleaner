@@ -147,6 +147,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 ### 8. History
 
 - Reverse-chronological list: time, action (remove worktree / move to Trash), target path, reason summary, result, size.
+- **What the reader did is on the same timeline**, marked as an action rather than a deletion: scans, project switches, the plan as it was generated, exports, settings changes, confirmations. Two records, two files, one list — the reader should not have to know which file holds the answer.
 - Filter: All / Worktree / Artifact; supports export.
 - A fixed note: the log is recorded only on this machine and is never reported.
 
@@ -459,6 +460,7 @@ Item 6 also guards against accidents such as "a variable being empty during conc
 ### 6.6 Logging and traceability
 
 - Each operation appends one local log entry: time, action, target path, reason summary, executed command, result, freed size, recoverable location.
+- **The plan is recorded too, once per plan.** `plan.generated` is written when the reader opens the plan page with a non-empty plan — the moment they stop assembling and start reading — and carries the worktree count, the artifact count and the total the page showed. Reopening an unchanged plan is not a second record; a changed selection is a new plan. `plan.exported` records a plan that left the app as JSON. Without them the log can say what was deleted but not what the run promised, and the two together are what makes a cleanup reviewable afterwards.
 - The log location varies by platform: on macOS `~/Library/Logs/Worktree Cleaner/operations.log`, on Windows `%LOCALAPPDATA%\Worktree Cleaner\logs\`.
 - Logs are written only to this machine; no network, no reporting; settings offer "Clear log".
 - The history page reads this log; failed entries are written too, for later troubleshooting.

@@ -350,7 +350,7 @@ scan.finished       { project, worktrees, artifacts, duration_ms, complete }
 scan.failed         { project, error }
 scan.cancelled      { project, elapsed_ms }
 project.switched    { from, to }
-plan.generated      { worktrees, artifacts, total_bytes, ack_reasons }
+plan.generated      { worktrees, artifacts, total_bytes }
 plan.exported       { format, item_count }
 settings.changed    { key, before, after }     // one event per changed key
 cleanup.confirmed   { forced_items, typed_name: bool }
@@ -359,6 +359,11 @@ trash.opened        {}
 
 `trash.opened` is included because a run is exactly when a user might want to
 know they opened it; drop it if it turns out to be noise.
+
+`plan.generated` carries no `ack_reasons`, unlike the payload sketched above: those
+are sentences in the active language, and an argument on the wire is a raw value by
+construction, so a list of them would freeze one language into a log that outlives
+it. How many gates applied is shown on the plan page, where the reader acts on it.
 
 **Not recorded:** hovering, focusing, re-rendering, language and theme changes
 while reading a page. The rule from §2 applies here too — if the reader would

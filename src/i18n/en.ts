@@ -221,8 +221,9 @@ export const en = {
         switched: "Switched to this project from {from}"
       },
       plan: {
-        generated: "Generated a plan: {worktrees} worktrees, {artifacts} artifact directories",
-        exported: "Exported the plan"
+        generated:
+          "Generated a plan: {worktrees} worktrees, {artifacts} artifact directories, {total_bytes} to release",
+        exported: "Copied the plan as JSON: {item_count} items"
       },
       settings: {
         changed: "Changed a setting"
