@@ -706,7 +706,9 @@ export const mockActivity: ActivityEvent[] = [
     at: "2026-10-12T09:05:40.000Z",
     action: "plan.generated",
     target: mockRoot,
-    args: { worktrees: 2, artifacts: 12 }
+    // The figure the plan page showed, so the preview's history reads like a real
+    // one instead of trailing an empty placeholder.
+    args: { worktrees: 2, artifacts: 12, total_bytes: 8_214_000_000 }
   },
   {
     at: "2026-10-12T09:06:01.000Z",

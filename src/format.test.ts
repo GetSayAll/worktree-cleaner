@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activityText,
   compareByActionability,
   compareSizeNullsFirst,
   formatBytes,
@@ -131,6 +132,46 @@ describe("compareByActionability", () => {
     // Zero, deliberately: the volume ordering is a second pass, composed by the
     // caller. A non-zero here would fight it.
     expect(compareByActionability(rec("Safe"), rec("Safe"))).toBe(0);
+  });
+});
+
+describe("activityText", () => {
+  function inLocale(locale: "en" | "zh-CN", run: () => void): void {
+    applyLocale(locale);
+    try {
+      run();
+    } finally {
+      applyLocale(SOURCE_LOCALE);
+    }
+  }
+
+  it("writes a byte argument as a size in the reader's units", () => {
+    // The plan line is what a reader goes back to when asking what a cleanup was
+    // worth before it ran. A raw byte count there would make the one number that
+    // matters unreadable, and formatting it in the core would freeze an English
+    // unit into a log that outlives the language it was written in.
+    const args = { worktrees: 3, artifacts: 6, total_bytes: 26_806_672_118 };
+    for (const [locale, table] of [
+      ["en", en],
+      ["zh-CN", zhCN]
+    ] as const) {
+      inLocale(locale, () => {
+        expect(activityText("plan.generated", args)).toBe(
+          table.activity.codes.plan.generated
+            .replace("{worktrees}", "3")
+            .replace("{artifacts}", "6")
+            .replace("{total_bytes}", formatBytes(26_806_672_118))
+        );
+      });
+    }
+    // Not the number itself: that is the fallback, not the sentence.
+    expect(activityText("plan.generated", args)).not.toContain("26806672118");
+  });
+
+  it("keeps an action this build has no copy for traceable", () => {
+    // A newer core against an older UI: an id is ugly, but a blank row reads as
+    // data loss.
+    expect(activityText("plan.something_new", {})).toBe("plan.something_new");
   });
 });
 

@@ -590,6 +590,71 @@ describe("the activity log", () => {
     expect(args.typed_name).toBe(false);
   });
 
+  it("writes the plan down when the reader goes to review it, once per plan", async () => {
+    // Until this existed nothing recorded the plan itself: `plan.generated` was in
+    // the type and in both message tables, and no code ever wrote it. After a run
+    // the only trace of what had been agreed to was a count on the confirmation
+    // line, so "what did this plan promise, and what did it actually free" could
+    // not be answered from the logs.
+    const { state, logActivity } = await freshStateWithExecutor({
+      entries: [],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.settings.whitelist_paths = [];
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [venv, dist];
+    const planned = state.cleanupPlan.value.total_bytes;
+    const generated = () =>
+      logActivity.mock.calls.filter((call: unknown[]) => call[0] === "plan.generated");
+
+    state.goTo("plan");
+
+    expect(generated()).toHaveLength(1);
+    const [, target, args] = generated()[0] as [string, string, Record<string, number>];
+    expect(target).toBe(mockRoot);
+    expect(args.worktrees).toBe(0);
+    expect(args.artifacts).toBe(2);
+    // The figure the plan page shows, not a second sum computed here: a log that
+    // disagrees with the screen it describes is worse than no log.
+    expect(args.total_bytes).toBe(planned);
+
+    // Going back to adjust something and returning to the same plan is not a
+    // second plan. A line per visit would drown the record it exists for.
+    state.goTo("overview");
+    state.goTo("plan");
+    expect(generated()).toHaveLength(1);
+
+    // A different selection is a different plan.
+    state.selectedArtifacts.value = [venv];
+    state.goTo("overview");
+    state.goTo("plan");
+    expect(generated()).toHaveLength(2);
+    unmockPlatform();
+  });
+
+  it("records a plan that left the app as JSON", async () => {
+    // The exported plan is how a run starts outside this app, so the log has to
+    // say one was taken and how much it covered.
+    const { state, logActivity } = await freshStateWithExecutor({
+      entries: [],
+      history: [],
+      log_error: null
+    });
+    state.projectPath.value = mockRoot;
+    state.snapshot.value = mockSnapshot;
+    state.recordPlanExport(4);
+    unmockPlatform();
+
+    const exported = logActivity.mock.calls.filter((call: unknown[]) => call[0] === "plan.exported");
+    expect(exported).toHaveLength(1);
+    const [, target, args] = exported[0] as [string, string, Record<string, unknown>];
+    expect(target).toBe(mockRoot);
+    expect(args.format).toBe("json");
+    expect(args.item_count).toBe(4);
+  });
+
 });
 
 describe("group selection and blocked execution", () => {

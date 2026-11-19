@@ -198,8 +198,8 @@ export const zhCN = {
         switched: "从 {from} 切换到这个项目"
       },
       plan: {
-        generated: "生成了清理计划：{worktrees} 个工作树、{artifacts} 个产物目录",
-        exported: "导出了计划"
+        generated: "生成了清理计划：{worktrees} 个工作树、{artifacts} 个产物目录，预计释放 {total_bytes}",
+        exported: "已把计划复制为 JSON：{item_count} 个条目"
       },
       settings: {
         changed: "修改了一项设置"

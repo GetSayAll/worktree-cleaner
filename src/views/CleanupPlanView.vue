@@ -10,6 +10,7 @@ import {
   executionProgress,
   goTo,
   projectPath,
+  recordPlanExport,
   selectedWorktrees,
   settings,
   snapshot
@@ -149,6 +150,9 @@ async function copyPlan() {
   try {
     await navigator.clipboard.writeText(planJson.value);
     copied.value = true;
+    // An exported plan is a plan a run can be started from later, and the log is
+    // the only place that would otherwise remember one was taken.
+    recordPlanExport(plan.value.worktree_removals.length + independentMoves.value.length);
     window.setTimeout(() => (copied.value = false), 1800);
   } catch {
     copied.value = false;

@@ -210,9 +210,16 @@ export function activityText(action: string, args: Record<string, DetailArg> = {
   const families: Record<string, Record<string, string> | undefined> = messages.activity.codes;
   const copy = families[action.slice(0, dot)]?.[action.slice(dot + 1)];
   if (typeof copy !== "string") return action;
-  const text = (value: DetailArg | undefined): string =>
-    value === undefined ? "" : detailArg(value);
-  return copy.replace(/\{(\w+)\}/g, (_, name: string) => text(args[name]));
+  // The wire format is untagged, so the argument's name is the only thing that
+  // knows a number is a byte count — the same rule `hygieneArg` applies to a
+  // finding. Formatting it in the core would freeze an English unit into the log.
+  const text = (name: string): string => {
+    const value = args[name];
+    if (value === undefined) return "";
+    if (typeof value === "number" && name.endsWith("_bytes")) return formatBytes(value);
+    return detailArg(value);
+  };
+  return copy.replace(/\{(\w+)\}/g, (_, name: string) => text(name));
 }
 
 /**

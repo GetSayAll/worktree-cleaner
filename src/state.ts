@@ -99,6 +99,15 @@ export const resultSummary = ref({ freed: 0, freed_unknown: 0, trashed: 0, remov
 export const acknowledged = ref(false);
 export const confirmText = ref("");
 
+/**
+ * What the last recorded plan held, so the same plan is not written twice.
+ *
+ * Module state, not a ref: nothing renders it. Reopening the plan page is not a
+ * new plan; changing a selection is. The signature is the contents rather than a
+ * count, because two different selections can hold the same number of items.
+ */
+let recordedPlan = "";
+
 export const scanState = reactive({
   stageIndex: 0,
   traceLine: 0,
@@ -344,6 +353,8 @@ export async function startScan(path: string) {
   lastResult.value = [];
   acknowledged.value = false;
   confirmText.value = "";
+  // A new scan makes a new plan; the same selection is now a different run.
+  recordedPlan = "";
   scanState.stageIndex = 0;
   scanState.traceLine = 0;  scanState.elapsed = 0;
   scanState.cancelled = false;
@@ -428,13 +439,56 @@ export function resetToWelcome() {
   scanError.value = null;
   executeError.value = null;
   logError.value = null;
+  recordedPlan = "";
   view.value = "welcome";
+}
+
+/**
+ * Writes the plan the reader is looking at into the activity log.
+ *
+ * The plan is derived state: every checkbox makes a different one, and a line per
+ * toggle is a log nobody reads. The moment worth keeping is the one where the
+ * reader stops assembling and starts reading — the plan page — because that is the
+ * plan they then agree to, and the operation log that follows is what it became.
+ * Without it, "how much did it promise, and what was actually freed" is only
+ * answerable by re-deriving the plan from a snapshot that has since changed.
+ */
+function recordPlanGenerated(): void {
+  const plan = cleanupPlan.value;
+  // The figure the confirmation line carries, kept the same way on purpose: an
+  // artifact that leaves with its worktree is not a separate move, and counting it
+  // as one would make the two lines disagree about the same plan.
+  const artifacts = plan.trash_moves.filter((item) => item.bundled_with_worktree === null).length;
+  if (plan.worktree_removals.length + artifacts === 0) return;
+
+  const signature = [
+    ...plan.worktree_removals.map((item) => item.path),
+    ...plan.trash_moves.map((item) => item.path),
+    String(plan.total_bytes)
+  ].join("\u0000");
+  if (signature === recordedPlan) return;
+  recordedPlan = signature;
+
+  record("plan.generated", snapshot.value?.root ?? projectPath.value, {
+    worktrees: plan.worktree_removals.length,
+    artifacts,
+    total_bytes: plan.total_bytes
+  });
+}
+
+/** Records that the plan left the app as JSON — the other way a run can start. */
+export function recordPlanExport(itemCount: number): void {
+  record("plan.exported", snapshot.value?.root ?? projectPath.value, {
+    format: "json",
+    item_count: itemCount
+  });
 }
 
 export function goTo(next: ViewKey) {
   if (executing.value) return;
   if (next === "scanning") return;
   if (next === "history") void refreshHistory();
+  if (next === "plan") recordPlanGenerated();
   view.value = next;
 }
 
