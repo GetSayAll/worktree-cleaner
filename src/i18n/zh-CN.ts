@@ -869,7 +869,7 @@ export const zhCN = {
     title: "更新",
     status: "状态",
     currentVersion: "当前版本",
-    hint: "应用启动时会检查是否有新版本。不会上传任何内容，也不会有数据离开这台机器。",
+    hint: "应用启动时会检查是否有新版本；这次请求不携带任何关于你或你的文件的信息。",
     check: "检查更新",
     checking: "正在检查更新…",
     upToDate: "已经是最新版本。",

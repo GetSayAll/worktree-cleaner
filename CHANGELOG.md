@@ -7,7 +7,19 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
-## [0.1.0] — not yet published
+## [0.1.1] — 2026-11-19
+
+A one-line release whose real purpose is to give the update path something to
+find: this is the first build that a published 0.1.0 can discover, download,
+verify and install.
+
+### Changed
+
+- The privacy line under **Settings → Updates** now says what the check does not
+  send — anything about the reader or their files — instead of the vaguer
+  "nothing is uploaded".
+
+## [0.1.0] — 2026-11-19
 
 The first release. What it does, and what a reader has to know before installing
 it.

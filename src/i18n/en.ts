@@ -930,7 +930,7 @@ export const en = {
     title: "Updates",
     status: "Status",
     currentVersion: "Installed version",
-    hint: "The app checks for a newer version when it starts. Nothing is uploaded and no data leaves the machine.",
+    hint: "The app checks for a newer version when it starts; the request carries nothing about you or your files.",
     check: "Check for updates",
     checking: "Checking for updates…",
     upToDate: "This is the latest version.",
