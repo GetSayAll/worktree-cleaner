@@ -9,6 +9,7 @@
 
 mod common;
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use common::{backdate_tree, purge_marked_from_trash, trash_inspectable, Repo};
@@ -157,17 +158,25 @@ fn ignored_modules_in<'a>(
     snapshot: &'a ProjectSnapshot,
     worktree: &Path,
 ) -> &'a worktree_core::ArtifactRecord {
-    let needle = format!(
-        "/{}/node_modules",
-        worktree.file_name().expect("a name").to_string_lossy()
-    );
+    // Matched by components rather than by a `/`-joined suffix: the separator in a
+    // recorded path is the platform's, so `…\wt-removable\node_modules` never ended
+    // with `/wt-removable/node_modules` on Windows and the fixture asserted a
+    // directory was missing that was right there.
+    let owner = worktree.file_name().expect("a name");
     snapshot
         .artifacts
         .iter()
-        .find(|artifact| artifact.path.ends_with(&needle) && artifact.git_ignored == Some(true))
+        .find(|artifact| {
+            artifact.git_ignored == Some(true) && {
+                let path = Path::new(&artifact.path);
+                path.file_name() == Some(OsStr::new("node_modules"))
+                    && path.parent().and_then(Path::file_name) == Some(owner)
+            }
+        })
         .unwrap_or_else(|| {
             panic!(
-                "no ignored node_modules at {needle}; artifacts were {:?}",
+                "no ignored node_modules under {}; artifacts were {:?}",
+                worktree.display(),
                 snapshot
                     .artifacts
                     .iter()

@@ -823,6 +823,30 @@ mod tests {
         }
     }
 
+    /// An ordinary project directory, spelled the way this platform spells one.
+    ///
+    /// The tests below say what happens to a project path — accepted, matched by a
+    /// whitelist rule, folded by the guard key — and none of that is about the shape
+    /// of `/Users/andy/…`. On Windows that string is not even absolute, so the
+    /// fixture asserted `NotAbsolute` before reaching the rule under test. `C:\Work`
+    /// rather than `C:\Users`: the home root and its shape are refused by design,
+    /// which is what other tests are about.
+    fn project() -> PathBuf {
+        #[cfg(windows)]
+        {
+            PathBuf::from(r"C:\Work\MySrc\proj")
+        }
+        #[cfg(not(windows))]
+        {
+            PathBuf::from("/Users/andy/MySrc/proj")
+        }
+    }
+
+    /// `project()` with one more component, as the string the validator takes.
+    fn in_project(name: &str) -> String {
+        project().join(name).display().to_string()
+    }
+
     /// Create a temporary directory used only within the current test.
     struct TempDir(PathBuf);
 
@@ -858,13 +882,10 @@ mod tests {
 
     #[test]
     fn accepts_an_ordinary_project_path() {
-        let validated =
-            validate_path_for_deletion(Path::new("/Users/andy/MySrc/proj/node_modules"), &ctx())
-                .expect("an ordinary project path should pass");
-        assert_eq!(
-            validated.as_path(),
-            Path::new("/Users/andy/MySrc/proj/node_modules")
-        );
+        let candidate = in_project("node_modules");
+        let validated = validate_path_for_deletion(Path::new(&candidate), &ctx())
+            .expect("an ordinary project path should pass");
+        assert_eq!(validated.as_path(), Path::new(&candidate));
         assert!(!validated.is_symlink);
     }
 
@@ -950,16 +971,18 @@ mod tests {
         // `Users` was folded and `home` was compared exactly, so `/HOME/andy` — the
         // same shape on the platforms where the root is spelled that way — was not
         // recognised at all.
-        for path in [
-            "/Users/example",
-            "/USERS/example",
-            "/home/example",
-            "/HOME/example",
-        ] {
+        let home = synthetic_home_root();
+        let shouted = PathBuf::from(home.to_string_lossy().to_uppercase());
+        assert_rejected(&home.display().to_string(), &ctx());
+        assert_rejected(&shouted.display().to_string(), &ctx());
+        // The other spelling of the same shape, where the platform has one.
+        #[cfg(unix)]
+        for path in ["/home/example", "/HOME/example"] {
             assert_rejected(path, &ctx());
         }
         // A child of a home root is not protected by this rule.
-        validate_path_for_deletion(Path::new("/Users/example/proj"), &ctx())
+        let child = home.join("proj");
+        validate_path_for_deletion(&child, &ctx())
             .expect("a project under a home root is ordinary");
     }
 
@@ -984,16 +1007,24 @@ mod tests {
     fn the_collapse_guard_compares_through_the_guard_key() {
         // The parent written with a different case is still the parent; missing it
         // would let an empty variable through on a filesystem that ignores case.
-        let context = DeletionContext::new("/expected/parent");
+        let parent = project();
+        let context = DeletionContext::new(&parent);
+        let shouted = parent.to_string_lossy().to_uppercase();
         assert!(matches!(
-            validate_path_for_deletion(Path::new("/EXPECTED/PARENT"), &context),
+            validate_path_for_deletion(Path::new(&shouted), &context),
             Err(PathRejection::EmptyVariableCollapse(_))
         ));
     }
 
     #[test]
     fn the_guard_key_folds_case_and_respects_component_boundaries() {
-        assert_eq!(guard_key(Path::new("/System/Library")), "/system/library");
+        // Case folding, asserted against the key itself rather than a literal: the
+        // separator inside a key is the platform's.
+        let path = in_project("node_modules");
+        assert_eq!(
+            guard_key(Path::new(&path)),
+            guard_key(Path::new(&path.to_uppercase()))
+        );
         assert!(key_under("/var/db/x", "/var/db"));
         assert!(!key_under("/var/db-backup", "/var/db"));
         assert!(!key_under("/anywhere", ""));
@@ -1046,17 +1077,46 @@ mod tests {
         // the order was not — two checks could swap and every other test would still
         // pass, even though the order decides which rejection the user is shown. Each
         // case below applies at least two rules, so it pins the one that wins.
-        let protected = DeletionContext::new("/expected/parent");
-        let whitelisted = DeletionContext::new("/elsewhere")
-            .with_whitelist(vec![PathBuf::from("/protected/area")]);
-        let collapsing = DeletionContext::new("/expected/parent")
-            .with_whitelist(vec![PathBuf::from("/expected/parent")]);
+        //
+        // The cases that need the platform's protected list are in the test below this
+        // one: that list is read from the environment on Windows, and pinning an order
+        // through it would be asserting `%WINDIR%` rather than the order.
+        let project = project();
+        let collapsing = DeletionContext::new(&project).with_whitelist(vec![project.clone()]);
 
         // A control character (check 5) beats a `..` component (check 4).
+        let garbled = project.join("a\u{7}").join("..").join("b");
         assert!(matches!(
-            validate_path_for_deletion(Path::new("/a\u{7}/../b"), &protected),
+            validate_path_for_deletion(&garbled, &ctx()),
             Err(PathRejection::ControlCharacter(_))
         ));
+        // A collapse beats the whitelist, which is the last check of all.
+        assert!(matches!(
+            validate_path_for_deletion(&project, &collapsing),
+            Err(PathRejection::EmptyVariableCollapse(_))
+        ));
+        // And what the whitelist still catches, once nothing earlier applies.
+        let whitelisted =
+            DeletionContext::new(UNRELATED_PARENT).with_whitelist(vec![project.join("protected")]);
+        assert!(matches!(
+            validate_path_for_deletion(&project.join("protected").join("proj"), &whitelisted),
+            Err(PathRejection::Whitelisted(_))
+        ));
+    }
+
+    /// The same ordering, through the protected list rather than a whitelist.
+    ///
+    /// Unix only, because the three cases below need a path the platform refuses as a
+    /// system location, and on Windows that list comes from `%WINDIR%`,
+    /// `%ProgramFiles%` and friends — pinning an order through them would be testing
+    /// the runner's environment. What Windows has instead is
+    /// `rejects_top_level_roots` and the `%WINDIR%` half of `protected_location`,
+    /// exercised by `a_drive_root_is_refused`.
+    #[test]
+    #[cfg(unix)]
+    fn the_protected_list_sits_where_the_contract_states() {
+        let protected = DeletionContext::new("/expected/parent");
+
         // `..` beats the protected list.
         assert!(matches!(
             validate_path_for_deletion(Path::new("/System/../bin/tool"), &protected),
@@ -1072,16 +1132,34 @@ mod tests {
             validate_path_for_deletion(Path::new("/System/Library"), &protected),
             Err(PathRejection::ProtectedLocation(_))
         ));
-        // A collapse beats the whitelist, which is the last check of all.
+    }
+
+    /// The Windows half of check 6: a drive root, and the system directories the
+    /// environment names.
+    ///
+    /// `%WINDIR%` and `%ProgramFiles%` are read at validation time, so this asks the
+    /// environment for the same values instead of hard-coding `C:\Windows`: a machine
+    /// that puts them on another drive is exactly the case worth catching.
+    #[test]
+    #[cfg(windows)]
+    fn a_drive_root_and_the_system_directories_are_refused() {
         assert!(matches!(
-            validate_path_for_deletion(Path::new("/expected/parent"), &collapsing),
-            Err(PathRejection::EmptyVariableCollapse(_))
+            validate_path_for_deletion(Path::new(r"C:\"), &ctx()),
+            Err(PathRejection::TopLevelRoot(_))
         ));
-        // And what the whitelist still catches, once nothing earlier applies.
-        assert!(matches!(
-            validate_path_for_deletion(Path::new("/protected/area/proj"), &whitelisted),
-            Err(PathRejection::Whitelisted(_))
-        ));
+        for name in ["WINDIR", "ProgramFiles", "ProgramData"] {
+            let Some(root) = std::env::var_os(name) else {
+                continue;
+            };
+            let inside = PathBuf::from(root).join("some").join("thing");
+            assert!(
+                matches!(
+                    validate_path_for_deletion(&inside, &ctx()),
+                    Err(PathRejection::ProtectedLocation(_))
+                ),
+                "{name} ({inside:?}) should be refused"
+            );
+        }
     }
 
     #[test]
@@ -1171,8 +1249,13 @@ mod tests {
     fn allows_legitimate_names_containing_dots() {
         // A `..` inside a name is not path traversal and must not be rejected outright.
         let context = ctx();
-        assert!(validate_path_for_deletion(Path::new("/tmp/name..files"), &context).is_ok());
-        assert!(validate_path_for_deletion(Path::new("/tmp/..hidden"), &context).is_ok());
+        for name in ["name..files", "..hidden"] {
+            let candidate = in_project(name);
+            assert!(
+                validate_path_for_deletion(Path::new(&candidate), &context).is_ok(),
+                "{candidate} is a name, not a traversal"
+            );
+        }
     }
 
     #[test]
@@ -1208,7 +1291,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn allows_usr_local_but_not_usr_local_itself() {
+        // The `/usr/local` exception lives in the Unix half of `protected_location`:
+        // Windows has no `/usr`, so there is no rule here to test there.
         let context = ctx();
         assert!(validate_path_for_deletion(Path::new("/usr/local/bin/mytool"), &context).is_ok());
         assert_rejected("/usr/local", &context);
@@ -1305,17 +1391,17 @@ mod tests {
 
     #[test]
     fn rejects_empty_variable_collapse() {
-        let context = DeletionContext::new("/Users/andy/proj");
+        let parent = project();
+        let literal = parent.display().to_string();
+        let context = DeletionContext::new(&parent);
         // The concatenated result collapses to the parent directory itself, which means
         // some variable is empty.
         assert_eq!(
-            validate_path_for_deletion(Path::new("/Users/andy/proj"), &context),
-            Err(PathRejection::EmptyVariableCollapse(
-                "/Users/andy/proj".to_string()
-            ))
+            validate_path_for_deletion(&parent, &context),
+            Err(PathRejection::EmptyVariableCollapse(literal))
         );
         // A normal concatenation is unaffected.
-        assert!(validate_path_for_deletion(Path::new("/Users/andy/proj/target"), &context).is_ok());
+        assert!(validate_path_for_deletion(&parent.join("target"), &context).is_ok());
     }
 
     #[test]
@@ -1343,14 +1429,15 @@ mod tests {
 
     #[test]
     fn rejects_whitelisted_paths_and_their_children() {
-        let context = DeletionContext::new(UNRELATED_PARENT)
-            .with_whitelist(vec![PathBuf::from("/Users/andy/MySrc/keep-me")]);
-        assert_rejected("/Users/andy/MySrc/keep-me", &context);
-        assert_rejected("/Users/andy/MySrc/keep-me/node_modules", &context);
+        let keep = project().join("keep-me");
+        let context = DeletionContext::new(UNRELATED_PARENT).with_whitelist(vec![keep.clone()]);
+        assert_rejected(&keep.display().to_string(), &context);
+        assert_rejected(&keep.join("node_modules").display().to_string(), &context);
         // A different path that shares the prefix but not the component is unaffected.
+        let lookalike = PathBuf::from(format!("{}-other", keep.display()));
         assert!(
-            validate_path_for_deletion(Path::new("/Users/andy/MySrc/keep-me-other"), &context)
-                .is_ok()
+            validate_path_for_deletion(&lookalike, &context).is_ok(),
+            "{lookalike:?} is not under the whitelisted rule"
         );
     }
 
@@ -1358,25 +1445,21 @@ mod tests {
     fn empty_whitelist_rules_are_skipped_not_matched_everywhere() {
         // A malformed (empty) rule normalises to the root and would otherwise match
         // every absolute path — silently protecting everything.
-        let context = DeletionContext::new(UNRELATED_PARENT).with_whitelist(vec![
-            PathBuf::new(),
-            PathBuf::from("/Users/andy/MySrc/keep-me"),
-        ]);
+        let keep = project().join("keep-me");
+        let context = DeletionContext::new(UNRELATED_PARENT)
+            .with_whitelist(vec![PathBuf::new(), keep.clone()]);
         // The real rule still works.
-        assert_rejected("/Users/andy/MySrc/keep-me/target", &context);
+        assert_rejected(&keep.join("target").display().to_string(), &context);
         // The empty rule does not turn every other path into a whitelist hit.
+        let other = project().join("other").join("target");
         assert!(
-            validate_path_for_deletion(Path::new("/Users/andy/MySrc/other/target"), &context)
-                .is_ok()
+            validate_path_for_deletion(&other, &context).is_ok(),
+            "{other:?} matches no rule and must pass"
         );
         // A whitelist that contains *only* empty rules protects nothing.
         let only_empty = DeletionContext::new(UNRELATED_PARENT)
             .with_whitelist(vec![PathBuf::new(), PathBuf::new()]);
-        assert!(validate_path_for_deletion(
-            Path::new("/Users/andy/MySrc/other/target"),
-            &only_empty
-        )
-        .is_ok());
+        assert!(validate_path_for_deletion(&other, &only_empty).is_ok());
     }
 
     #[test]
@@ -1544,10 +1627,21 @@ mod tests {
 
     #[test]
     fn root_path_is_resolvable() {
-        // An absolute path can always walk its ancestors up to `/`, so a resolution
-        // failure can only be a defensive branch.
-        let resolution = resolve_for_inspection(Path::new("/")).expect("root is resolvable");
-        assert_eq!(resolution.resolved, Path::new("/"));
+        // An absolute path can always walk its ancestors up to the root, so a
+        // resolution failure can only be a defensive branch. Which root that is
+        // depends on the platform, and so does its spelling: `canonicalize` answers
+        // `\\?\C:\` on Windows, so the comparison is against what the platform calls
+        // the root rather than against the literal.
+        let root = if cfg!(windows) {
+            Path::new(r"C:\")
+        } else {
+            Path::new("/")
+        };
+        let resolution = resolve_for_inspection(root).expect("root is resolvable");
+        assert_eq!(
+            resolution.resolved,
+            std::fs::canonicalize(root).expect("the root canonicalises")
+        );
         assert!(!resolution.is_leaf_symlink);
         assert!(!resolution.crossed_symlink);
     }
@@ -1568,9 +1662,12 @@ mod tests {
 
     #[test]
     fn validates_normalized_target_form() {
-        let validated = validate_path_for_deletion(Path::new("/tmp/./a/./b"), &ctx())
-            .expect("passes validation");
-        assert_eq!(validated.as_path(), Path::new("/tmp/a/b"));
+        // A real directory rather than a literal: the point is that the components
+        // collapse, and the fixture has to be absolute wherever the test runs.
+        let temp = TempDir::new("normalized");
+        let candidate = temp.path().join("a").join(".").join("b");
+        let validated = validate_path_for_deletion(&candidate, &ctx()).expect("passes validation");
+        assert_eq!(validated.as_path(), temp.path().join("a").join("b"));
     }
 
     #[test]
