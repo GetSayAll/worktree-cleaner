@@ -199,6 +199,14 @@ jobs:
   windows:
     name: Build Windows (x64)
     runs-on: windows-latest
+    # The Windows build needs the updater key to sign its artifact, and it needs
+    # nothing else the release holds. Keeping it in its own protected
+    # environment means the Apple credentials — the deploy keys and the age
+    # identity that opens the notary key — are readable only by the macOS job.
+    # Without an environment this job sees no secrets at all, the bundle step
+    # stops with "A public key has been found, but no private key", and the
+    # publish job never runs.
+    environment: windows-release
     steps:
       # A dispatch rebuilds a tag, so the build uses the tagged commit rather
       # than whatever the default branch has become since.

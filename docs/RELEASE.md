@@ -217,11 +217,19 @@ from the `.sig` the build produced.
 gh secret set RELEASE_AGE_IDENTITY --env mac-release < /path/to/ci-age-identity.txt
 gh secret set RELEASE_CREDENTIALS_DEPLOY_KEY --env mac-release < /path/to/credentials_deploy_key
 gh secret set APPLE_SIGNING_MATCH_DEPLOY_KEY --env mac-release < /path/to/match_deploy_key
+gh secret set TAURI_SIGNING_PRIVATE_KEY --env windows-release < ~/.tauri/worktree-cleaner.key
 ```
 
 The `mac-release` environment already exists and accepts only `v*` tags. Keep it
 that way: an unprotected environment on a public repository is a secret-leak
 path, not a formality.
+
+The Windows job has its own environment, `windows-release`, holding only
+`TAURI_SIGNING_PRIVATE_KEY` and also restricted to `v*` tags. It needs the
+updater key to sign its installer and nothing else the release holds, so the
+Apple credentials stay readable only by the macOS job. A job without an
+environment sees no secrets at all: the bundle step then stops with *"A public
+key has been found, but no private key"* and the publish job never runs.
 
 Two properties of this route are worth knowing before the first run:
 
