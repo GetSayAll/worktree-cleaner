@@ -238,6 +238,7 @@ export type DetailCode =
   | "worktree.changed"
   | "worktree.no_longer_safe"
   | "worktree.removed"
+  | "worktree.remnants"
   | "worktree.remove_failed"
   | "worktree.pruned"
   | "worktree.prune_failed"

@@ -373,3 +373,50 @@ fn a_credential_at_the_worktree_root_is_caught_by_the_worktree_check() {
         .expect("wt.credentials");
     assert!(reason.evidence.contains(".env"), "{}", reason.evidence);
 }
+
+#[test]
+fn a_worktree_inside_the_main_one_is_scanned_once_and_owns_its_artifacts() {
+    // The layout the app actually runs in — every worktree under `<repo>/.worktree/`
+    // — is the one the other fixtures avoid, because a worktree beside the repository
+    // cannot collide with the repository's own walk. Here it can: the main walk
+    // reaches `.worktree/feat/node_modules` too, and reported it a second time —
+    // spelled `…\.worktree\feat\node_modules`, and recorded as the main worktree's
+    // artifact. The plan then held two entries for one directory, the second one
+    // attributed to a worktree that was about to delete it anyway, which is how one
+    // directory became one real deletion and one "vanished" in the audit log.
+    let repo = Repo::new("nested-worktree");
+    std::fs::write(repo.root.join(".gitignore"), "node_modules/\n").expect("write .gitignore");
+    std::fs::write(repo.root.join("package.json"), "{}\n").expect("write manifest");
+    repo.git(&["add", ".gitignore", "package.json"]);
+    repo.git_dated_in(&repo.root, &["commit", "--quiet", "-m", "layout"], 80);
+
+    let nested = repo.add_worktree_at(&repo.root.join(".worktree").join("feat"), "feat/x");
+    std::fs::create_dir_all(nested.join("node_modules/left-pad")).expect("create modules");
+    std::fs::write(
+        nested.join("node_modules/left-pad/index.js"),
+        "module.exports = 1;\n",
+    )
+    .expect("write module");
+
+    let snapshot = scan_project(&repo.root.display().to_string(), &options()).expect("scan");
+    let found: Vec<&ArtifactRecord> = snapshot
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.path.ends_with("node_modules"))
+        .collect();
+
+    assert_eq!(
+        found.len(),
+        1,
+        "one directory, one record: {:?}",
+        found.iter().map(|a| a.path.as_str()).collect::<Vec<_>>()
+    );
+    // Owned by the worktree it sits in. That attribution is what lets the plan fold
+    // the artifact into that worktree's removal instead of scheduling a second
+    // deletion for a directory the removal is about to take.
+    let owner = found[0].worktree_path.as_deref().unwrap_or_default();
+    assert!(
+        owner.ends_with("feat"),
+        "the artifact is attributed to {owner}, not to the worktree holding it"
+    );
+}

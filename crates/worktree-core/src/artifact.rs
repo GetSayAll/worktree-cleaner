@@ -347,7 +347,7 @@ pub fn scan_artifacts(
     let mut warnings: Vec<String> = Vec::new();
     let mut budget_spent = false;
 
-    for root in roots {
+    for root in &owning_roots(roots) {
         // A root inside the system Trash is skipped even though it exists: the
         // scan already dropped its worktree (see `scan_project`), and this is
         // the second line of the same boundary for any other caller.
@@ -363,7 +363,7 @@ pub fn scan_artifacts(
             Err(_) => continue,
         }
 
-        for candidate in collect_candidates(root, opts.max_depth) {
+        for candidate in collect_candidates(root, opts.max_depth, &nested_roots(root, roots)) {
             if let Some(deadline) = opts.budget_deadline {
                 if Instant::now() >= deadline {
                     warnings.push(format!(
@@ -396,6 +396,53 @@ struct Candidate {
     name: String,
 }
 
+/// Whether two paths name one directory.
+///
+/// Compared component by component, not as strings. `git worktree list` writes
+/// `D:/repo/.worktree/feat` with forward slashes on Windows while `Path::join`
+/// appends with a backslash, and the two spellings of one directory are two
+/// different `String`s — which is how one directory became two records.
+fn same_directory(left: &Path, right: &Path) -> bool {
+    left.components().eq(right.components())
+}
+
+/// Whether `inner` sits strictly below `outer`.
+fn is_below(inner: &Path, outer: &Path) -> bool {
+    inner.starts_with(outer) && inner.components().count() > outer.components().count()
+}
+
+/// The roots to walk: one per directory.
+///
+/// A root nested inside another root stays in this list — its own walk is the one
+/// that attributes what is inside it to it — and the outer walk is told to leave
+/// that subtree alone (see `nested_roots`). An exact duplicate is dropped, so one
+/// worktree named twice is not scanned twice.
+fn owning_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut kept: Vec<PathBuf> = Vec::new();
+    for root in roots {
+        if kept.iter().any(|other| same_directory(other, root)) {
+            continue;
+        }
+        kept.push(root.clone());
+    }
+    kept
+}
+
+/// The roots a walk starting at `root` must not enter.
+///
+/// The layout this tool runs in puts every worktree inside the main one
+/// (`<repo>/.worktree/<name>`), so the main walk reaches all of them. Walking in
+/// reported each artifact a second time, under the parent's spelling and with the
+/// parent as its owner: the plan then listed one directory twice and executed it
+/// twice — one real move, one "vanished".
+fn nested_roots<'a>(root: &Path, roots: &'a [PathBuf]) -> Vec<&'a Path> {
+    roots
+        .iter()
+        .map(PathBuf::as_path)
+        .filter(|candidate| is_below(candidate, root))
+        .collect()
+}
+
 /// Upper bound on directory entries visited per worktree root. A repository with
 /// more entries than this is not scanned completely, and the measurement reports
 /// `None` rather than a partial number that would look exact.
@@ -406,7 +453,11 @@ const MAX_WALK_ENTRIES: usize = 2_000_000;
 /// The walk never enters `.git` and never descends into a recognised artifact
 /// directory: `node_modules/.bin` is not a second artifact, and `node_modules`
 /// is never treated as a project root (D8).
-fn collect_candidates(root: &Path, max_depth: usize) -> Vec<Candidate> {
+///
+/// It also leaves `worktrees` alone — the roots of the other worktrees that sit
+/// inside this one. They are scanned from their own root, which is the walk that
+/// can say which worktree an artifact belongs to.
+fn collect_candidates(root: &Path, max_depth: usize, worktrees: &[&Path]) -> Vec<Candidate> {
     let mut out: Vec<Candidate> = Vec::new();
     let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
     let mut visited: usize = 0;
@@ -423,6 +474,12 @@ fn collect_candidates(root: &Path, max_depth: usize) -> Vec<Candidate> {
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = entry.path();
+            // Another worktree starts here. Its own walk reports what is inside it,
+            // once and with itself as the owner; reporting it from here too is what
+            // put two spellings of one directory in the plan.
+            if worktrees.iter().any(|nested| path.starts_with(nested)) {
+                continue;
+            }
             // `DirEntry::metadata` does not follow symlinks, which is what the
             // symlink checks below need.
             let is_dir = entry.metadata().is_ok_and(|meta| meta.is_dir());
@@ -2446,15 +2503,20 @@ mod tests {
         std::fs::create_dir_all(root.join(".git")).expect("create .git");
         std::fs::create_dir_all(root.join(".git/worktrees")).expect("create nested");
 
-        let mut found: Vec<String> = collect_candidates(&root, 6)
+        let mut found: Vec<String> = collect_candidates(&root, 6, &[])
             .into_iter()
+            // Joined with `/` rather than printed with `display()`, so the
+            // expectation below reads the same on every platform: Windows writes
+            // `apps\web\node_modules`.
             .map(|candidate| {
                 candidate
                     .path
                     .strip_prefix(&root)
                     .unwrap()
-                    .display()
-                    .to_string()
+                    .iter()
+                    .map(|part| part.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/")
             })
             .collect();
         found.sort();
@@ -2473,10 +2535,74 @@ mod tests {
         let dir = tempfile::TempDir::new().expect("temp dir");
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join("a/b/c/d/e/node_modules")).expect("create deep");
-        let found = collect_candidates(&root, 3);
+        let found = collect_candidates(&root, 3, &[]);
         assert!(found.is_empty(), "depth 5 exceeds the limit of 3");
-        let found = collect_candidates(&root, 6);
+        let found = collect_candidates(&root, 6, &[]);
         assert_eq!(found.len(), 1);
+    }
+
+    #[test]
+    fn collect_candidates_leaves_a_nested_worktree_to_its_own_walk() {
+        // The layout the app runs in: every worktree sits inside the main one, at
+        // `<repo>/.worktree/<name>`, so the main walk reaches all of them. Counting
+        // them from here as well gave one directory two records — one spelled
+        // `…/.worktree/feat\target`, one `…\.worktree\feat\target` — two plan
+        // entries, and a log line saying a directory had vanished when it had just
+        // been deleted by the entry above it.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let nested = root.join(".worktree").join("feat");
+        std::fs::create_dir_all(nested.join("target")).expect("create nested target");
+        std::fs::create_dir_all(root.join("node_modules")).expect("create modules");
+
+        let roots = vec![root.clone(), nested.clone()];
+        let found: Vec<String> = collect_candidates(&root, 6, &nested_roots(&root, &roots))
+            .into_iter()
+            .map(|candidate| {
+                candidate
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap()
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            found,
+            vec!["node_modules".to_string()],
+            "the parent walk must not report the nested worktree's artifacts"
+        );
+
+        // The nested root's own walk still finds it, exactly once.
+        let found = collect_candidates(&nested, 6, &nested_roots(&nested, &roots));
+        let names: Vec<&str> = found
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["target"],
+            "the nested root's own walk reports it"
+        );
+    }
+
+    #[test]
+    fn a_root_named_twice_is_walked_once() {
+        // Git cannot register one directory as two worktrees, but the roots are
+        // assembled from two sources — `git worktree list` and the directory the
+        // user picked — and a duplicate there would undo the point of the dedup.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let spelled_differently = PathBuf::from(root.to_string_lossy().replace('\\', "/"));
+
+        let kept = owning_roots(&[root.clone(), spelled_differently.clone()]);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!(same_directory(&kept[0], &root));
+        assert!(
+            is_below(&root.join(".worktree").join("feat"), &root),
+            "a worktree inside the main one is below it"
+        );
+        assert!(!is_below(&root, &root), "a root is not below itself");
     }
 
     #[test]
