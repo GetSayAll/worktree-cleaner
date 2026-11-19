@@ -236,15 +236,13 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   releases. The ten `pedantic` lints that remain allowed are each listed with their
   reason in `Cargo.toml` and in `AGENTS.md`; adding an exception without one is the
   thing to look for in review.
-- Rust tests: `cargo test -p worktree-core` must pass, and CI runs it on macOS on
-  every pull request. Until 2026-11-20 the workflow ran the lints and never the
-  tests, so P0's first acceptance criterion — "`cargo test -p worktree-core` is
-  green" — was checked on whoever's machine happened to run it, or not at all. What
-  that cost is in §7: a fixture helper opened directories with `File::open`, which
-  Windows refuses, so sixty tests were red there and nobody could see it. Windows
-  still compiles every target without running the tests: sixteen of them are written
-  against Unix path shapes, and a skipped test is coverage that job would claim and
-  not have.
+- Rust tests: `cargo test -p worktree-core` must pass, and CI runs it on macOS and
+  Windows on every pull request. Until 2026-11-20 the workflow ran the lints and
+  never the tests, so P0's first acceptance criterion — "`cargo test -p
+  worktree-core` is green" — was checked on whoever's machine happened to run it, or
+  not at all. What that cost is in §7: a fixture helper opened directories with
+  `File::open`, which Windows refuses, so sixty tests were red there and nobody
+  could see it.
 - Platform: macOS verifies the Trash path on a real machine before every release;
   Windows verifies the Recycle Bin path separately. Both results are recorded
   separately.
@@ -936,11 +934,19 @@ was checked to fail without the fix:
    the verdicts came out `Review` instead of `Safe`. The helper now lives in one place
    per crate (`crate::testing`, and `tests/common` for the integration tests) and
    panics when it cannot date a file, because a fixture that silently keeps today's
-   mtime does not test what it says it tests. Fifteen tests still do not pass on
-   Windows: twelve assert Unix path shapes, two match `/` in the evidence they
-   compare, and one drives a generative corpus of Unix paths. They fail loudly there
-   rather than being skipped, and the Windows job stays on `cargo check` until they
-   are ported.
+   mtime does not test what it says it tests. The Windows job runs the suite too.
+   Getting it green there meant building the fixtures instead of typing them: the
+   tests said `/Users/andy/…` and on Windows that is not an absolute path, so
+   `accepts_an_ordinary_project_path` and eleven neighbours asserted `NotAbsolute`
+   before reaching the rule they were about — they now hang off `project()`, one
+   helper that answers `C:\Work\MySrc\proj` or `/Users/andy/MySrc/proj`. The corpus
+   generator gained the same root; without it twenty thousand samples measured the
+   absolute-path check and accepted none. Two tests stay Unix-only, and say so where
+   they sit: the `/usr/local` exception exists only in the Unix half of
+   `protected_location`, and the ordering cases that need a protected path are pinned
+   through `/System`, while on Windows that list comes from `%WINDIR%` and friends.
+   The Windows half of check 6 — a drive root, and the directories the environment
+   names — is its own test, added with this change.
 
 **Open**
 

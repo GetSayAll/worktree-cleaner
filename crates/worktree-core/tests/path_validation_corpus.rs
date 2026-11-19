@@ -169,11 +169,25 @@ const TOKENS: &[&str] = &[
     "passwd",
 ];
 
+/// The root a generated candidate hangs from, spelled the way this platform writes
+/// one.
+///
+/// Without it every candidate is relative on Windows — `/a/b` has no drive — so the
+/// generator spent twenty thousand samples measuring the absolute-path check and
+/// accepted none of them, which is the "the case may be ineffective" failure.
+const fn generated_root() -> &'static str {
+    if cfg!(windows) {
+        r"C:\"
+    } else {
+        "/"
+    }
+}
+
 fn random_candidate(rng: &mut XorShift) -> PathBuf {
     let segments = 1 + (rng.next() % 6) as usize;
     let mut raw = String::new();
     if !rng.next().is_multiple_of(4) {
-        raw.push('/');
+        raw.push_str(generated_root());
     }
     for index in 0..segments {
         if index > 0 {

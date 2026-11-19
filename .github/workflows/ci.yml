@@ -95,13 +95,11 @@ jobs:
       - name: Front-end tests
         run: pnpm test
 
-      # Not `cargo test` here yet. Fifteen of the crate's tests do not pass on
-      # Windows: twelve are written against Unix path shapes (`/Users/andy/…` is not
-      # an absolute path here, so `accepts_an_ordinary_project_path` and eleven
-      # neighbours assert the wrong thing before they reach the rule they are about),
-      # two match `/` separators in the evidence they compare, and one drives a
-      # generative corpus of Unix paths. They fail loudly rather than being skipped,
-      # because a skipped test is coverage this job would claim and not have;
-      # porting them is its own change.
+      # The same step the macOS job runs, for the same reason and one more: the app
+      # ships for Windows, so a test that only ever ran on the other platform is a
+      # test of the wrong machine.
+      - name: Rust tests
+        run: cargo test -p worktree-core
+
       - name: Compile every target
         run: cargo check --workspace --all-targets
