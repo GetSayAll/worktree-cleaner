@@ -245,6 +245,10 @@ pub enum DetailCode {
     /// prune did not.
     #[serde(rename = "worktree.removed")]
     WorktreeRemoved,
+    /// `git worktree remove` succeeded, but its directory is still on disk.
+    /// Carries `prune_error` when the follow-up prune did not.
+    #[serde(rename = "worktree.remnants")]
+    WorktreeRemnants,
     /// Git refused or failed while removing the worktree. Carries `error`.
     #[serde(rename = "worktree.remove_failed")]
     WorktreeRemoveFailed,

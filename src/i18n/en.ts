@@ -164,6 +164,8 @@ export const en = {
         changed: "changed since the plan was made: {before} → {after}; not deleted",
         no_longer_safe: "the re-check no longer reports it as safe to delete: {reason}",
         removed: "removed with git worktree remove",
+        remnants:
+          "git removed the worktree, but its directory is still on disk — the next scan reports what is left inside",
         remove_failed: "git worktree remove failed: {error}",
         pruned: "git worktree prune cleaned up the leftover metadata",
         prune_failed: "git worktree prune failed: {error}"

@@ -279,12 +279,20 @@ where
                     Ok(()) => Vec::new(),
                     Err(error) => vec![("prune_error", DetailArg::Text(error.to_string()))],
                 };
+                // A zero exit code means Git removed the worktree, not that its last
+                // directory went with it; "removed" was a claim the filesystem did
+                // not support. See `directory_remains`.
+                let code = if directory_remains(Path::new(&record.path)) {
+                    DetailCode::WorktreeRemnants
+                } else {
+                    DetailCode::WorktreeRemoved
+                };
                 push(
                     &mut audit,
                     HistoryAction::WorktreeRemove,
                     target,
                     ExecutionResult::Ok,
-                    DetailCode::WorktreeRemoved,
+                    code,
                     &args,
                     record.size_bytes,
                     primary_reason(record),
@@ -563,6 +571,25 @@ fn move_to_trash(path: &str) -> Result<(), trash::Error> {
         context.set_delete_method(DeleteMethod::NsFileManager);
     }
     context.delete(path)
+}
+
+/// Whether a directory `git worktree remove` reported as removed is still there.
+///
+/// A zero exit code means Git removed the *worktree*, not that the last directory
+/// went with it: it deletes every file it can and stops at a directory it cannot
+/// empty. On Windows the entry that survives is a reparse point it does not
+/// follow, and a pnpm `node_modules` is a stack of them — one real removal left 203
+/// directories and 352 dangling links behind while the log said `ok`. The worktree
+/// metadata is pruned either way, so this report is the only place the leftover can
+/// surface.
+///
+/// A stat error other than `NotFound` counts as present: an unreadable path is not
+/// evidence of absence, the same rule the worktree check applies to `directory_state`.
+fn directory_remains(path: &Path) -> bool {
+    !matches!(
+        std::fs::symlink_metadata(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    )
 }
 
 /// The per-item results and their log records, accumulated together.
@@ -1361,6 +1388,29 @@ mod tests {
     }
 
     // ---- options -----------------------------------------------------------
+
+    #[test]
+    fn a_successful_removal_is_only_called_clean_when_the_directory_is_gone() {
+        // The distinction `worktree.remnants` exists for. `git worktree remove`
+        // exited 0 on a worktree that still held 203 directories, because the only
+        // entries left were pnpm reparse points it would not follow; the log called
+        // it removed and the reader had no way to learn otherwise.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let still_there = dir.path().join("wt");
+        std::fs::create_dir_all(still_there.join("node_modules")).expect("create");
+
+        assert!(directory_remains(&still_there), "the directory is on disk");
+
+        std::fs::remove_dir_all(&still_there).expect("remove");
+        assert!(
+            !directory_remains(&still_there),
+            "a directory that left is not a leftover"
+        );
+        assert!(
+            !directory_remains(&dir.path().join("never-existed")),
+            "a path that never existed is not a leftover either"
+        );
+    }
 
     #[test]
     fn the_default_execute_options_point_at_the_platform_log() {

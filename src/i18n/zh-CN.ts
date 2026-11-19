@@ -144,6 +144,7 @@ export const zhCN = {
         changed: "生成计划后 {field} 变了：{before} → {after}；未删除",
         no_longer_safe: "重新检查后不再判定为可安全删除：{reason}",
         removed: "已用 git worktree remove 移除",
+        remnants: "git 已移除该工作树，但它的目录仍留在磁盘上——下次扫描会报告里面还剩什么",
         remove_failed: "git worktree remove 失败：{error}",
         pruned: "git worktree prune 清理了残留元数据",
         prune_failed: "git worktree prune 失败：{error}"
