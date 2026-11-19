@@ -5,8 +5,38 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.2] — 2026-11-20
+
+The first release after a real cleanup ran on Windows, and most of it comes from
+reading that run's log: two of its lines contradicted each other, and following
+them back found a scan that counted some directories twice and a removal that
+reported success without emptying the directory.
+
+### Added
+
+- **The plan is written down.** The history page records the plan as it stood when
+  it was reviewed — how many worktrees and artifact directories, and the total it
+  promised — so a cleanup can be compared with its outcome afterwards instead of
+  being reconstructed from the count on the confirmation line. A plan copied as
+  JSON is recorded too.
+
 ### Fixed
 
+- **A directory could be counted twice and offered for deletion twice.** Every
+  worktree inside the project — the usual `.worktree/` layout — was walked twice,
+  once from the project root and once from its own, and the two spellings of one
+  path were never recognised as the same directory. The plan then held two
+  entries for it (13.35 GB of the 26.81 GB that run promised), moved it once, and
+  logged "vanished" for the entry behind it. Each worktree is walked once now, and
+  an artifact inside a worktree that is also being removed is folded into that
+  removal rather than scheduled again.
+- **`git worktree remove` could report a removal it had not finished.** Git exits 0
+  after deleting every file it can, and on Windows a directory holding entries it
+  does not follow — a pnpm `node_modules` is a stack of reparse points — survives
+  that pass. The result line now says `worktree.remnants`, and the next scan
+  reports what is left, instead of claiming the directory was gone.
 - **No terminal window on Windows.** The release binary was linked as a console
   program, so Windows gave it a console, and Windows 11 draws a console in Windows
   Terminal — a window opened at every launch, including the one the installer starts
