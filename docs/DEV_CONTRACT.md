@@ -902,6 +902,19 @@ was checked to fail without the fix:
    current user, because MSI cannot update itself. The updater's feed publishes
    the same universal macOS archive under both architecture keys.
 
+**Decided (2026-11-20)**
+
+1. **The Windows release is a window program, not a console program.**
+   `src-tauri/src/main.rs` carries
+   `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`. Without it the
+   binary links as a console program, Windows creates a console for it at every launch,
+   and Windows 11 draws that console in Windows Terminal — which is what a reader saw
+   right after installing, because the installer's finish page starts the app. Every Git
+   child is started with `CREATE_NO_WINDOW` for the same reason from the other side: a
+   GUI-subsystem parent has no console to hand down, so each call would otherwise open
+   one of its own. Debug builds keep the console, which is where `pnpm tauri dev` writes
+   its logs.
+
 **Open**
 
 1. **How to verify the Windows Recycle Bin path**: D16 requires separate verification

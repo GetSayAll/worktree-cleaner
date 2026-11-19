@@ -281,7 +281,9 @@ release, and each one has caught something.
 
 ### 4.2 The Windows app
 
-- [ ] Download the `.exe`, install it as the current user, and run it.
+- [ ] Download the `.exe`, install it as the current user, and run it. **No
+      terminal window opens** — not at the end of the installation, where the
+      finish page starts the app, and not on a later launch from the Start menu.
 - [ ] The **Recycle Bin** path works: delete one safe worktree and find it in
       the Recycle Bin. This is D16, and it is still open in
       `docs/DEV_CONTRACT.md` §7 — no Windows machine has run it yet. Until one

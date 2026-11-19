@@ -5,7 +5,13 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **No terminal window on Windows.** The release binary was linked as a console
+  program, so Windows gave it a console, and Windows 11 draws a console in Windows
+  Terminal — a window opened at every launch, including the one the installer starts
+  when it finishes. The release build is now a window program, and every Git call it
+  makes asks for a console without a window, so a scan does not open one either.
 
 ## [0.1.1] — 2026-11-19
 
