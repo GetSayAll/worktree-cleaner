@@ -71,7 +71,7 @@ pub enum ScanError {
     /// "the repository could not be read", and a person can do something about
     /// the first one. The desktop shell is started from Finder or Explorer, so
     /// the `PATH` it inherits is not always the one a terminal would have.
-    #[error("Git was not found on this machine. Install Git, then try again.")]
+    #[error("Git was not found on this machine; install Git, then try again")]
     GitMissing,
 }
 

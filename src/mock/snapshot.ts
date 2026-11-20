@@ -26,13 +26,13 @@ export const mockRoot = "/Users/andy/MySrc/remote-mic-app";
 // text and it travels with the record (development contract D23 / section 3).
 // Only the "Scan incomplete · " label in front of it lives in src/i18n/en.ts.
 const mockScanWarning =
-  "Scanning the .nuxt directory under worktree cursor/perf-audio timed out; the size is recorded as unknown and treated as Needs review.";
+  "Scanning the .nuxt directory under worktree cursor/perf-audio timed out; the size is recorded as unknown and treated as Needs review";
 
 // The same walk timing out on a *different* directory must not downgrade the
 // safety verdict: coverage is git-ignored and regenerable, so it stays Safe while
 // only its size stays unknown. "Unmeasurable" and "unsafe" are independent axes.
 const mockCoverageWarning =
-  "The size of coverage under the main worktree timed out; only the size is unknown, the rebuildable judgement stands and the item stays Safe to delete.";
+  "The size of coverage under the main worktree timed out; only the size is unknown, the rebuildable judgement stands and the item stays Safe to delete";
 
 // ---- sample policy audit ----------------------------------------------------
 //
