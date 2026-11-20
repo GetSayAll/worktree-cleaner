@@ -4,6 +4,7 @@ import { recentProjects, scanError, startScan } from "../state";
 import { homePath } from "../format";
 import { messages } from "../i18n";
 import { isDesktop, onPathsDropped, pickDirectory } from "../platform";
+import brandLogo from "../assets/brand.svg";
 
 const path = ref("");
 const dragActive = ref(false);
@@ -83,98 +84,117 @@ function scannedAt(iso: string): string {
 
 <template>
   <div class="welcome">
-    <div class="welcome__hero">
-      <!-- The page identity is already in the sidebar and the top bar. Keep a
-           heading for assistive technology, but do not repeat the brand and the
-           page name over the one paragraph that explains the tool. -->
-      <h1 class="visually-hidden">{{ messages.welcome.title }}</h1>
-      <p class="welcome__lede">{{ " " + messages.welcome.lede + " " }}</p>
-    </div>
+    <header class="welcome__hero">
+      <img class="welcome__mark" :src="brandLogo" alt="" />
+      <div class="welcome__copy">
+        <p class="welcome__eyebrow">{{ messages.welcome.eyebrow }}</p>
+        <h1>{{ messages.welcome.title }}</h1>
+        <p class="welcome__lede">{{ messages.welcome.lede }}</p>
+      </div>
+    </header>
 
-    <div
-      class="dropzone"
-      :style="dropStyle"
-      @dragover.prevent="dragActive = true"
-      @dragleave="dragActive = false"
-      @drop.prevent="onDrop"
-    >
-      <div class="pick-row">
-        <input
-          v-model="path"
-          class="input input--mono"
-          :placeholder="messages.welcome.pathPlaceholder"
-          @keyup.enter="submit"
-        />
-        <button
-          class="btn"
-          data-action="choose-folder"
-          :title="desktop ? messages.welcome.chooseFolderTitle : messages.welcome.chooseFolderUnavailable"
-          @click="chooseFolder"
+    <div class="welcome__grid">
+      <div class="welcome__main">
+        <div
+          class="dropzone"
+          :style="dropStyle"
+          @dragover.prevent="dragActive = true"
+          @dragleave="dragActive = false"
+          @drop.prevent="onDrop"
         >
-          {{ messages.welcome.chooseFolder }}
-        </button>
-        <button
-          class="btn btn--primary"
-          data-action="start-scan"
-          :disabled="!path.trim()"
-          @click="submit"
-        >
-          {{ messages.welcome.startScan }}
-        </button>
-      </div>
-      <p v-if="pickerUnavailable" class="field__hint field__hint--warn">
-        {{ messages.welcome.chooseFolderUnavailable }}
-      </p>
-      <p v-if="pickerError" class="field__hint field__hint--warn">
-        {{ messages.welcome.pickerFailed(pickerError) }}
-      </p>
-      <p class="field__hint">{{ messages.welcome.dropHint }}</p>
-    </div>
-
-    <p v-if="scanError" class="notice notice--unsafe">{{ messages.welcome.scanFailed(scanError) }}</p>
-
-    <div class="promise-grid">
-      <div class="promise">
-        <div class="promise__k">{{ messages.welcome.promises.readOnlyTitle }}</div>
-        <div class="promise__v">{{ messages.welcome.promises.readOnlyBody }}</div>
-      </div>
-      <div class="promise">
-        <div class="promise__k">{{ messages.welcome.promises.evidenceTitle }}</div>
-        <div class="promise__v">{{ messages.welcome.promises.evidenceBody }}</div>
-      </div>
-      <div class="promise">
-        <div class="promise__k">{{ messages.welcome.promises.trashTitle }}</div>
-        <div class="promise__v">{{ messages.welcome.promises.trashBody }}</div>
-      </div>
-    </div>
-
-    <p class="rules-summary"><strong>{{ messages.rules.shortLabel }}</strong>{{ messages.rules.welcomeSummary }}</p>
-
-    <div class="card">
-      <div class="card__head">
-        <h2>{{ messages.welcome.recentTitle }}</h2>
-        <span class="faint tiny">{{ messages.welcome.recentHint }}</span>
-      </div>
-      <div class="card__body">
-        <p v-if="recentProjects.length === 0" class="faint">{{ messages.welcome.recentEmpty }}</p>
-        <div v-else class="recent-list">
-          <button
-            v-for="item in recentProjects"
-            :key="item.path"
-            class="recent"
-            @click="startScan(item.path)"
-          >
-            <span class="recent__path">{{ homePath(item.path) }}</span>
-            <span class="faint tiny nowrap">
-              {{
-                item.scanned_at
-                  ? messages.welcome.lastScan(scannedAt(item.scanned_at))
-                  : messages.welcome.neverScanned
-              }}
-            </span>
-          </button>
+          <div class="pick-row">
+            <input
+              v-model="path"
+              class="input input--mono"
+              :placeholder="messages.welcome.pathPlaceholder"
+              @keyup.enter="submit"
+            />
+            <button
+              class="btn"
+              data-action="choose-folder"
+              :title="desktop ? messages.welcome.chooseFolderTitle : messages.welcome.chooseFolderUnavailable"
+              @click="chooseFolder"
+            >
+              {{ messages.welcome.chooseFolder }}
+            </button>
+            <button
+              class="btn btn--primary"
+              data-action="start-scan"
+              :disabled="!path.trim()"
+              @click="submit"
+            >
+              {{ messages.welcome.startScan }}
+            </button>
+          </div>
+          <p v-if="pickerUnavailable" class="field__hint field__hint--warn">
+            {{ messages.welcome.chooseFolderUnavailable }}
+          </p>
+          <p v-if="pickerError" class="field__hint field__hint--warn">
+            {{ messages.welcome.pickerFailed(pickerError) }}
+          </p>
+          <p class="field__hint">{{ messages.welcome.dropHint }}</p>
         </div>
+
+        <p v-if="scanError" class="notice notice--unsafe">{{ messages.welcome.scanFailed(scanError) }}</p>
+
+        <section class="assurance-sheet">
+          <div class="card__head">
+            <h2>{{ messages.welcome.assuranceTitle }}</h2>
+          </div>
+          <div class="assurance-row">
+            <span class="assurance-row__index">01</span>
+            <div>
+              <div class="assurance-row__title">{{ messages.welcome.promises.readOnlyTitle }}</div>
+              <p class="assurance-row__body">{{ messages.welcome.promises.readOnlyBody }}</p>
+            </div>
+          </div>
+          <div class="assurance-row">
+            <span class="assurance-row__index">02</span>
+            <div>
+              <div class="assurance-row__title">{{ messages.welcome.promises.evidenceTitle }}</div>
+              <p class="assurance-row__body">{{ messages.welcome.promises.evidenceBody }}</p>
+            </div>
+          </div>
+          <div class="assurance-row">
+            <span class="assurance-row__index">03</span>
+            <div>
+              <div class="assurance-row__title">{{ messages.welcome.promises.trashTitle }}</div>
+              <p class="assurance-row__body">{{ messages.welcome.promises.trashBody }}</p>
+            </div>
+          </div>
+        </section>
       </div>
+
+      <aside class="welcome__aside">
+        <div class="card">
+          <div class="card__head">
+            <h2>{{ messages.welcome.recentTitle }}</h2>
+            <span class="faint tiny">{{ messages.welcome.recentHint }}</span>
+          </div>
+          <div class="card__body">
+            <p v-if="recentProjects.length === 0" class="faint">{{ messages.welcome.recentEmpty }}</p>
+            <div v-else class="recent-list">
+              <button
+                v-for="item in recentProjects"
+                :key="item.path"
+                class="recent"
+                @click="startScan(item.path)"
+              >
+                <span class="recent__path">{{ homePath(item.path) }}</span>
+                <span class="faint tiny nowrap">
+                  {{
+                    item.scanned_at
+                      ? messages.welcome.lastScan(scannedAt(item.scanned_at))
+                      : messages.welcome.neverScanned
+                  }}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p class="rules-summary"><strong>{{ messages.rules.shortLabel }}</strong>{{ messages.welcome.rulesNote }}</p>
+      </aside>
     </div>
   </div>
 </template>

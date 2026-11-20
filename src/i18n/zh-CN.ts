@@ -22,8 +22,7 @@ export const zhCN = {
     // 暂时留空，等口号定下来。键先留着：文案落地时只需改这一处，别的地方
     // （侧栏布局、两表一致性测试）都不用动。
     tagline: "",
-    readOnlyNote:
-      "扫描阶段只运行只读 Git 命令。产物目录会进系统{{trash}}；工作树由 git worktree remove 永久删除。",
+    readOnlyNote: "只读扫描。产物进系统{{trash}}；工作树由 Git 移除。",
     versionNote: "v{{version}}",
     sampleData: "示例数据",
     previewNote: "浏览器预览",
@@ -287,8 +286,11 @@ export const zhCN = {
     }
   },
   welcome: {
-    title: "项目清理审计",
-    lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删。扫描默认只读。产物目录会进系统{{trash}}；工作树由 git worktree remove 永久删除。",
+    title: "先看清，再清理",
+    eyebrow: "项目清理审计",
+    lede: "扫描一个仓库，逐项看清哪些工作树和构建产物可以清理，以及每一项判断的依据。",
+    assuranceTitle: "安全边界",
+    rulesNote: "默认只勾选可安全删除的项目；需人工确认的项目要手动选择。",
     pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
@@ -299,14 +301,11 @@ export const zhCN = {
     scanFailed: (message: string) => `扫描没有运行：${message}`,
     promises: {
       readOnlyTitle: "只读扫描",
-      readOnlyBody:
-        "检查阶段只运行只读 Git 命令，不修改仓库，也不向目标目录写入任何内容。",
+      readOnlyBody: "只运行只读 Git 命令，扫描阶段不写入任何内容。",
       evidenceTitle: "可核验的理由",
-      evidenceBody:
-        "每条判断都带证据：具体命令、文件数量或路径。「看着像垃圾」不算理由。",
+      evidenceBody: "每条判断都附上具体命令、路径或文件数量。",
       trashTitle: "两条删除路径",
-      trashBody:
-        "产物目录会进系统{{trash}}，可以恢复；工作树由 git worktree remove 删除，这一步是永久的，不经过{{trash}}。"
+      trashBody: "产物进系统{{trash}}，可恢复；工作树由 Git 移除。"
     },
     recentTitle: "最近的项目",
     recentHint: "点击即可扫描",

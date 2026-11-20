@@ -70,17 +70,17 @@
    competes with the verdict beside it, and a page of tinted rows has no way left
    to say "look here".
 
-   Second, the shell is the frame and the surface is the sheet. `--bg` is what
-   sits behind everything, `--surface` is what a card and the sidebar are made
-   of, and the difference between them - about four points of lightness - is what
-   separates a panel from the page without a shadow doing it. Both themes keep
-   that relationship in the same direction, so a card reads as a card in either.
+   Second, the shell is the frame and the surface is the sheet. The light canvas is
+   white and a panel is the same white: a hairline and one shadow step separate the
+   two, which is how a white sheet on a white page reads in macOS. The dark theme
+   lifts `--surface` a few points above `--bg`, because a dark sheet needs a value
+   difference as well as the hairline.
 
    Every token below is declared in this block and, where it is palette rather
    than layout, restated in the two dark blocks. `src/theme.test.ts` fails if the
    two dark copies drift or if one overrides a layout token. */
 :root {
-  --bg: #f5f6f8;
+  --bg: #ffffff;
   --surface: #ffffff;
   --surface-2: #fafbfc;
   --surface-3: #f0f2f5;
@@ -1189,9 +1189,70 @@ h1, h2 { text-wrap: balance; }
    to be its own layout - 860px wide and centred - which is why the welcome screen
    and the page after it had two different left and right margins. */
 .welcome { width: 100%; padding: var(--sp-4) 0 var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-5); }
-.welcome__hero { display: flex; flex-direction: column; gap: 10px; max-width: 74ch; }
-.welcome__lede { color: var(--text-2); font-size: var(--fs-lead); line-height: 1.65; letter-spacing: 0; text-wrap: pretty; }
+/* The mark is the Dock icon at reading size, beside a short headline. The page
+   used to open with one long paragraph, which made the first screen feel like a
+   document rather than a starting point. */
+.welcome__hero { display: flex; align-items: flex-start; gap: var(--sp-4); }
+.welcome__mark {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+.welcome__copy { min-width: 0; max-width: 74ch; }
+.welcome__eyebrow {
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+:lang(zh-CN) .welcome__eyebrow { letter-spacing: 0.08em; }
+.welcome__hero h1 {
+  margin-top: 2px;
+  font-size: var(--fs-hero);
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+:lang(zh-CN) .welcome__hero h1 { letter-spacing: 0; line-height: 1.3; }
+.welcome__lede { margin-top: 6px; color: var(--text-2); font-size: var(--fs-lead); line-height: 1.6; letter-spacing: 0; text-wrap: pretty; }
 :lang(en) .welcome__lede { line-height: 1.55; letter-spacing: -0.01em; }
+
+/* The command composer and its assurances stay together; recent projects get
+   their own column. At the default window the right column is where the eye
+   lands after typing a path, and on a narrow window the two simply stack. */
+.welcome__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.welcome__main, .welcome__aside { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.welcome__aside { gap: var(--sp-3); }
+
+/* One sheet, three rows: the assurances are a reading order, not three more
+   cards competing with the command composer. */
+.assurance-sheet {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow), var(--inset);
+  overflow: hidden;
+}
+.assurance-row { display: flex; gap: var(--sp-3); padding: 13px var(--sp-4); border-bottom: 1px solid var(--border); }
+.assurance-row:last-child { border-bottom: 0; }
+.assurance-row__index {
+  width: 20px;
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  line-height: 1.6;
+}
+.assurance-row__title { font-size: var(--fs-ui); font-weight: 600; line-height: 1.5; }
+.assurance-row__body { color: var(--text-2); font-size: var(--fs-ui); line-height: 1.65; margin-top: 1px; text-wrap: pretty; }
 
 /* A panel, not a drop target drawn in dashes: the input inside it is the way in,
    dropping is the shortcut. The dashed edge was the loudest border on the page
@@ -1232,8 +1293,9 @@ h1, h2 { text-wrap: balance; }
 .recent-list { display: flex; flex-direction: column; gap: 6px; }
 .recent {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
   width: 100%;
   text-align: left;
   padding: 9px 11px;
@@ -1244,7 +1306,8 @@ h1, h2 { text-wrap: balance; }
   transition: border-color 0.12s ease, background-color 0.12s ease;
 }
 .recent:hover { border-color: var(--accent-border); background: var(--accent-weak); }
-.recent__path { font-family: var(--mono); font-size: var(--fs-ui); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent__path { font-family: var(--mono); font-size: var(--fs-ui); white-space: normal; overflow-wrap: anywhere; }
+.recent > .faint { align-self: flex-end; }
 
 /* ---------- scanning ---------- */
 /* The full content pane like every other page. */
@@ -1658,6 +1721,9 @@ h1, h2 { text-wrap: balance; }
 .setting-row__control { flex: 1; min-width: 0; }
 .setting-row__control--narrow { max-width: 320px; }
 
+@media (max-width: 1100px) {
+  .welcome__grid { grid-template-columns: 1fr; }
+}
 @media (max-width: 900px) {
   /* `minmax(0, 1fr)` for the same reason as above - a bare `1fr` would reset the
      track's minimum to `auto` and let a long page scroll the document again. */
@@ -1666,6 +1732,12 @@ h1, h2 { text-wrap: balance; }
   .stat-grid, .stat-grid--4, .promise-grid, .detail__grid, .rules__grid { grid-template-columns: 1fr; }
   .actionbar { flex-wrap: wrap; }
   .actionbar--plan .actionbar__row { flex-wrap: wrap; }
+}
+@media (max-width: 700px) {
+  .welcome__mark { width: 44px; height: 44px; }
+  .welcome__hero h1 { font-size: var(--fs-page); }
+  .pick-row { flex-wrap: wrap; }
+  .pick-row .input { flex-basis: 100%; }
 }
 
 /* ---------- scrolling ---------- */

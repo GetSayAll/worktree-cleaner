@@ -27,7 +27,7 @@ export const en = {
     // landing the copy later is a one-line edit and nothing else has to move.
     tagline: "",
     readOnlyNote:
-      "The scan phase runs only read-only Git commands. Artifact directories are moved to the system {{trash}}; worktrees are permanently removed with git worktree remove.",
+      "Read-only scan. Artifacts go to the {{trash}}; worktrees are removed by Git.",
     versionNote: "v{{version}}",
     sampleData: "Sample data",
     previewNote: "Browser preview",
@@ -313,8 +313,11 @@ export const en = {
     }
   },
   welcome: {
-    title: "Project cleanup audit",
-    lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted. Scanning is read-only by default. Artifact directories go to the system {{trash}}; worktrees are permanently removed with git worktree remove.",
+    title: "Look before you clean",
+    eyebrow: "Project cleanup audit",
+    lede: "Scan one repository, then see which worktrees and build artifacts are safe to remove — and why.",
+    assuranceTitle: "How it stays safe",
+    rulesNote: "Safe items are selected by default; Review needs an explicit choice.",
     pathPlaceholder: "/path/to/your-repo",
     chooseFolder: "Choose folder",
     chooseFolderTitle: "Open the system folder picker",
@@ -326,14 +329,11 @@ export const en = {
     scanFailed: (message: string) => `The scan did not run: ${message}`,
     promises: {
       readOnlyTitle: "Read-only scan",
-      readOnlyBody:
-        "The check phase runs only read-only Git commands; it does not modify the repository or write into the target directory.",
+      readOnlyBody: "Only read-only Git commands; nothing is written during the scan.",
       evidenceTitle: "Verifiable reasons",
-      evidenceBody:
-        'Every judgment comes with evidence: a concrete command, file count, or path. "Looks like junk" is not accepted.',
+      evidenceBody: "Every verdict carries the command, path, or file count behind it.",
       trashTitle: "Two deletion paths",
-      trashBody:
-        "Artifact directories go to the system {{trash}} and can be restored. Worktrees are removed with git worktree remove; that deletion is permanent and does not use the {{trash}}."
+      trashBody: "Artifacts go to the {{trash}} and can be restored. Worktrees are removed with Git."
     },
     recentTitle: "Recent projects",
     recentHint: "Click to scan",

@@ -157,6 +157,13 @@ describe("theme stylesheet", () => {
     expect(attributeDark.declarations["color-scheme"]).toBe("dark");
   });
 
+  it("keeps the light content pane white", () => {
+    // P1 in docs/DESIGN.md: the canvas, the sidebar, and a card are all white in
+    // the light theme. A grey canvas is the exact regression this guards against.
+    expect(light.declarations["--bg"]).toBe("#ffffff");
+    expect(light.declarations["--surface"]).toBe("#ffffff");
+  });
+
   it("uses a genuinely different dark canvas and ink", () => {
     // Presence first: `not.toBe` on two missing declarations would pass while
     // proving nothing.
