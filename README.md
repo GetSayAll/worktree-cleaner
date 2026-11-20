@@ -11,6 +11,13 @@ Trash or Recycle Bin — never through a permanent delete, never through `rm -rf
 - **Stack**: Vue 3, Tauri 2, a Rust workspace
 - **License**: GPL-3.0-only
 
+## Screenshots
+
+| Start and scan | Review and clean up |
+|---|---|
+| ![The Project page, with no repository chosen yet](docs/screenshots/project.webp) <br><sub>Pick a repository by path, folder picker, or drag and drop</sub> | ![The Overview page, listing every worktree and build artifact with its verdict](docs/screenshots/overview.webp) <br><sub>Every worktree and artifact, with its verdict and the evidence behind it</sub> |
+| ![The scan in progress, with each read-only phase listed](docs/screenshots/scanning.webp) <br><sub>The scan is read-only, and every phase is listed as it runs</sub> | ![The Cleanup plan page, reviewed before anything is executed](docs/screenshots/cleanup-plan.webp) <br><sub>The whole plan is shown before anything is executed</sub> |
+
 ---
 
 ## Install
