@@ -19,7 +19,8 @@ export const en = {
   // names the one system the reader is on. `other` is a browser preview on a third
   // system: the generic noun rather than a guess.
   platform: {
-    trash: { macos: "Trash", windows: "Recycle Bin", other: "system trash" }
+    trash: { macos: "Trash", windows: "Recycle Bin", other: "system trash" },
+    pathExample: { macos: "/Users/you/repo", windows: "C:\\Users\\you\\repo", other: "/path/to/your-repo" },
   },
   app: {
     name: "Worktree Cleaner",
@@ -314,7 +315,7 @@ export const en = {
   },
   welcome: {
     lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted; scanning is read-only by default; artifact directories go to the system {{trash}}; worktrees are permanently removed with git worktree remove",
-    pathPlaceholder: "Absolute path, like /path/to/your-repo",
+    pathPlaceholder: "Absolute path, like {{path}}",
     chooseFolder: "Choose folder",
     chooseFolderTitle: "Open the system folder picker",
     chooseFolderUnavailable:
@@ -870,7 +871,7 @@ export const en = {
     scanScopeTitle: "Scan scope",
     extraScanPaths: "Extra scan paths",
     extraScanPathsHint:
-      "One per line; when empty, the defaults are used (~/MySrc, ~/dev, ~/Projects, ~/Code)",
+      "One per line; use absolute paths, like {{path}}",
     maxDepth: "Maximum scan depth",
     maxDepthHint: "Relative to the scan root; deeper is slower",
     perDirTimeout: "Per-directory timeout",

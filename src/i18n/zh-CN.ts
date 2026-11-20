@@ -15,7 +15,8 @@ export const zhCN = {
   // 那个词（见 `./index.ts`），所以界面上只出现读者所在的那一个系统，不并列两个。
   // `other` 是第三方系统上的浏览器预览：用通用说法，不猜。
   platform: {
-    trash: { macos: "废纸篓", windows: "回收站", other: "系统回收站" }
+    trash: { macos: "废纸篓", windows: "回收站", other: "系统回收站" },
+    pathExample: { macos: "/Users/you/repo", windows: "C:\\Users\\you\\repo", other: "/path/to/your-repo" },
   },
   app: {
     name: "Worktree Cleaner",
@@ -288,7 +289,7 @@ export const zhCN = {
   },
   welcome: {
     lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删；扫描默认只读；产物目录会进系统{{trash}}；工作树由 git worktree remove 永久删除",
-    pathPlaceholder: "绝对路径，例如 /path/to/your-repo",
+    pathPlaceholder: "绝对路径，例如 {{path}}",
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
     chooseFolderUnavailable: "文件夹选择器只在桌面应用里可用，请直接输入路径",
@@ -813,7 +814,7 @@ export const zhCN = {
     title: "设置",
     scanScopeTitle: "扫描范围",
     extraScanPaths: "额外扫描路径",
-    extraScanPathsHint: "每行一条；留空则使用默认值（~/MySrc、~/dev、~/Projects、~/Code）",
+    extraScanPathsHint: "每行一条；请使用绝对路径，例如 {{path}}",
     maxDepth: "最大扫描深度",
     maxDepthHint: "相对扫描根目录计算；越深越慢",
     perDirTimeout: "单目录超时",

@@ -5,6 +5,7 @@ import {
   compareSizeNullsFirst,
   formatBytes,
   formatCount,
+  homePath,
   isUnder,
   reasonText
 } from "./format";
@@ -74,6 +75,20 @@ describe("compareSizeNullsFirst", () => {
     const sizes = [50, null, 900, 10, null, 400];
     const sorted = [...sizes].sort(compareSizeNullsFirst);
     expect(sorted).toEqual([null, null, 900, 400, 50, 10]);
+  });
+});
+
+describe("homePath", () => {
+  it("shortens a home directory with the style the path uses", () => {
+    expect(homePath("/Users/andy/MySrc/proj")).toBe("~/MySrc/proj");
+    expect(homePath("/home/andy/proj")).toBe("~/proj");
+    expect(homePath("C:\\Users\\andy\\MySrc\\proj")).toBe("%USERPROFILE%\\MySrc\\proj");
+    expect(homePath("C:/Users/andy/MySrc/proj")).toBe("%USERPROFILE%/MySrc/proj");
+  });
+
+  it("leaves a path outside a home directory unchanged", () => {
+    expect(homePath("C:\\Work\\repo")).toBe("C:\\Work\\repo");
+    expect(homePath("/tmp/repo")).toBe("/tmp/repo");
   });
 });
 

@@ -292,7 +292,9 @@ export function isUnder(path: string, root: string): boolean {
 
 /** Display-only abbreviation of a home directory; tolerates both separators. */
 export function homePath(path: string): string {
-  return path.replace(/^(?:[A-Za-z]:)?[\\/](?:Users|home)[\\/][^\\/]+/, "~");
+  const home = /^(?:[A-Za-z]:)?[\\/](?:Users|home)[\\/][^\\/]+/i;
+  const windows = /^[A-Za-z]:[\\/]/.test(path);
+  return path.replace(home, windows ? "%USERPROFILE%" : "~");
 }
 
 export function basename(path: string): string {

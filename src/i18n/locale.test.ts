@@ -181,6 +181,15 @@ describe("platform wording", () => {
     expect(resolvedTable("en", "windows").result.stats.succeededSub(2)).not.toContain("Trash");
   });
 
+  it("uses a path example that belongs on this machine", () => {
+    // The placeholder used to say `/path/to/your-repo` on Windows, where that is
+    // not a path the reader can type. The example is a token like the trash noun.
+    expect(resolvedTable("en", "macos").welcome.pathPlaceholder).toBe("Absolute path, like /Users/you/repo");
+    expect(resolvedTable("en", "windows").welcome.pathPlaceholder).toBe("Absolute path, like C:\\Users\\you\\repo");
+    expect(resolvedTable("zh-CN", "windows").welcome.pathPlaceholder).toBe("绝对路径，例如 C:\\Users\\you\\repo");
+    expect(resolvedTable("en", "windows").welcome.pathPlaceholder).not.toContain("/Users/you/repo");
+  });
+
   it("keeps the tables themselves free of a hard-coded platform noun", () => {
     // The tables are shipped source: a string in them must not already contain a
     // platform noun, or the token layer is being bypassed for that string. Tokens
