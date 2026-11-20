@@ -288,13 +288,13 @@ export const zhCN = {
   },
   welcome: {
     lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删；扫描默认只读；产物目录会进系统{{trash}}；工作树由 git worktree remove 永久删除",
-    pathPlaceholder: "/path/to/your-repo",
+    pathPlaceholder: "绝对路径，例如 /path/to/your-repo",
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
     chooseFolderUnavailable: "文件夹选择器只在桌面应用里可用，请直接输入路径",
     pickerFailed: (message: string) => `文件夹选择器没能打开：${message}`,
     startScan: "开始扫描",
-    dropHint: "也可以把项目文件夹拖进这个窗口；扫描阶段不写任何文件",
+    dropHint: "除了输入路径或选择文件夹，也可以把项目文件夹拖进这个窗口；扫描阶段不写任何文件",
     scanFailed: (message: string) => `扫描没有运行：${message}`,
     promises: {
       readOnlyTitle: "只读扫描",

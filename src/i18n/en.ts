@@ -314,14 +314,14 @@ export const en = {
   },
   welcome: {
     lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted; scanning is read-only by default; artifact directories go to the system {{trash}}; worktrees are permanently removed with git worktree remove",
-    pathPlaceholder: "/path/to/your-repo",
+    pathPlaceholder: "Absolute path, like /path/to/your-repo",
     chooseFolder: "Choose folder",
     chooseFolderTitle: "Open the system folder picker",
     chooseFolderUnavailable:
       "The folder picker lives in the desktop app; type the path instead",
     pickerFailed: (message: string) => `The folder picker could not open: ${message}`,
     startScan: "Start scan",
-    dropHint: "You can also drop a project folder onto this window; the scan phase writes no files",
+    dropHint: "Besides typing a path or choosing a folder, you can drop a project folder onto this window; the scan phase writes no files",
     scanFailed: (message: string) => `The scan did not run: ${message}`,
     promises: {
       readOnlyTitle: "Read-only scan",
