@@ -7,6 +7,28 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.2.0] — 2026-11-20
+
+A release about the first screen and the words on it: the welcome page returns to
+the composer-first order on a white canvas, and path examples now name the system
+the reader is on.
+
+### Changed
+
+- **The welcome page leads with the scan field.** The path field, the folder
+  picker and the scan button come first, the three assurance cards follow, and the
+  explanatory copy sits after them. The light canvas, sidebar and cards are white
+  again, as the design calls for.
+- **Path examples follow the host.** The path field and the extra-paths hint show
+  `/Users/you/repo` on macOS and `C:\Users\you\repo` on Windows. A home directory
+  is displayed as `~` on macOS and `%USERPROFILE%` on Windows, and the settings
+  hint no longer claims macOS-only defaults.
+- **The copy says what the field takes.** The placeholder names an absolute path,
+  and the drop hint names typing a path and choosing a folder before the drag
+  alternative. Sentence-ending periods are gone from the interface copy, the mock
+  warnings and the one user-visible core message; dots inside paths, commands and
+  versions stay.
+
 ## [0.1.2] — 2026-11-20
 
 The first release after a real cleanup ran on Windows, and most of it comes from
