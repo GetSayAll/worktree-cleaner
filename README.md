@@ -13,10 +13,23 @@ Trash or Recycle Bin — never through a permanent delete, never through `rm -rf
 
 ## Screenshots
 
-| Start and scan | Review and clean up |
-|---|---|
-| ![The Project page, with no repository chosen yet](docs/screenshots/project.webp) <br><sub>Pick a repository by path, folder picker, or drag and drop</sub> | ![The Overview page, listing every worktree and build artifact with its verdict](docs/screenshots/overview.webp) <br><sub>Every worktree and artifact, with its verdict and the evidence behind it</sub> |
-| ![The scan in progress, with each read-only phase listed](docs/screenshots/scanning.webp) <br><sub>The scan is read-only, and every phase is listed as it runs</sub> | ![The Cleanup plan page, reviewed before anything is executed](docs/screenshots/cleanup-plan.webp) <br><sub>The whole plan is shown before anything is executed</sub> |
+The four pages, in the order a cleanup takes.
+
+![The Project page, with no repository chosen yet](docs/screenshots/project.webp)
+
+*Project — pick a repository by path, folder picker, or drag and drop.*
+
+![The scan in progress, with each read-only phase listed](docs/screenshots/scanning.webp)
+
+*Scanning — read-only, with every phase listed as it runs.*
+
+![The Overview page, listing every worktree and build artifact with its verdict](docs/screenshots/overview.webp)
+
+*Overview — every worktree and artifact, with its verdict and the evidence behind it.*
+
+![The Cleanup plan page, reviewed before anything is executed](docs/screenshots/cleanup-plan.webp)
+
+*Cleanup plan — the whole plan is shown before anything is executed.*
 
 ---
 
