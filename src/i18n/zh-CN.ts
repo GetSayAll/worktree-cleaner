@@ -7,8 +7,8 @@
 // 这里只放界面文案。扫描器产出的 reason text / evidence 是数据，不是界面
 // 文案，仍随扫描结果留在 src/mock/snapshot.ts 与 Rust 侧。
 
-// 与 en.ts 同名同义：用于生成 plan.blocker()，并让前端能把前缀剥回去。
-const blockerPrefix = "被白名单保护规则拦截：";
+// 与 en.ts 同名同义：计划页的拦截提示和导出的计划共用这一句。
+const blockerPrefix = "受保护路径：";
 
 export const zhCN = {
   // 随运行机器变化的词。字符串里写 `{{trash}}`，由 `applyLocale` 填入本机该用的
@@ -24,18 +24,18 @@ export const zhCN = {
     // （侧栏布局、两表一致性测试）都不用动。
     tagline: "",
     readOnlyNote:
-      "扫描阶段只运行只读 Git 命令；产物目录会进系统{{trash}}；工作树由 git worktree remove 永久删除",
+      "只读扫描 · 每次删除前再次确认。",
     versionNote: "v{{version}}",
     sampleData: "示例数据",
     previewNote: "浏览器预览",
     switchProject: "切换项目",
     noProject: "尚未选择项目",
     pickRepository: "选择一个仓库开始扫描",
-    desktopOnly: "这个操作需要桌面应用；浏览器预览访问不到文件系统"
+    desktopOnly: "请在桌面应用中操作。"
   },
   preview: {
     notice:
-      "浏览器预览 —— 这个版本访问不到文件系统，因此清理操作不可用，页面上的数字都来自示例数据"
+      "浏览器预览 · 示例数据；清理操作不可用。"
   },
   nav: {
     project: "项目",
@@ -74,14 +74,14 @@ export const zhCN = {
     defaultUnselected: "默认不选",
     defaultDisabled: "不可勾选",
     footer:
-      "工作树永久删除目录，分支保留；构建产物进系统{{trash}}，可以恢复；执行前逐项复检，每条判定都附有命令、数量或路径作为证据",
+      "工作树永久删除，分支保留；构建产物进{{trash}}，可以恢复。",
     worktreesSummary:
       "默认只勾选「可安全删除」；「需人工确认」必须逐项勾选；「禁止删除」不可选",
     artifactsSummary:
-      "只删除可重建或为空的产物，且没有受保护内容；近期写入或检查未完成时转为「需人工确认」",
+      "只删除可重建或为空的产物；其他项留待确认。",
     welcomeSummary:
       "扫描后，每一项会判为「可安全删除」「需人工确认」或「禁止删除」；默认只勾选「可安全删除」",
-    planSummary: "只执行已勾选且复检通过的条目"
+    planSummary: "只执行已勾选且仍符合条件的条目。"
   },
   // 每个 ReasonCode 一条，顺序与 `src/types.ts` 一致。核心送来的判定理由因此
   // 用读者自己的语言显示，而不是送出它那个进程的语言。`evidence` 不在这里：
@@ -111,7 +111,7 @@ export const zhCN = {
       prunable: "工作目录已不存在",
       merged: "已合并进默认分支",
       absorbed: "所有提交的改动都已在默认分支中",
-      absorbed_content_changed: "补丁已在默认分支中，但它触及的文件此后又被改过",
+      absorbed_content_changed: "改动已在默认分支中，但相关文件之后又改过",
       clean: "工作区干净"
     },
     af: {
@@ -141,33 +141,33 @@ export const zhCN = {
     // 用点号拆路径，键里带点会被读成两段。
     codes: {
       worktree: {
-        not_in_scan: "已不在扫描结果中，未执行任何操作",
+        not_in_scan: "已不存在，未执行任何操作。",
         changed: "生成计划后 {field} 变了：{before} → {after}；未删除",
-        no_longer_safe: "重新检查后不再判定为可安全删除：{reason}",
-        removed: "已用 git worktree remove 移除",
-        remnants: "git 已移除该工作树，但它的目录仍留在磁盘上——下次扫描会报告里面还剩什么",
-        remove_failed: "git worktree remove 失败：{error}",
-        pruned: "git worktree prune 清理了残留元数据",
-        prune_failed: "git worktree prune 失败：{error}"
+        no_longer_safe: "不再判定为可安全删除：{reason}",
+        removed: "已移除",
+        remnants: "已移除，但目录仍在磁盘上。",
+        remove_failed: "移除失败：{error}",
+        pruned: "已清理残留记录",
+        prune_failed: "清理失败：{error}"
       },
       artifact: {
-        not_in_scan: "已不在扫描结果中，未执行任何操作",
-        not_a_known_kind: "已不是本工具识别的构建产物目录名，未删除",
+        not_in_scan: "已不存在，未执行任何操作。",
+        not_a_known_kind: "已不是构建产物目录，未删除。",
         changed: "生成计划后 {field} 变了：{before} → {after}；未删除",
-        no_longer_safe: "重新检查后不再判定为可安全删除：{reason}",
+        no_longer_safe: "不再判定为可安全删除：{reason}",
         vanished: "该目录已不在磁盘上，无需删除",
-        unmeasurable: "重新检查时无法测量这个目录，因此没有动它",
+        unmeasurable: "无法测量体积，未删除。",
         trashed: "已移入{{trash}}",
         trash_failed: "无法移入{{trash}}：{error}"
       },
       prunable: {
-        metadata_only: "该目录早已不存在，只清理了 Git 元数据，未触碰任何文件"
+        metadata_only: "该目录早已不存在，只清理了残留记录，未触碰任何文件。"
       },
       precondition: {
-        failed: "该路径未通过删除前检查，未执行"
+        failed: "路径检查未通过，未执行。"
       },
       bundled: {
-        with_worktree: "随所属工作树一起移除，没有单独操作"
+        with_worktree: "已随所属工作树一起移除。"
       }
     },
     // 变化字段的名字，供两个 changed 码使用。没有这张表，句子里的字段名会是英文。
@@ -183,7 +183,7 @@ export const zhCN = {
       ignored: "忽略规则",
       symlink: "软链接"
     },
-    legacy: "这条记录写于本工具开始保留原因码之前"
+    legacy: "旧版本记录"
   },
   // 用户做过什么，按 ActivityAction 索引。删除记录在上面自己的段里；这里是
   // 「这台机器上发生过什么」的另一半，也是读者没有别的办法重建的那一半。
@@ -200,16 +200,16 @@ export const zhCN = {
       },
       plan: {
         generated: "生成了清理计划：{worktrees} 个工作树、{artifacts} 个产物目录，预计释放 {total_bytes}",
-        exported: "已把计划复制为 JSON：{item_count} 个条目"
+        exported: "已复制计划：{item_count} 项"
       },
       settings: {
         changed: "修改了一项设置"
       },
       cleanup: {
-        confirmed: "确认执行清理：{worktrees} 个工作树、{artifacts} 个产物目录，其中 {forced} 个需要 --force"
+        confirmed: "确认执行清理：{worktrees} 个工作树、{artifacts} 个产物目录，其中 {forced} 个含未跟踪文件"
       },
       trash: {
-        opened: "打开了系统{{trash}}"
+        opened: "打开{{trash}}"
       }
     },
     kinds: {
@@ -232,7 +232,7 @@ export const zhCN = {
     action: {
       worktreeRemove: "移除工作树",
       trashMove: "移入{{trash}}",
-      prune: "清理元数据"
+      prune: "清理残留"
     },
     outcome: {
       ok: "已删除",
@@ -266,47 +266,41 @@ export const zhCN = {
     elapsed: (clock: string) => `已用时 ${clock}`,
     cancel: "取消",
     scanning: "扫描中…",
-    budgetNote:
-      "每个目录探测都有超时，整次扫描也有总预算；预算用尽时会如实报告「扫描未完成」，并把受影响的条目标为「需人工确认」",
     stages: {
       worktrees: {
-        label: "解析 Git 工作树",
-        detail: "git worktree list --porcelain -z"
+        label: "查找工作树",
       },
       status: {
-        label: "检查每个工作树的状态",
-        detail: "status · merge-base · stash · upstream"
+        label: "检查改动",
       },
       artifacts: {
-        label: "扫描构建产物",
-        detail: "在项目边界内遍历产物目录名清单"
+        label: "查找构建产物",
       },
       verify: {
-        label: "校验并汇总",
-        detail: "活动时间复检 · 原因合并 · 体积汇总"
+        label: "汇总",
       }
     }
   },
   welcome: {
-    lede: "扫描一个仓库，列出它的全部 Git 工作树与构建产物，并逐条说明每一项为什么能删、为什么不能删；扫描默认只读；产物目录会进系统{{trash}}；工作树由 git worktree remove 永久删除",
+    lede: "扫描仓库，列出全部工作树和构建产物，并说明哪些能删、哪些不能删。",
     pathPlaceholder: "绝对路径，例如 {{path}}",
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
-    chooseFolderUnavailable: "文件夹选择器只在桌面应用里可用，请直接输入路径",
+    chooseFolderUnavailable: "请直接输入路径。",
     pickerFailed: (message: string) => `文件夹选择器没能打开：${message}`,
     startScan: "开始扫描",
-    dropHint: "除了输入路径或选择文件夹，也可以把项目文件夹拖进这个窗口；扫描阶段不写任何文件",
+    dropHint: "也可以把项目文件夹拖进这个窗口。",
     scanFailed: (message: string) => `扫描没有运行：${message}`,
     promises: {
       readOnlyTitle: "只读扫描",
       readOnlyBody:
-        "检查阶段只运行只读 Git 命令，不修改仓库，也不向目标目录写入任何内容",
+        "扫描不会改动任何文件。",
       evidenceTitle: "可核验的理由",
       evidenceBody:
-        "每条判断都带证据：具体命令、文件数量或路径；「看着像垃圾」不算理由",
+        "每条判定都写明理由。",
       trashTitle: "两条删除路径",
       trashBody:
-        "产物目录会进系统{{trash}}，可以恢复；工作树由 git worktree remove 删除，这一步是永久的，不经过{{trash}}"
+        "构建产物可从{{trash}}恢复；工作树永久删除。"
     },
     recentTitle: "最近的项目",
     recentHint: "点击即可扫描",
@@ -326,9 +320,9 @@ export const zhCN = {
       // 测量的条数，而不是悄悄丢掉。`bytes` 参数已自带「≥」前缀
       // （formatBytes 的 approximate），所以这句不能重复写。
       safeSubUnknown: (bytes: string, unknown: number) =>
-        `合计 ${bytes} · ${unknown} 项无法测量 · 可删条目默认勾选`,
+        `合计 ${bytes} · ${unknown} 项体积未知 · 可删条目默认勾选`,
       reviewLabel: "需人工确认",
-      reviewSub: "未合并 / 最近有改动 / 检查未完成",
+      reviewSub: "未合并 / 最近有改动",
       unsafeLabel: "禁止删除",
       unsafeSub: "主工作树 / 有未提交改动 / 已锁定 / 已提交进仓库",
       reclaimableLabel: "预计可回收",
@@ -344,7 +338,7 @@ export const zhCN = {
     selected: (n: number) => `已选 ${n} 项 · 预计可回收`,
     // 可回收卡片下方：选中项里有无法测量的，合计只是下界，用户必须一眼看到。
     selectedUnknown: (n: number) =>
-      `已选的 ${n} 项无法测量体积，因此上面显示的是下界`,
+      `${n} 项体积未知，合计为下限。`,
     selectHint: "在「工作树」或「构建产物」页面勾选；可删条目默认已勾选",
     adjustSelection: "调整选择",
     generatePlan: "生成清理计划"
@@ -352,13 +346,11 @@ export const zhCN = {
   worktrees: {
     title: "工作树",
     mainWorkspaceBadge: "主工作区 · 受保护",
-    mainWorkspaceHint: (branch: string) =>
-      `主工作区是仓库本身，不能删除，也不会进入清理计划；合并判定以${branch ? `默认分支 ${branch}` : "默认分支"}为准，不以主工作区当前检出的分支为准`,
-    dataSource:
-      "数据来源：git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
+    mainWorkspaceHint: (_branch: string) =>
+      "主工作区就是仓库本身，不能删除。",
     outsideRoot: "在所选目录之外",
     outsideRootHint:
-      "这个工作树在你所选目录之外；它和其他工作树一样会被扫描、判定，也可以删除",
+      "在所选目录之外，但仍可扫描和删除。",
     filterAll: (n: number) => `全部 ${n}`,
     filterSafe: (n: number) => `可安全删除 ${n}`,
     filterReview: (n: number) => `需人工确认 ${n}`,
@@ -379,17 +371,18 @@ export const zhCN = {
     },
     stashEntries: (n: number) => `${n} 条`,
     prunableBanner:
-      "工作目录已不存在，只会运行 git worktree prune 清理残留元数据，不触碰任何文件",
-    untrackedLabel: "未跟踪文件（删除此工作树需要 --force）",
+      "工作目录已不在；只清理残留记录，不碰文件。",
+    untrackedLabel: "未跟踪文件（删除时会一并删除）",
     empty: "没有符合当前筛选条件的工作树",
     upstreamGone: "工作目录已消失",
     upstreamNone: "没有上游分支",
     upstreamCounts: (ahead: number, behind: number) => `上游领先 ${ahead} / 落后 ${behind}`,
-    mergeMain: "主工作树，不参与合并状态判定",
+    mergeMain: "主工作树",
     mergeUnknown: (branch: string) => `无法判定是否已合并进 ${branch}`,
     mergeYes: (branch: string) => `已合并进 ${branch}`,
     mergeNo: (branch: string) => `未合并进 ${branch}`,
-    mergeAbsorbed: (branch: string) => `改动已在 ${branch} 中（压缩合并）`,
+    mergeAbsorbed: (branch: string) =>
+      `改动已在 ${branch} 中`,
     stateGone: "目录已消失",
     stateDirty: (n: number) => `有改动 ${n}`,
     stateClean: "干净",
@@ -400,13 +393,12 @@ export const zhCN = {
     continueToArtifacts: "继续查看构建产物",
     generatePlan: "生成清理计划",
     hygieneTitle: "这个仓库会不断重新堆积",
-    hygieneBody: (n: number) => `有 ${n} 条磁盘卫生规则未通过：worktree 数量、缓存或闲置状态会在清理后继续长回来`,
+    hygieneBody: (n: number) =>
+      `本仓库有 ${n} 条磁盘卫生规则未通过，清理后会继续堆积。`,
     hygieneAction: "查看磁盘卫生"
   },
   artifacts: {
     title: "构建产物",
-    caption:
-      "候选目录名只是提示；最终判断依据是它是否被 Git 跟踪、是否含有手写内容，以及最近活动时间",
     bySize: "按体积",
     byLastActivity: "按最近活动",
     showOnlyLargerThan: "只显示大于",
@@ -422,12 +414,12 @@ export const zhCN = {
     symlink: (target: string) => ` · 软链接 → ${target}`,
     gitTracked: "已跟踪",
     gitIgnored: "已忽略",
-    gitUnverified: "未核验",
+    gitUnverified: "未知",
     gitUntracked: "未跟踪",
     // 每一行自带字段名，没有表头可标注。这个前缀就是表头的替身：写「Git 已忽略」
     // 而不是孤零零一个「已忽略」。
     gitLabel: "Git",
-    empty: "没有超过当前体积阈值的产物目录",
+    empty: "没有大于当前下限的产物目录",
     selectedSummary: (artifacts: number, worktrees: number) =>
       `已选 ${artifacts} 个产物 · ${worktrees} 个工作树 · 预计可回收`,
     backToWorktrees: "返回工作树",
@@ -440,7 +432,7 @@ export const zhCN = {
   hygiene: {
     title: "磁盘卫生",
     lede:
-      "对照 docs/DISK_HYGIENE.md 检查本仓库；全程只读：这里不会删除任何东西，任何一条问题也不会改变某一项「是否可删」的判断",
+      "只读检查，不会删除任何东西。",
     metOf: (met: number, total: number) => `${total} 条规则中符合 ${met} 条`,
     stats: {
       violation: "违反的规则",
@@ -449,7 +441,7 @@ export const zhCN = {
       met: "符合的规则"
     },
     violationBanner: (rules: number) =>
-      `有 ${rules} 条规则被违反；下面每条问题都写明了涉及的路径和处理办法；目前没有改动任何东西`,
+      `有 ${rules} 条规则未通过；下面每条都写明路径和处理办法。`,
     level: {
       ok: "符合",
       advisory: "建议处理",
@@ -488,7 +480,7 @@ export const zhCN = {
           "在仓库内部，但不在 {expected} 之下，于是 Git 把它当作普通的未跟踪文件",
       },
       L2: {
-        not_checkable: "从一个仓库内部看不到第二个 clone",
+        not_checkable: "无法从当前仓库检查。",
       },
       L3: {
         nested_worktree: "这个工作树位于 {parent} 内部",
@@ -512,10 +504,10 @@ export const zhCN = {
         nested_worktree_dir: "某个工作树内部出现了 .worktree/ 目录；它只应存在于仓库根目录",
       },
       L6: {
-        not_checkable: "git clean 不留日志，扫描看不到一条已经执行过的命令",
+        not_checkable: "无法从当前仓库检查。",
       },
       L7: {
-        not_checkable: "编辑器的文件搜索与系统索引都在仓库之外配置",
+        not_checkable: "无法从当前仓库检查。",
       },
       T1: {
         over_cap: "已注册 {count} 个工作树；上限是 {cap} 个",
@@ -532,10 +524,10 @@ export const zhCN = {
       },
       T4: {
         past_ceiling: "创建于 {days} 天前；任何工作树都不超过 {ceiling} 天",
-        age_unknown: "{count} 个工作树目录读不出创建时间，因此无法核对其存活时长",
+        age_unknown: "{count} 个工作树无法读取创建时间。",
       },
       T5: {
-        not_checkable: "会话的退出没有被记录在任何扫描能读到的地方",
+        not_checkable: "无法从当前仓库检查。",
       },
       B1: {
         outside_declared:
@@ -553,14 +545,14 @@ export const zhCN = {
         nested_cache_root: "某个工作树内部出现了第二个 build-cache/",
       },
       B3: {
-        not_checkable: "构建共享哪些依赖，由它自己的配置决定",
+        not_checkable: "无法从当前仓库检查。",
       },
       B4: {
-        not_checkable: "某处是否把缓存当作输入来读，光读缓存本身判断不了",
+        not_checkable: "无法从当前仓库检查。",
       },
       B5: {
         slot_over_cap: "这个槽位已占 {size}；单个工作树的上限是 {cap_bytes}",
-        slot_unmeasurable: "这个槽位无法测量，因此体积未知",
+        slot_unmeasurable: "无法测量这个槽位的体积。",
       },
       Q1: {
         frozen:
@@ -570,10 +562,10 @@ export const zhCN = {
       },
       Q2: {
         over_share: "build-cache 已占 {size}，为卷容量的 {percent}；建议控制在一成以内",
-        share_unknown: "有 {count} 个缓存槽位无法测量，因此这个占比只是下限",
+        share_unknown: "{count} 个缓存槽位无法测量，占比为下限。",
       },
       Q3: {
-        not_checkable: "准入发生在创建之前；扫描只看得到已经存在的东西",
+        not_checkable: "无法从当前仓库检查。",
       },
       X1: {
         entry_without_expiry:
@@ -613,12 +605,13 @@ export const zhCN = {
       evidence: "依据",
       fix: "处理",
       acceptedTitle: "已接受的例外",
-      acceptedUntil: (date: string) => `已接受至 ${date}（见 .worktree-keep）`
+      acceptedUntil: (date: string) =>
+        `已接受至 ${date}`
     },
     setup: {
       title: "在创建第一个工作树之前做好",
       note:
-        "四处接线做到位，其余规则才立得住；状态来自上面的审计；下面的片段可以直接粘贴",
+        "下面的片段可以直接粘贴。",
       items: {
         ignore: "两条忽略条目，带前导斜杠并提交",
         cache: "唯一的缓存根，以及把构建指向它的变量",
@@ -639,74 +632,70 @@ export const zhCN = {
     scope: {
       title: "这次审计看不到什么",
       note:
-        "L2、L6、L7、T5、B3、B4、Q3 会被报成「未检查」：它们各自取决于一个仓库之外的东西——另一个 clone、一条已经执行过的命令、编辑器的索引、会话的退出，或创建当刻做出的决定；C1–C3 属于机器级缓存与发布产物；没有证据的规则，永远不会被说成「符合」"
+        "这些规则依赖仓库之外的信息，因此只报「未检查」。"
     },
-    policyRef: "规则编号与 docs/DISK_HYGIENE.md 一致"
   },
   plan: {
     title: "清理计划",
-    lede: "执行前逐项复核；本页只说明将要发生什么，尚未执行任何操作",
+    lede: "执行前复核。尚未改动任何内容。",
     backToAdjustSelection: "返回调整选择",
     stats: {
       removeWorktree: "移除工作树",
-      removeWorktreeSub: "git worktree remove · 永久删除",
+      removeWorktreeSub: "永久删除",
       moveToTrash: "移入{{trash}}",
       moveToTrashSub: (bundled: number) => `另有 ${bundled} 项随所属工作树一并删除（不可恢复）`,
       reclaimable: "预计可回收",
-      reclaimableSub: "依据扫描时测得的体积",
+      reclaimableSub: "扫描时测得的体积。",
       // 合计里缺少无法测量的条目，所以只是下界；这里把条数摆出来，避免把下界
       // 说成精确值。
       reclaimableSubUnknown: (n: number) =>
-        `至少为已测得的体积 · ${n} 项无法测量`,
+        `${n} 项体积未知，合计为下限。`,
       autoExcluded: "自动排除",
-      autoExcludedSub: "「禁止删除」的条目已排除在计划之外"
+      autoExcludedSub: "「禁止删除」条目不会进入计划。"
     },
     blockerPrefix,
     blocker: (path: string) => `${blockerPrefix}${path}`,
-    blockerTitle: "前置条件未满足 · ",
+    blockerTitle: "已阻止 · ",
     ack: {
       force: (n: number) =>
-        `包含 ${n} 个需要 --force 的工作树，它们的未跟踪文件也会被删除`,
-      // 阈值一律由参数传入，不在文案里写死：数字的唯一定义处在 state.ts
-      // （ACK_COUNT_THRESHOLD / ACK_SIZE_THRESHOLD_BYTES），并由调用方传入，
-      // 用户读到的数字和代码实际判断的数字因此不可能对不上。体积上限传的是
-      // 格式化好的字符串，单位跟着当前语言走。
-      count: (n: number, threshold: number) =>
-        `本次将处理 ${n} 项，超过 ${threshold} 项的确认阈值`,
+        `含 ${n} 个有未跟踪文件的工作树；这些文件也会被删除。`,
+      // 数量阈值由 state.ts 判断，文案只说明本次规模；体积上限传的是格式化好
+      // 的字符串，单位跟着当前语言走。
+      count: (n: number) =>
+        `本次将处理 ${n} 项。`,
       size: (limit: string) => `单次释放超过 ${limit}`,
       // 计划里存在无法测量的条目时，合计只是下界，上面的体积阈值无法判定：
       // 这条理由独立拦一道，而不是猜。
-      unmeasurable: (n: number, limit: string) =>
-        `包含 ${n} 项无法测量体积，合计只是下界，${limit} 阈值无法判定`
+      unmeasurable: (n: number) =>
+        `含 ${n} 项体积未知，合计为下限。`
     },
     checks: {
-      title: "前置条件检查（dry run）",
-      note: "标有短横线的检查会在每项删除之前重新运行",
+      title: "执行前检查",
+      note: "短横线表示执行前会再检查。",
       recheckNotice:
-        "执行前每项都会复检；已变化或无法确认的条目会被跳过，结果页会说明原因；勾选条目不保证一定删除",
+        "执行前会再次检查；已变化的条目会跳过。",
       pathCheck: (n: number) =>
-        `路径检查通过：非空绝对路径、软链接已解析、不含 .. 组件、均不指向系统目录（${n} 项）`,
-      whitelistPassed: "白名单检查通过：没有任何条目命中保护规则",
-      whitelistBlocked: (n: number) => `${n} 项命中白名单，已被拦截`,
+        `路径检查通过（${n} 项）`,
+      whitelistPassed: "保护检查通过",
+      whitelistBlocked: (n: number) =>
+        `${n} 项受保护，已排除`,
       duplicateCheck: (n: number) =>
-        `重复删除检查通过：${n} 个产物随所属工作树移除，只计一次`,
-      // 每条只说「要看什么」，不再重复「尚未运行」：列表里的短横线已经说明了状态，
-      // `note` 已经说明了时机，两条里各再写一遍就是同一句话说三遍。复检本身是
-      // 实现细节，读者拿它做不了什么决策。
-      identityNotRun: "路径、体积与最近修改时间的复检",
-      activityNotRun: "计划生成之后有没有新的写入"
+        `随工作树删除的产物只计一次（${n} 项）。`,
+      // 两条推迟的检查说明删除前会核对什么，避免把「已勾选」理解成「一定删除」。
+      identityNotRun: "执行前复查路径与体积",
+      activityNotRun: "执行前检查新改动"
     },
-    channelA: "通道 A · 永久移除工作树",
+    channelA: "永久移除工作树",
     items: (n: number) => `${n} 项`,
     noWorktrees: "没有选中工作树",
-    needForce: "需要 --force",
+    needForce: "有未跟踪文件",
     reviewItem: "需人工确认",
     removable: "可直接移除",
     forceNote: (n: number) =>
-      `--force 会连同下列未跟踪文件一起删除（共 ${n} 个）：它们没有被 Git 跟踪，删除后无法从仓库里恢复：`,
-    prunableNote: "工作目录已经不在了；只清理 Git 元数据，不触碰任何文件",
+      `以下 ${n} 个未跟踪文件也会被删除，且无法恢复：`,
+    prunableNote: "工作目录已不在；只清理残留记录，不碰文件。",
     cleanNote: "工作区是干净的，不会丢失任何未保存内容",
-    channelB: "通道 B · 将产物目录移入{{trash}}",
+    channelB: "将产物目录移入{{trash}}",
     trashHeader: (n: number, bytes: string) => `${n} 项 · ${bytes}`,
     columns: {
       directory: "目录",
@@ -718,30 +707,30 @@ export const zhCN = {
     recoverable: "可从{{trash}}恢复",
     noArtifacts: "没有选中产物目录",
     confirmationTitle: "执行前确认",
-    confirmationIntro: "本次操作命中以下高风险条件，需要人工确认：",
+    confirmationIntro: "本次清理需要你确认：",
     permanenceNote:
-      "工作树由 git 永久删除，不能从{{trash}}恢复；只有产物目录会进{{trash}}",
+      "工作树不能从{{trash}}恢复；构建产物可以。",
     ackConfirm: (n: number) =>
       n > 0
-        ? `我已逐条看过上面的内容，包括 ${n} 个工作树中被 --force 删除的未跟踪文件，并确认工作树删除是永久的`
-        : "我已逐条看过上面的内容，并确认工作树删除是永久的",
+        ? `我已看过上面的列表，包括 ${n} 个工作树中会被删除的未跟踪文件；我明白工作树删除是永久的。`
+        : "我已看过上面的列表；我明白工作树删除是永久的。",
     confirmRequired: "必须确认",
     confirmed: "已勾选",
     confirmHint: "勾选后才能执行清理",
     confirmRules:
-      "确认后执行：工作树永久删除，分支保留；构建产物目录进系统{{trash}}，可以恢复",
+      "工作树永久删除，分支保留；构建产物移入{{trash}}，可以恢复。",
     typeNameBefore: "请输入项目目录名",
     typeNameAfter: "以继续",
-    exportTitle: "计划导出（JSON）",
+    exportTitle: "计划",
     copy: "复制",
     hideExport: "收起导出",
-    exportPlan: "导出计划",
+    exportPlan: "复制计划",
     excludedNote: (n: number) =>
       `${n} 个「禁止删除」条目已被自动排除；回到列表可以查看原因`,
     backToAdjust: "返回调整",
     runCleanup: "执行清理",
     running: "正在执行…",
-    runningNote: "正在逐项复检并删除，每项都要重新验证，所以需要一点时间；请不要关闭",
+    runningNote: "请保持应用开启。",
   },
   result: {
     title: "执行结果",
@@ -753,15 +742,15 @@ export const zhCN = {
       `已移除 ${worktrees} 个工作树，将 ${artifacts} 个产物目录移入{{trash}}，释放 ${size}；有 ${failed} 个已勾选条目未删除，原因见下表`,
     openTrash: "打开{{trash}}",
     trashNotice:
-      "产物目录会进系统{{trash}}，可以从{{trash}}恢复；工作树由 git 永久删除",
+      "构建产物可从{{trash}}恢复；工作树不能。",
     noTrashNotice:
-      "没有任何目录进入{{trash}}：所有产物移动都在复核时被跳过，原因见下表",
+      "没有目录进入{{trash}}；原因见下表。",
     worktreePermanentNotice: (n: number) =>
-      `${n} 个工作树已由 git worktree remove 永久删除，不经过{{trash}}；分支引用仍保留在 Git 中；工作目录和其中的未跟踪文件不会保留`,
+      `${n} 个工作树已永久删除，分支仍保留；工作目录和未跟踪文件不会保留。`,
     openLog: "打开日志",
     logFailedTitle: "操作日志没能写入",
     logFailedBody: (path: string, error: string) =>
-      `上面的条目仍然处理了，但 ${path} 写入失败（${error}），审计记录在这里断了一环`,
+      `处理已完成，但日志 ${path} 写入失败：${error}`,
     stats: {
       spaceFreed: "已释放空间",
       spaceFreedSub: "包含{{trash}}移动与工作树移除",
@@ -774,7 +763,7 @@ export const zhCN = {
       // 现在说清成功数里有什么、什么才会进回收站。
       succeeded: "已处理",
       succeededSub: (trashed: number) =>
-        `其中 ${trashed} 个目录进了{{trash}}；工作树由 git 永久删除，不进{{trash}}`,
+        `其中 ${trashed} 项进入{{trash}}；工作树不进入{{trash}}。`,
       movedToTrash: "进了{{trash}}",
       movedToTrashSub: "可从{{trash}}恢复",
       skippedFailed: "未删除",
@@ -790,7 +779,7 @@ export const zhCN = {
     },
     empty: "没有执行记录",
     footer:
-      "失败的条目不影响其他条目；每个动作都会写入本机操作日志；产物目录可以从{{trash}}恢复；工作树由 git 永久删除，不能从{{trash}}恢复",
+      "失败的条目不影响其他条目。",
     complete: "清理完成；重新扫描即可确认结果",
     viewHistory: "查看历史记录",
     backToOverview: "返回总览"
@@ -806,8 +795,8 @@ export const zhCN = {
     readFailed: (message: string) => `日志读取失败：${message}`,
     reason: {
       confirmed: "经用户确认后执行",
-      rebuildable: "命中可重建的产物类型",
-      metadata: "元数据清理"
+      rebuildable: "可重建的产物",
+      metadata: "清理残留记录"
     }
   },
   settings: {
@@ -816,38 +805,38 @@ export const zhCN = {
     extraScanPaths: "额外扫描路径",
     extraScanPathsHint: "每行一条；请使用绝对路径，例如 {{path}}",
     maxDepth: "最大扫描深度",
-    maxDepthHint: "相对扫描根目录计算；越深越慢",
-    perDirTimeout: "单目录超时",
-    perDirTimeoutHint: "超时后该项按「需人工确认」处理，绝不当作「可安全删除」",
-    totalBudget: "扫描总预算",
-    totalBudgetHint: "预算用尽即停止，并如实报告未扫描的部分",
-    thresholdsTitle: "阈值",
-    activityWindow: "活动时间窗口（天）",
+    maxDepthHint: "越深越慢。",
+    perDirTimeout: "单个目录时间上限",
+    perDirTimeoutHint: "超时的条目需要人工确认。",
+    totalBudget: "扫描总时长上限",
+    totalBudgetHint: "到时停止；未扫描的部分需要确认。",
+    thresholdsTitle: "判定条件",
+    activityWindow: "闲置天数",
     activityWindowHint:
-      "只有超过这个天数没有写入，才视为「安静」；否则标记为「需人工确认」",
-    artifactThreshold: "产物显示体积阈值",
-    artifactThresholdHint: "小于该值的产物默认隐藏，以减少干扰",
+      "在这段时间内改动过的条目需要确认。",
+    artifactThreshold: "产物显示下限",
+    artifactThresholdHint: "更小的产物默认隐藏。",
     untrackedUnsafe: "把未跟踪文件视为不安全",
     untrackedUnsafeHint: "开启后，含未跟踪文件的工作树标记为「禁止删除」",
     protectionTitle: "保护规则",
     whitelistPaths: "白名单路径",
-    whitelistPathsHint: "每行一条；命中的目录永远不会进入清理计划",
+    whitelistPathsHint: "命中的目录不会被删除。",
     protectedBranches: "受保护分支",
-    protectedBranchesHint: "逗号分隔，支持通配符；默认分支会被自动识别并加入",
+    protectedBranchesHint: "逗号分隔；默认分支自动加入。",
     deletionTitle: "删除方式",
     directoryDeletion: "产物目录删除",
-    directoryDeletionHint: "产物目录一律移入系统{{trash}}；这项设置不能更改，也没有绕过开关",
-    directoryDeletionOption: "系统{{trash}}",
+    directoryDeletionHint: "产物目录始终移入{{trash}}。",
+    directoryDeletionOption: "{{trash}}",
     worktreeDeletion: "工作树删除",
     worktreeDeletionHint:
-      "一律走 git worktree remove；这会永久删除工作目录并保留分支引用；目录已消失时使用 git worktree prune",
-    worktreeDeletionOption: "git worktree remove（绝不 rm -rf）",
+      "永久删除工作目录，保留分支。",
+    worktreeDeletionOption: "永久删除",
     strongProtection: "强保护",
-    strongProtectionHint: "开启后，清理前必须手动输入项目目录名",
+    strongProtectionHint: "清理前必须输入项目目录名。",
     logsTitle: "日志、语言与外观",
     operationLog: "操作日志",
     operationLogHint: (n: number) => `只写在本机，从不上传；目前已有 ${n} 条记录`,
-    operationLogUnknown: "当前平台没有可报告的日志目录",
+    operationLogUnknown: "当前平台没有日志目录。",
     openDirectory: "打开目录",
     clearLog: "清空日志",
     clearLogTitle: "清空日志内容，文件本身保留",

@@ -60,10 +60,7 @@ const scannedTrace = desktop ? [] : scanTrace;
         <div class="stage-list">
           <div v-for="(stage, index) in stages" :key="stage.key" :class="stageClass(index)">
             <span class="stage__mark">{{ stageMark(index) }}</span>
-            <span>
-              <div class="stage__label">{{ stage.label }}</div>
-              <div class="stage__detail">{{ stage.detail }}</div>
-            </span>
+            <span class="stage__label">{{ stage.label }}</span>
           </div>
         </div>
       </div>
@@ -78,7 +75,5 @@ const scannedTrace = desktop ? [] : scanTrace;
     <div v-if="scannedTrace.length > 0" class="trace">
       <div v-for="line in visibleTrace" :key="line" class="trace__line">{{ line }}</div>
     </div>
-
-    <p class="faint tiny">{{ " " + messages.scan.budgetNote + " " }}</p>
   </div>
 </template>

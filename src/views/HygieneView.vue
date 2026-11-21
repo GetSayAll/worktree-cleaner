@@ -136,10 +136,7 @@ function ruleFix(rule: HygieneRule): string {
     <div class="spread">
       <div>
         <h1>{{ messages.hygiene.title }}</h1>
-        <p class="faint tiny">
-          {{ messages.hygiene.metOf(counts.ok, rules.length) }}
-          <span v-if="report"> · {{ messages.hygiene.policyRef }}</span>
-        </p>
+        <p class="faint tiny">{{ messages.hygiene.metOf(counts.ok, rules.length) }}</p>
       </div>
     </div>
 

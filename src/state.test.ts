@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { mockRoot, mockSnapshot } from "./mock/snapshot";
 import { assess } from "./types";
 import type { ExecutionOutcome, ResultEntry } from "./types";
-import { basename, formatBytes, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
+import { basename, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
 import { messages } from "./i18n";
 import { primaryReason } from "./state";
 
@@ -224,7 +224,7 @@ describe("high-risk confirmation threshold (D13)", () => {
     expect(independent).toBe(5);
     expect(plan.total_bytes).toBeLessThan(state.ACK_SIZE_THRESHOLD_BYTES);
     expect(plan.worktree_removals.some((w) => w.force)).toBe(false);
-    expect(plan.ack_reasons).toEqual([messages.plan.ack.count(5, state.ACK_COUNT_THRESHOLD)]);
+    expect(plan.ack_reasons).toEqual([messages.plan.ack.count(5)]);
   });
 
   it("does not require confirmation for four independently deleted items", async () => {
@@ -239,7 +239,7 @@ describe("high-risk confirmation threshold (D13)", () => {
       plan.worktree_removals.length + plan.trash_moves.filter((t) => t.bundled_with_worktree === null).length;
 
     expect(independent).toBe(4);
-    expect(plan.ack_reasons).not.toContain(messages.plan.ack.count(4, state.ACK_COUNT_THRESHOLD));
+    expect(plan.ack_reasons).not.toContain(messages.plan.ack.count(4));
     expect(plan.ack_reasons).toEqual([]);
   });
 
@@ -397,9 +397,7 @@ describe("an unmeasurable size travels as unknown", () => {
     expect(plan.total_bytes_unknown).toBe(1);
     // With an unknown size in the plan the size threshold cannot be evaluated,
     // so the run is gated on its own reason.
-    expect(plan.ack_reasons).toEqual([
-      messages.plan.ack.unmeasurable(1, formatBytes(state.ACK_SIZE_THRESHOLD_BYTES))
-    ]);
+    expect(plan.ack_reasons).toEqual([messages.plan.ack.unmeasurable(1)]);
   });
 
   it("stays null through execution instead of collapsing to zero", async () => {

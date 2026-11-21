@@ -303,7 +303,7 @@ Met is `--safe` on `--safe-bg`; failed is `--unsafe` on `--unsafe-bg`; pending i
 | Result | check circle | page head with actions, four stat cards, result table, action bar |
 | History | clock | page head, toolbar (type segments), timeline with dots, empty state |
 | Settings | sliders | page head, one card per settings group, rows in the anatomy above |
-| Scanning | search | page head, stage card with circular stage marks, trace, budget note |
+| Scanning | search | page head, stage card with circular stage marks, trace |
 
 ## 8. Motion and accessibility
 

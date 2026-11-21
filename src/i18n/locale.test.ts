@@ -168,9 +168,9 @@ describe("platform wording", () => {
   it("names this machine's trash rather than the other system's", () => {
     // The other half of the same rule: a token that is silently dropped would pass
     // both tests above, so the word itself is asserted.
-    expect(resolvedTable("en", "macos").settings.directoryDeletionOption).toBe("System Trash");
-    expect(resolvedTable("en", "windows").settings.directoryDeletionOption).toBe("System Recycle Bin");
-    expect(resolvedTable("en", "other").settings.directoryDeletionOption).toBe("System system trash");
+    expect(resolvedTable("en", "macos").settings.directoryDeletionOption).toBe("Trash");
+    expect(resolvedTable("en", "windows").settings.directoryDeletionOption).toBe("Recycle Bin");
+    expect(resolvedTable("en", "other").settings.directoryDeletionOption).toBe("system trash");
 
     expect(resolvedTable("zh-CN", "macos").common.action.trashMove).toBe("移入废纸篓");
     expect(resolvedTable("zh-CN", "windows").common.action.trashMove).toBe("移入回收站");

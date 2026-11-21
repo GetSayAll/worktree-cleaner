@@ -753,12 +753,12 @@ function buildPlan(): CleanupPlan {
     ack_reasons.push(messages.plan.ack.force(forcedItems.length));
   }
   if (independentItems >= ACK_COUNT_THRESHOLD) {
-    ack_reasons.push(messages.plan.ack.count(independentItems, ACK_COUNT_THRESHOLD));
+    ack_reasons.push(messages.plan.ack.count(independentItems));
   }
   if (total_bytes_unknown > 0) {
     // With unknown sizes in the plan the total is a lower bound, so the size
     // threshold below cannot be evaluated — this reason gates the run instead.
-    ack_reasons.push(messages.plan.ack.unmeasurable(total_bytes_unknown, sizeLimit));
+    ack_reasons.push(messages.plan.ack.unmeasurable(total_bytes_unknown));
   }
   if (total_bytes > ACK_SIZE_THRESHOLD_BYTES) {
     // The *known* part already exceeds the threshold, which is true regardless of

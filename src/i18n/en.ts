@@ -9,9 +9,9 @@
 // evidence are data, not UI chrome, and stay with the scan results in
 // src/mock/snapshot.ts.
 
-// Kept as a module constant so the plan blocker copy and the code that strips
-// that prefix back off stay in sync.
-const blockerPrefix = "Blocked by whitelist protection: ";
+// Kept as a module constant so the plan blocker banner and the exported plan
+// use the same sentence.
+const blockerPrefix = "Protected path: ";
 
 export const en = {
   // The words that differ by the machine the app runs on. A string writes
@@ -28,7 +28,7 @@ export const en = {
     // landing the copy later is a one-line edit and nothing else has to move.
     tagline: "",
     readOnlyNote:
-      "The scan phase runs only read-only Git commands; artifact directories are moved to the system {{trash}}; worktrees are permanently removed with git worktree remove",
+      "Read-only scan · every deletion is checked again.",
     versionNote: "v{{version}}",
     sampleData: "Sample data",
     previewNote: "Browser preview",
@@ -36,13 +36,13 @@ export const en = {
     noProject: "No project selected",
     pickRepository: "Pick a repository to start scanning",
     desktopOnly:
-      "This action needs the desktop app; the browser preview cannot reach the file system"
+      "Open the desktop app to do this."
   },
   preview: {
     // Said on the pages that offer an action, because a button that looks available
     // and does nothing is the failure this build was rewritten to remove.
     notice:
-      "Browser preview — this build cannot reach the file system, so the cleanup actions are disabled and the numbers on these pages come from sample data"
+      "Browser preview · sample data; cleanup is disabled."
   },
   nav: {
     project: "Project",
@@ -84,14 +84,14 @@ export const en = {
     defaultUnselected: "Not selected",
     defaultDisabled: "Cannot be selected",
     footer:
-      "Worktrees are permanently deleted, but their branch refs are kept; build artifacts go to the system {{trash}} and can be restored; every item is checked again before execution, and every decision carries a command, a count, or a path as evidence",
+      "Worktrees are deleted permanently; their branches remain. Build artifacts go to the {{trash}} and can be restored.",
     worktreesSummary:
       "Only Safe items are selected by default; Review items must be selected one by one; Unsafe items cannot be selected",
     artifactsSummary:
-      "Only rebuildable or empty artifacts with no protected content are deleted; recent writes or an unfinished check move an item to Review",
+      "Only rebuildable or empty artifacts are deleted; everything else needs review.",
     welcomeSummary:
       "After a scan, every item is Safe to delete, Needs review, or Must not delete; only Safe items are selected by default",
-    planSummary: "Only selected items that pass the re-check run"
+    planSummary: "Only selected items that still pass the check run."
   },
   // One entry per ReasonCode, in the order `src/types.ts` declares them. The core
   // ships the same codes, so a verdict can be rendered in the reader's language
@@ -128,7 +128,7 @@ export const en = {
       merged: "merged into the default branch",
       absorbed: "every commit has an equivalent patch in the default branch",
       absorbed_content_changed:
-        "the patch is in the default branch, but the files it touched changed afterwards",
+        "the change is in the default branch, but the files it touched changed afterwards",
       clean: "clean working tree"
     },
     af: {
@@ -161,36 +161,36 @@ export const en = {
     // so a key that contains one would be read as two segments.
     codes: {
       worktree: {
-        not_in_scan: "no longer in the scan result; nothing was executed",
+        not_in_scan: "No longer present; nothing was executed.",
         changed: "changed since the plan was made: {before} → {after}; not deleted",
-        no_longer_safe: "the re-check no longer reports it as safe to delete: {reason}",
-        removed: "removed with git worktree remove",
+        no_longer_safe: "no longer safe to delete: {reason}",
+        removed: "Removed",
         remnants:
-          "git removed the worktree, but its directory is still on disk — the next scan reports what is left inside",
-        remove_failed: "git worktree remove failed: {error}",
-        pruned: "git worktree prune cleaned up the leftover metadata",
-        prune_failed: "git worktree prune failed: {error}"
+          "Removed, but the directory is still on disk.",
+        remove_failed: "Could not remove: {error}",
+        pruned: "Leftover records cleaned up",
+        prune_failed: "Could not clean up records: {error}"
       },
       artifact: {
-        not_in_scan: "no longer in the scan result; nothing was executed",
+        not_in_scan: "No longer present; nothing was executed.",
         not_a_known_kind:
-          "no longer a directory name this tool recognises as an artifact; not deleted",
+          "No longer an artifact directory; not deleted.",
         changed: "changed since the plan was made: {before} → {after}; not deleted",
-        no_longer_safe: "the re-check no longer reports it as safe to delete: {reason}",
+        no_longer_safe: "no longer safe to delete: {reason}",
         vanished: "this directory is no longer on disk, so there was nothing to delete",
-        unmeasurable: "the re-check could not measure this directory, so it was left alone",
+        unmeasurable: "Size could not be measured; not deleted.",
         trashed: "moved to the {{trash}}",
         trash_failed: "could not move to the {{trash}}: {error}"
       },
       prunable: {
         metadata_only:
-          "the directory was already gone; only the Git metadata was cleaned up, and no files were touched"
+          "The directory was already gone. Only leftover records were cleaned up; no files were touched."
       },
       precondition: {
-        failed: "a deletion guard refused this path; not executed"
+        failed: "Path check failed; not deleted."
       },
       bundled: {
-        with_worktree: "removed together with its own worktree; no separate operation"
+        with_worktree: "Removed with its worktree."
       }
     },
     // The name of the field that moved, for the `changed` codes. Without these
@@ -207,7 +207,7 @@ export const en = {
       ignored: "the ignore rules",
       symlink: "the symlink"
     },
-    legacy: "recorded before this build kept reason codes"
+    legacy: "Older record"
   },
   // What the user did, keyed by ActivityAction. The deletions live in their own
   // section above; these are the other half of "what happened on this machine",
@@ -226,17 +226,17 @@ export const en = {
       plan: {
         generated:
           "Generated a plan: {worktrees} worktrees, {artifacts} artifact directories, {total_bytes} to release",
-        exported: "Copied the plan as JSON: {item_count} items"
+        exported: "Copied the plan: {item_count} items"
       },
       settings: {
         changed: "Changed a setting"
       },
       cleanup: {
         confirmed:
-          "Confirmed the cleanup: {worktrees} worktrees, {artifacts} artifact directories, {forced} needing --force"
+          "Confirmed the cleanup: {worktrees} worktrees, {artifacts} artifact directories, {forced} with untracked files"
       },
       trash: {
-        opened: "Opened the system {{trash}}"
+        opened: "Opened {{trash}}"
       }
     },
     kinds: {
@@ -259,7 +259,7 @@ export const en = {
     action: {
       worktreeRemove: "Remove Worktree",
       trashMove: "Move to {{trash}}",
-      prune: "Clean up metadata"
+      prune: "Clean up leftovers"
     },
     outcome: {
       // Every row on the result page is a deletion, so the label says what happened
@@ -292,48 +292,42 @@ export const en = {
     elapsed: (clock: string) => `Elapsed ${clock}`,
     cancel: "Cancel",
     scanning: "scanning…",
-    budgetNote:
-      'Each directory probe has a timeout and the whole scan has a total budget; if the budget runs out it reports "scan incomplete" and marks the affected items as "Needs review"',
     stages: {
       worktrees: {
-        label: "Parse Git worktrees",
-        detail: "git worktree list --porcelain -z"
+        label: "Find worktrees",
       },
       status: {
-        label: "Check each worktree's status",
-        detail: "status · merge-base · stash · upstream"
+        label: "Check changes",
       },
       artifacts: {
-        label: "Scan build artifacts",
-        detail: "walk a list of artifact kinds within project boundaries"
+        label: "Find build artifacts",
       },
       verify: {
-        label: "Verify and summarize",
-        detail: "activity re-check · reason merge · size rollup"
+        label: "Summarize",
       }
     }
   },
   welcome: {
-    lede: "Scan a repository, list all of its Git worktrees and build artifacts, and explain item by item why each one can or cannot be deleted; scanning is read-only by default; artifact directories go to the system {{trash}}; worktrees are permanently removed with git worktree remove",
+    lede: "Scan a repository, list every worktree and build artifact, and explain what can be deleted and what must stay.",
     pathPlaceholder: "Absolute path, like {{path}}",
     chooseFolder: "Choose folder",
     chooseFolderTitle: "Open the system folder picker",
     chooseFolderUnavailable:
-      "The folder picker lives in the desktop app; type the path instead",
+      "Type the path instead.",
     pickerFailed: (message: string) => `The folder picker could not open: ${message}`,
     startScan: "Start scan",
-    dropHint: "Besides typing a path or choosing a folder, you can drop a project folder onto this window; the scan phase writes no files",
+    dropHint: "Or drop a project folder here.",
     scanFailed: (message: string) => `The scan did not run: ${message}`,
     promises: {
       readOnlyTitle: "Read-only scan",
       readOnlyBody:
-        "The check phase runs only read-only Git commands; it does not modify the repository or write into the target directory",
+        "The scan changes nothing.",
       evidenceTitle: "Verifiable reasons",
       evidenceBody:
-        'Every judgment comes with evidence: a concrete command, file count, or path; "Looks like junk" is not accepted',
+        "Every verdict says why.",
       trashTitle: "Two deletion paths",
       trashBody:
-        "Artifact directories go to the system {{trash}} and can be restored; worktrees are removed with git worktree remove; that deletion is permanent and does not use the {{trash}}"
+        "Build artifacts can be restored from the {{trash}}; worktrees are permanent."
     },
     recentTitle: "Recent projects",
     recentHint: "Click to scan",
@@ -354,9 +348,9 @@ export const en = {
       // rather than silently dropped. The `bytes` argument already carries the
       // "≥" prefix (formatBytes with approximate), so this text must not repeat it.
       safeSubUnknown: (bytes: string, unknown: number) =>
-        `${bytes} total · ${unknown} unmeasurable · Safe items are selected by default`,
+        `${bytes} total · ${unknown} ${unknown === 1 ? "size" : "sizes"} unknown · Safe items are selected by default`,
       reviewLabel: "Needs review",
-      reviewSub: "not merged / recently changed / check incomplete",
+      reviewSub: "not merged / changed recently",
       unsafeLabel: "Must not delete",
       unsafeSub: "main worktree / dirty / locked / committed to the repository",
       reclaimableLabel: "Estimated reclaimable",
@@ -373,7 +367,7 @@ export const en = {
     // Under the reclaimable card: an unmeasurable selection makes the figure a
     // lower bound, and the user must be able to see that at a glance.
     selectedUnknown: (n: number) =>
-      `${n} selected items have no measurable size, so the total shown is a lower bound`,
+      `${n} selected items have unknown size; the total is a minimum.`,
     selectHint: "Select items on the Worktree or Build artifacts page; Safe items are selected by default",
     adjustSelection: "Adjust selection",
     generatePlan: "Generate cleanup plan"
@@ -381,16 +375,14 @@ export const en = {
   worktrees: {
     title: "Worktree",
     mainWorkspaceBadge: "Main workspace · Protected",
-    mainWorkspaceHint: (branch: string) =>
-      `The main workspace is the repository itself; it cannot be deleted and never enters the cleanup plan; the merge check is against ${branch ? `the default branch ${branch}` : "the default branch"}, not the branch checked out in the main workspace`,
-    dataSource:
-      "Data source: git worktree list --porcelain -z · status --porcelain=v2 · merge-base --is-ancestor",
+    mainWorkspaceHint: (_branch: string) =>
+      "The main workspace is the repository itself and cannot be deleted.",
     // `git worktree add` takes any path, so a worktree of the repository the user
     // picked can sit anywhere. The page says so rather than leaving the reader to
     // notice that a path is not under the directory at the top of the window.
     outsideRoot: "outside the selected directory",
     outsideRootHint:
-      "This worktree sits outside the directory you picked; it is scanned, judged and can be removed like any other worktree",
+      "Outside the selected directory, but still scanned and removable.",
     filterAll: (n: number) => `All ${n}`,
     filterSafe: (n: number) => `Safe to delete ${n}`,
     filterReview: (n: number) => `Needs review ${n}`,
@@ -411,18 +403,19 @@ export const en = {
     },
     stashEntries: (n: number) => `${n} entries`,
     prunableBanner:
-      "The working directory no longer exists; only git worktree prune runs to clean up leftover metadata; no files are touched",
-    untrackedLabel: "Untracked files (removing this worktree requires --force)",
+      "The working directory is gone; only leftover records are cleaned up, and no files are touched.",
+    untrackedLabel: "Untracked files (deleted with this worktree)",
     empty: "No worktrees match the current filters",
     upstreamGone: "working directory is gone",
     upstreamNone: "no upstream branch",
     upstreamCounts: (ahead: number, behind: number) => `upstream ahead ${ahead} / behind ${behind}`,
-    mergeMain: "main worktree; not evaluated for merge status",
+    mergeMain: "main worktree",
     mergeUnknown: (branch: string) => `cannot be determined whether merged into ${branch}`,
     mergeYes: (branch: string) => `merged into ${branch}`,
     mergeNo: (branch: string) => `not merged into ${branch}`,
     /** The ancestry answer is "no", but every commit's patch is already there. */
-    mergeAbsorbed: (branch: string) => `its patches are already in ${branch} (squash merge)`,
+    mergeAbsorbed: (branch: string) =>
+      `its changes are already in ${branch}`,
     stateGone: "directory is gone",
     stateDirty: (n: number) => `dirty ${n}`,
     stateClean: "clean",
@@ -437,13 +430,11 @@ export const en = {
     // every pass, so the cause has to sit next to the symptom.
     hygieneTitle: "This repository will keep refilling",
     hygieneBody: (n: number) =>
-      `${n} disk-hygiene ${n === 1 ? "rule is" : "rules are"} violated — worktree count, caches or idle state that grows back after a cleanup`,
+      `${n} disk-hygiene ${n === 1 ? "rule is" : "rules are"} broken; this repository will refill after cleanup.`,
     hygieneAction: "Open disk hygiene"
   },
   artifacts: {
     title: "Build artifacts",
-    caption:
-      "Candidate directory names are only hints; the final call is based on whether it is Git-tracked, whether it contains authored content, and its activity",
     bySize: "By size",
     byLastActivity: "By last activity",
     showOnlyLargerThan: "Show only larger than",
@@ -459,12 +450,12 @@ export const en = {
     symlink: (target: string) => ` · symlink → ${target}`,
     gitTracked: "tracked",
     gitIgnored: "ignored",
-    gitUnverified: "unverified",
+    gitUnverified: "unknown",
     gitUntracked: "untracked",
     // The rows name their own fields, so there is no column header to label.
     // This prefix is what stands in for it: "Git ignored" rather than "ignored".
     gitLabel: "Git",
-    empty: "No artifact directories exceed the current size threshold",
+    empty: "No artifact directories are larger than the current minimum",
     selectedSummary: (artifacts: number, worktrees: number) =>
       `Selected ${artifacts} artifacts · ${worktrees} worktrees · Estimated reclaimable`,
     backToWorktrees: "Back to Worktree",
@@ -478,7 +469,7 @@ export const en = {
   hygiene: {
     title: "Disk hygiene",
     lede:
-      "The policy of docs/DISK_HYGIENE.md, checked against this repository; read-only: nothing here deletes anything, and no finding changes whether an item is safe to remove",
+      "Read-only audit; nothing is deleted.",
     metOf: (met: number, total: number) => `${met} of ${total} rules met`,
     stats: {
       violation: "Rules broken",
@@ -487,7 +478,7 @@ export const en = {
       met: "Rules met"
     },
     violationBanner: (rules: number) =>
-      `${rules === 1 ? "One rule is" : `${rules} rules are`} broken; each finding names the path it is about and what to do; nothing has been changed`,
+      `${rules === 1 ? "One rule is" : `${rules} rules are`} broken; each finding names its path and fix.`,
     level: {
       ok: "Met",
       advisory: "Worth fixing",
@@ -526,7 +517,7 @@ export const en = {
           "Inside the repository but not under {expected}, so Git sees it as ordinary untracked files",
       },
       L2: {
-        not_checkable: "A second clone cannot be seen from inside one repository",
+        not_checkable: "Cannot be checked from this repository.",
       },
       L3: {
         nested_worktree: "This worktree sits inside {parent}",
@@ -554,11 +545,11 @@ export const en = {
       },
       L6: {
         not_checkable:
-          "git clean is not logged, so a scan cannot see a command that has already run",
+          "Cannot be checked from this repository.",
       },
       L7: {
         not_checkable:
-          "Editor search and platform indexing are configured outside the repository",
+          "Cannot be checked from this repository.",
       },
       T1: {
         over_cap: "{count} worktrees are registered; the cap is {cap}",
@@ -576,10 +567,10 @@ export const en = {
       T4: {
         past_ceiling: "Created {days} days ago; nothing survives {ceiling} days",
         age_unknown:
-          "{count} worktree directories report no creation time, so their age cannot be checked",
+          "{count} worktrees have no creation time.",
       },
       T5: {
-        not_checkable: "A session's exit is not recorded anywhere a scan can read",
+        not_checkable: "Cannot be checked from this repository.",
       },
       B1: {
         outside_declared:
@@ -598,15 +589,15 @@ export const en = {
       },
       B3: {
         not_checkable:
-          "Which dependencies a build shares is decided by its own configuration",
+          "Cannot be checked from this repository.",
       },
       B4: {
         not_checkable:
-          "Whether something reads the cache as an input cannot be established by reading it",
+          "Cannot be checked from this repository.",
       },
       B5: {
         slot_over_cap: "This slot holds {size}; the ceiling for one worktree is {cap_bytes}",
-        slot_unmeasurable: "The slot could not be measured, so its size is unknown",
+        slot_unmeasurable: "The slot size could not be measured.",
       },
       Q1: {
         frozen:
@@ -617,11 +608,11 @@ export const en = {
       Q2: {
         over_share: "build-cache holds {size}, {percent} of the volume; the guide is a tenth",
         share_unknown:
-          "{count} cache slots could not be measured, so the share is a lower bound",
+          "{count} cache slots could not be measured; the share is a minimum.",
       },
       Q3: {
         not_checkable:
-          "Admission runs before creation; a scan only sees what already exists",
+          "Cannot be checked from this repository.",
       },
       X1: {
         entry_without_expiry:
@@ -662,12 +653,13 @@ export const en = {
       evidence: "Evidence",
       fix: "Fix",
       acceptedTitle: "Accepted exceptions",
-      acceptedUntil: (date: string) => `Accepted until ${date}, per .worktree-keep`
+      acceptedUntil: (date: string) =>
+        `Accepted until ${date}`
     },
     setup: {
       title: "Set up before the first worktree",
       note:
-        "Four pieces of wiring make the rest of the policy hold; their status comes from the audit above; the snippets are what to paste",
+        "The snippets below can be pasted as they are.",
       items: {
         ignore: "Both ignore entries, anchored and committed",
         cache: "One cache root, and the variable that points builds at it",
@@ -688,80 +680,76 @@ export const en = {
     scope: {
       title: "What this audit cannot see",
       note:
-        "L2, L6, L7, T5, B3, B4, and Q3 are reported as not checked: each depends on something outside one repository — another clone, a command that has already run, an editor's index, a session's exit, or a decision made at creation time; C1–C3 cover machine-level caches and release artifacts; a rule without evidence is never called met"
+        "These rules depend on information outside this repository, so they are reported as not checked."
     },
-    policyRef: "The rules are numbered as they are in docs/DISK_HYGIENE.md"
   },
   plan: {
     title: "Cleanup plan",
-    lede: "Review each item before executing; this page only describes what will happen — nothing has been executed yet",
+    lede: "Review before running. Nothing has changed yet.",
     backToAdjustSelection: "Back to adjust selection",
     stats: {
       removeWorktree: "Remove Worktree",
-      removeWorktreeSub: "git worktree remove · permanent",
+      removeWorktreeSub: "Permanent",
       moveToTrash: "Move to {{trash}}",
       moveToTrashSub: (bundled: number) =>
-        `plus ${bundled} items deleted with their worktree (not recoverable)`,
+        `plus ${bundled} ${bundled === 1 ? "item" : "items"} deleted with their worktree (not recoverable)`,
       reclaimable: "Estimated reclaimable",
-      reclaimableSub: "based on sizes measured at scan time",
+      reclaimableSub: "Measured at scan time.",
       // The total omits items whose size could not be measured, so it is a lower
       // bound; the count keeps that visible instead of implying an exact figure.
       reclaimableSubUnknown: (n: number) =>
-        `At least the measured sizes · ${n} items have no measurable size`,
+        `${n} ${n === 1 ? "item has" : "items have"} unknown size; the total is a minimum.`,
       autoExcluded: "Auto-excluded",
-      autoExcludedSub: "Must not delete items are excluded from the plan"
+      autoExcludedSub: "Must-not-delete items never enter the plan."
     },
     blockerPrefix,
     blocker: (path: string) => `${blockerPrefix}${path}`,
-    blockerTitle: "Precondition failed · ",
+    blockerTitle: "Blocked · ",
     ack: {
       force: (n: number) =>
-        `Includes ${n} worktrees that need --force; their untracked files will be deleted too`,
-      // The thresholds are arguments rather than literals: the plan code owns
-      // them (ACK_COUNT_THRESHOLD / ACK_SIZE_THRESHOLD_BYTES) and passes them in,
-      // so the numbers a reader sees cannot drift from the numbers the code
-      // actually enforces. The size limit arrives already formatted, so the unit
+        `Includes ${n} ${n === 1 ? "worktree" : "worktrees"} with untracked files; those files will be deleted too.`,
+      // The count threshold is enforced in state.ts; the copy only states the
+      // size of the run. The size limit arrives already formatted, so the unit
       // follows the active language.
-      count: (n: number, threshold: number) =>
-        `This run will process ${n} items, above the ${threshold}-item confirmation threshold`,
+      count: (n: number) =>
+        `This run will process ${n} ${n === 1 ? "item" : "items"}.`,
       size: (limit: string) => `A single run frees more than ${limit}`,
       // With unmeasurable items in the plan the total is a lower bound, so the
       // size threshold above cannot be evaluated: this reason gates the run on
       // its own instead of guessing.
-      unmeasurable: (n: number, limit: string) =>
-        `Includes ${n} items whose size could not be measured, so the total is a lower bound and the ${limit} threshold cannot be evaluated`
+      unmeasurable: (n: number) =>
+        `Includes ${n} ${n === 1 ? "item" : "items"} of unknown size; the total is a minimum.`
     },
     checks: {
-      title: "Precondition checks (dry run)",
-      note: "Checks marked with a dash run again just before each deletion",
+      title: "Pre-run checks",
+      note: "A dash means the check runs again before deletion.",
       recheckNotice:
-        "Every item is re-checked before deletion; if it changed or can no longer be verified, it is skipped; the result page names the reason; selecting an item does not guarantee deletion",
+        "Items are checked again before deletion; changed items are skipped.",
       pathCheck: (n: number) =>
-        `Path check passed: non-empty absolute paths, symlinks resolved, no .. components, none pointing at system directories (${n} items)`,
-      whitelistPassed: "Whitelist check passed: no item matches a protection rule",
-      whitelistBlocked: (n: number) => `${n} items matched the whitelist and have been blocked`,
+        `Paths checked (${n} ${n === 1 ? "item" : "items"})`,
+      whitelistPassed: "Protection check passed",
+      whitelistBlocked: (n: number) =>
+        `${n} ${n === 1 ? "item" : "items"} protected and excluded`,
       duplicateCheck: (n: number) =>
-        `Duplicate-deletion check passed: ${n} artifacts are removed with their owning worktree and counted only once`,
-      // Each deferred check now says only what it will look at. Saying "has not
-      // been performed yet" here repeated the dash in the list and the timing in
-      // `note` a third time, and the re-check is an implementation, not a thing a
-      // reader can act on.
-      identityNotRun: "Re-check of path, size and last-modified time",
-      activityNotRun: "Whether anything was written since this plan was generated"
+        `Artifacts removed with a worktree are counted once (${n} ${n === 1 ? "item" : "items"}).`,
+      // The two deferred checks say what will be verified before deletion, so a
+      // selected item is not mistaken for a guaranteed deletion.
+      identityNotRun: "Re-check path and size before deletion.",
+      activityNotRun: "Check for new changes before deletion."
     },
-    channelA: "Channel A · Remove worktrees permanently",
-    items: (n: number) => `${n} items`,
+    channelA: "Remove worktrees permanently",
+    items: (n: number) => `${n} ${n === 1 ? "item" : "items"}`,
     noWorktrees: "No worktrees selected",
-    needForce: "Needs --force",
+    needForce: "Has untracked files",
     reviewItem: "Needs review",
     removable: "Removable directly",
     forceNote: (n: number) =>
-      `--force also deletes the following untracked files (${n} in total), which are not tracked in Git and cannot be recovered from the repository once deleted:`,
+      `These ${n} untracked files will be deleted too and cannot be recovered:`,
     prunableNote:
-      "The working directory is already gone; only the Git metadata is pruned; no files are touched",
+      "The working directory is gone; only leftover records are cleaned up, and no files are touched.",
     cleanNote: "The working tree is clean; no unsaved content will be lost",
-    channelB: "Channel B · Move artifact directories to {{trash}}",
-    trashHeader: (n: number, bytes: string) => `${n} items · ${bytes}`,
+    channelB: "Move artifact directories to the {{trash}}",
+    trashHeader: (n: number, bytes: string) => `${n} ${n === 1 ? "item" : "items"} · ${bytes}`,
     columns: {
       directory: "Directory",
       files: "Files",
@@ -773,31 +761,31 @@ export const en = {
     noArtifacts: "No artifact directories selected",
     confirmationTitle: "Confirmation before execution",
     confirmationIntro:
-      "This operation meets the following high-risk conditions and requires manual confirmation:",
+      "This cleanup needs your confirmation:",
     permanenceNote:
-      "Worktrees are permanently removed with git and cannot be recovered from the {{trash}}; only artifact directories go to the {{trash}}",
+      "Worktrees cannot be recovered from the {{trash}}; build artifacts can.",
     ackConfirm: (n: number) =>
       n > 0
-        ? `I have reviewed the items listed above, including the untracked files force-deleted in ${n} worktrees, and I understand that worktree removal is permanent`
-        : "I have reviewed the items listed above and I understand that worktree removal is permanent",
+        ? `I reviewed the list, including the untracked files that will be deleted in ${n} ${n === 1 ? "worktree" : "worktrees"}. I understand that worktree removal is permanent.`
+        : "I reviewed the list. I understand that worktree removal is permanent.",
     confirmRequired: "Required confirmation",
     confirmed: "Checked",
     confirmHint: "Check this box to enable cleanup",
     confirmRules:
-      "When confirmed: worktrees are permanently deleted and their branch refs are kept; build artifact directories go to the system {{trash}} and can be restored",
+      "Worktrees are deleted permanently and their branches remain. Build artifacts go to the {{trash}} and can be restored.",
     typeNameBefore: "Type the project directory name",
     typeNameAfter: "to proceed",
-    exportTitle: "Plan export (JSON)",
+    exportTitle: "Plan",
     copy: "Copy",
     hideExport: "Hide export",
-    exportPlan: "Export plan",
+    exportPlan: "Copy plan",
     excludedNote: (n: number) =>
       `${n} must-not-delete items were auto-excluded; return to the list to see why`,
     backToAdjust: "Back to adjust",
     runCleanup: "Run cleanup",
     running: "Running…",
     runningNote:
-      "Re-checking and removing item by item; every item is verified again first, so it takes a moment — please leave the app open",
+      "Keep the app open.",
   },
   result: {
     title: "Result",
@@ -809,15 +797,15 @@ export const en = {
       `Removed ${worktrees} worktrees, moved ${artifacts} artifact directories to the {{trash}}, and freed ${size}; ${failed} selected items were not deleted; the table below says why`,
     openTrash: "Open {{trash}}",
     trashNotice:
-      "Artifact directories go to the system {{trash}} and are recoverable from there; worktrees are permanently removed with git",
+      "Build artifacts can be restored from the {{trash}}; worktrees cannot.",
     noTrashNotice:
-      "Nothing reached the {{trash}}: every trash move was skipped on re-check; the table below names the reason for each one",
+      "Nothing went to the {{trash}}; the table below says why.",
     worktreePermanentNotice: (n: number) =>
-      `${n} worktrees were permanently removed with git worktree remove and do not go to the {{trash}}; their branch refs remain in Git; their working directories and any untracked files do not`,
+      `${n} ${n === 1 ? "worktree was" : "worktrees were"} permanently deleted. ${n === 1 ? "Its branch remains; its working directory and untracked files do not." : "Their branches remain; their working directories and untracked files do not."}`,
     openLog: "Open log",
     logFailedTitle: "The operation log could not be written",
     logFailedBody: (path: string, error: string) =>
-      `The items above were processed anyway, but ${path} could not be written (${error}), so the audit trail has a hole in it`,
+      `The work finished, but the log at ${path} could not be written: ${error}`,
     stats: {
       spaceFreed: "Space freed",
       spaceFreedSub: "includes {{trash}} moves and worktrees",
@@ -830,7 +818,7 @@ export const en = {
       // Saying so here is what stops "4 succeeded, 1 in the Trash" looking wrong.
       succeeded: "Handled",
       succeededSub: (trashed: number) =>
-        `${trashed} went to the {{trash}}; worktrees are permanently removed by git and do not go there`,
+        `${trashed} went to the {{trash}}; worktrees do not.`,
       movedToTrash: "Went to {{trash}}",
       movedToTrashSub: "recoverable from {{trash}}",
       skippedFailed: "Not deleted",
@@ -846,7 +834,7 @@ export const en = {
     },
     empty: "No execution records",
     footer:
-      "Failed items do not affect the others; every action is written to the local operation log; artifact directories can be recovered from {{trash}}; worktrees are permanently removed by git and cannot be recovered from there",
+      "Failed items do not affect the others.",
     complete: "Cleanup complete; rescan to confirm the result",
     viewHistory: "View history",
     backToOverview: "Back to overview"
@@ -862,8 +850,8 @@ export const en = {
     readFailed: (message: string) => `The log could not be read: ${message}`,
     reason: {
       confirmed: "Executed after user confirmation",
-      rebuildable: "Matched a rebuildable artifact type",
-      metadata: "Metadata cleanup"
+      rebuildable: "Rebuildable artifact",
+      metadata: "Leftover records cleaned up"
     }
   },
   settings: {
@@ -873,43 +861,43 @@ export const en = {
     extraScanPathsHint:
       "One per line; use absolute paths, like {{path}}",
     maxDepth: "Maximum scan depth",
-    maxDepthHint: "Relative to the scan root; deeper is slower",
-    perDirTimeout: "Per-directory timeout",
+    maxDepthHint: "Deeper scans take longer.",
+    perDirTimeout: "Time limit per directory",
     perDirTimeoutHint:
-      "After a timeout the item is treated as Needs review and never as Safe to delete",
-    totalBudget: "Total scan budget",
-    totalBudgetHint: "Stops when the budget runs out and honestly reports the unscanned portion",
-    thresholdsTitle: "Thresholds",
-    activityWindow: "Activity window (days)",
+      "Timed-out items need review.",
+    totalBudget: "Total scan time limit",
+    totalBudgetHint: "Stops at the limit; unscanned items need review.",
+    thresholdsTitle: "Criteria",
+    activityWindow: "Quiet period (days)",
     activityWindowHint:
-      "An item is only considered quiet if it has had no writes for longer than this; otherwise it is marked Needs review",
-    artifactThreshold: "Artifact display size threshold",
-    artifactThresholdHint: "Artifacts smaller than this are hidden by default to reduce noise",
+      "Items changed within this period need review.",
+    artifactThreshold: "Minimum artifact size",
+    artifactThresholdHint: "Smaller artifacts are hidden.",
     untrackedUnsafe: "Treat untracked files as unsafe",
     untrackedUnsafeHint:
       "When enabled, a worktree containing untracked files is marked Must not delete",
     protectionTitle: "Protection rules",
     whitelistPaths: "Whitelist paths",
-    whitelistPathsHint: "One per line; matching directories never enter the cleanup plan",
+    whitelistPathsHint: "Matching directories are never deleted.",
     protectedBranches: "Protected branches",
     protectedBranchesHint:
-      "Comma-separated, wildcards supported; the default branch is detected and added automatically",
+      "Comma-separated; the default branch is added automatically.",
     deletionTitle: "Deletion method",
     directoryDeletion: "Artifact directory deletion",
     directoryDeletionHint:
-      "Artifact directories are always moved to the system {{trash}}; this setting cannot be changed or bypassed",
-    directoryDeletionOption: "System {{trash}}",
+      "Artifact directories always go to the {{trash}}.",
+    directoryDeletionOption: "{{trash}}",
     worktreeDeletion: "Worktree deletion",
     worktreeDeletionHint:
-      "Always via git worktree remove; this permanently deletes the working directory and keeps the branch ref; uses git worktree prune when the directory is gone",
-    worktreeDeletionOption: "git worktree remove (never rm -rf)",
+      "Deletes the working directory permanently and keeps the branch.",
+    worktreeDeletionOption: "Permanent delete",
     strongProtection: "Strong protection",
     strongProtectionHint:
-      "When enabled, the project directory name must be typed by hand before cleanup",
+      "Type the project directory name before cleanup.",
     logsTitle: "Logs, language and appearance",
     operationLog: "Operation log",
     operationLogHint: (n: number) => `Written locally and never uploaded; ${n} records so far`,
-    operationLogUnknown: "This platform has no log directory to report",
+    operationLogUnknown: "No log folder on this platform.",
     openDirectory: "Open directory",
     clearLog: "Clear log",
     clearLogTitle: "Empty the log file; the file itself stays",
