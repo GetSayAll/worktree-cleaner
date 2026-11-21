@@ -7,6 +7,35 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.2.1] — 2026-11-21
+
+A copy release: the interface keeps the actions a reader can take, and drops the
+implementation detail behind them.
+
+### Changed
+
+- **Implementation detail left the interface.** The scan page no longer explains
+  its per-directory time limit, total scan time limit or Git commands; the
+  worktree and artifact lists no longer print their data source or detection
+  rules; the disk-hygiene page no longer cites its policy document. “Scan
+  incomplete” and “size unknown” remain as states the reader must see.
+- **Affordances stayed.** “Click to scan”, the drag-and-drop hint, the selection
+  hint, the rule summaries, the pre-run checks and the permanence warnings were
+  kept, shortened to one line where possible.
+- **Commands became outcomes.** `git worktree remove`, `git worktree prune`,
+  `--force`, `dry run`, `JSON`, `merge-base` and the path-validation list are gone
+  from user-facing copy. The plan still carries the exact command as evidence, and
+  the result table still names the reason a selected item was skipped.
+- **Settings labels say what the reader chooses.** “Per-directory timeout”,
+  “Total scan budget”, “Activity window” and “Artifact display size threshold”
+  became “Time limit per directory”, “Total scan time limit”, “Quiet period” and
+  “Minimum artifact size”.
+
+### Fixed
+
+- **Singular counts read correctly.** Messages that take a count now write
+  “1 worktree” rather than “1 worktrees” where the sentence names the noun.
+
 ## [0.2.0] — 2026-11-20
 
 A release about the first screen and the words on it: the welcome page returns to
