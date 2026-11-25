@@ -12,9 +12,9 @@
 //!
 //! What it deliberately does not do:
 //!
-//! - read `~/.gitconfig` or `/etc/gitconfig`: the global and system search paths
-//!   point at an empty directory, both for determinism and because a sandboxed app
-//!   cannot read them;
+//! - read arbitrary user configuration: the isolated config carries only the
+//!   status-relevant `core.*` settings (line endings, case, file mode and symlinks)
+//!   that the checkout already reflects. Other machine settings are not read;
 //! - run hooks, filters, external diff tools, or textconv: libgit2 does not run
 //!   them, so a repository cannot execute code through a scan;
 //! - use the network: the vendored build has no HTTP/SSH transport enabled.
@@ -90,22 +90,76 @@ impl GitRunner for Git2Runner {
 }
 
 /// libgit2 reads its configuration from process-wide search paths. Set them once
-/// to an empty directory so no scan depends on the developer's `~/.gitconfig`.
+/// to an isolated directory that contains only the status-relevant core settings
+/// from the effective config.
+///
+/// The checkout already reflects line endings, case folding, file modes and
+/// symlinks. Ignoring those settings makes a clean Windows worktree look dirty
+/// when Git for Windows checked it out with `core.autocrlf=true`. Keep every other
+/// machine setting, including ignore files and hooks paths, out of the scan.
 ///
 /// `set_search_path` is unsafe because it mutates process-global state. It is
 /// called exactly once, before any repository is opened, from `Git2Runner::new`.
-/// The directory lives for the process; libgit2 copies the path it needs.
+/// The directory lives for the process; libgit2 copies the paths it needs.
 #[allow(unsafe_code)]
 fn configure_libgit2() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
-        let empty = std::env::temp_dir().join("worktree-cleaner-empty-git-config");
-        let _ = std::fs::create_dir_all(&empty);
+        let entries = status_config_entries();
+        let isolated = std::env::temp_dir().join("worktree-cleaner-git-config");
+        let _ = std::fs::create_dir_all(&isolated);
+        write_isolated_config(&isolated, &entries);
         unsafe {
-            let _ = git2::opts::set_search_path(ConfigLevel::System, &empty);
-            let _ = git2::opts::set_search_path(ConfigLevel::Global, &empty);
+            let _ = git2::opts::set_search_path(ConfigLevel::ProgramData, &isolated);
+            let _ = git2::opts::set_search_path(ConfigLevel::System, &isolated);
+            let _ = git2::opts::set_search_path(ConfigLevel::XDG, &isolated);
+            let _ = git2::opts::set_search_path(ConfigLevel::Global, &isolated);
         }
     });
+}
+
+/// The settings that describe how the working tree was checked out. They are
+/// read once from the effective config and copied into the isolated config; the
+/// repository's own config still overrides them.
+const STATUS_CONFIG_KEYS: [&str; 5] = [
+    "core.autocrlf",
+    "core.eol",
+    "core.ignorecase",
+    "core.filemode",
+    "core.symlinks",
+];
+
+fn status_config_entries() -> Vec<(String, String)> {
+    git2::Config::open_default()
+        .map(|config| status_config_entries_from(&config))
+        .unwrap_or_default()
+}
+
+fn status_config_entries_from(config: &git2::Config) -> Vec<(String, String)> {
+    STATUS_CONFIG_KEYS
+        .iter()
+        .filter_map(|key| {
+            let value = config
+                .get_string(key)
+                .or_else(|_| config.get_bool(key).map(|value| value.to_string()))
+                .ok()?;
+            Some(((*key).to_string(), value))
+        })
+        .collect()
+}
+
+/// libgit2 looks for `.gitconfig` (global), `config` (XDG) and `gitconfig`
+/// (system and ProgramData) in the search-path directory. Writing all three
+/// names keeps the same values available at every isolated level.
+fn write_isolated_config(directory: &Path, entries: &[(String, String)]) {
+    let mut text = String::from("[core]\n");
+    for (key, value) in entries {
+        let name = key.strip_prefix("core.").unwrap_or(key);
+        let _ = writeln!(text, "\t{name} = {value}");
+    }
+    for file in [".gitconfig", "config", "gitconfig"] {
+        let _ = std::fs::write(directory.join(file), &text);
+    }
 }
 
 fn run_once(repo_path: &Path, args: &[&str], command: &str) -> Result<GitOutput, GitError> {
@@ -885,6 +939,39 @@ mod tests {
         assert!(pattern_matches(".worktree/", ".worktree/__probe__"));
         assert!(pattern_matches("build-cache/", "build-cache/__probe__"));
         assert!(!pattern_matches("*.log", ".worktree/__probe__"));
+    }
+
+    #[test]
+    fn only_status_settings_are_carried_into_the_isolated_config() {
+        let directory = tempfile::TempDir::new().expect("temp dir");
+        let path = directory.path().join("config");
+        std::fs::write(
+            &path,
+            "[core]\n\tautocrlf = true\n\tignorecase = true\n[user]\n\tname = ignored\n",
+        )
+        .expect("write config");
+        let config = git2::Config::open(&path).expect("read config");
+        let entries = status_config_entries_from(&config);
+        assert_eq!(
+            entries,
+            vec![
+                ("core.autocrlf".to_string(), "true".to_string()),
+                ("core.ignorecase".to_string(), "true".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_isolated_config_is_written_under_all_three_names() {
+        let directory = tempfile::TempDir::new().expect("temp dir");
+        write_isolated_config(
+            directory.path(),
+            &[("core.autocrlf".to_string(), "true".to_string())],
+        );
+        for file in [".gitconfig", "config", "gitconfig"] {
+            let text = std::fs::read_to_string(directory.path().join(file)).expect("read config");
+            assert_eq!(text, "[core]\n\tautocrlf = true\n");
+        }
     }
 
     #[test]

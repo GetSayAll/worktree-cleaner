@@ -12,8 +12,9 @@
 //! The guarantees the in-process transport keeps:
 //!
 //! - no hooks, filters, external diff tools or textconv: libgit2 does not run them;
-//! - system and global configuration are read from an empty directory, so a
-//!   developer's `gitconfig` cannot change a verdict;
+//! - the isolated config carries only the status-relevant `core.*` settings that
+//!   the checkout already reflects; ignore rules, hooks and other machine settings
+//!   stay out of a verdict;
 //! - the network is not available in the vendored build.
 //!
 //! Additional guarantees the CLI oracle keeps (it is still used by the tests):
@@ -138,10 +139,10 @@ impl GitRunner for ProcessGitRunner {
     fn run(&self, repo: &Path, args: &[&str]) -> Result<GitOutput, GitError> {
         let command = display_command(repo, args);
         let mut process = Command::new("git");
-        // The CLI is now the differential test oracle; it has to see the same
-        // configuration as the in-process transport. System and global config are
-        // ignored there, so they are ignored here too: a developer's `gitconfig`
-        // must not be able to change a safety verdict.
+        // The CLI is the differential test oracle. Its fixtures pin the checkout
+        // settings, so both transports read the same working tree; this process
+        // still gets no machine ignore or hook configuration, so a developer's
+        // `gitconfig` cannot change the comparison.
         let null_config = if cfg!(windows) { "NUL" } else { "/dev/null" };
         process
             .arg("-C")

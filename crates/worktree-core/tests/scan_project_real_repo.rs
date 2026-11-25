@@ -420,3 +420,42 @@ fn a_worktree_inside_the_main_one_is_scanned_once_and_owns_its_artifacts() {
         "the artifact is attributed to {owner}, not to the worktree holding it"
     );
 }
+
+/// A Windows host commonly checks a worktree out with `core.autocrlf=true`.
+/// The files then have CRLF while the index has LF; that is not an uncommitted
+/// change. The transport must carry the checkout's line-ending setting into its
+/// isolated libgit2 config.
+#[cfg(windows)]
+#[test]
+fn a_crlf_checkout_from_the_host_config_is_not_dirty() {
+    let repo = Repo::new_with_host_autocrlf("host-autocrlf");
+    let linked = repo.add_worktree("wt-crlf", "crlf");
+    let content = std::fs::read(linked.join("a.txt")).expect("read the checked-out file");
+    if !content.windows(2).any(|pair| pair == b"\r\n") {
+        // The host did not convert this checkout; the scenario is absent.
+        return;
+    }
+
+    let snapshot = scan_project(&repo.root.display().to_string(), &options()).expect("scan");
+    let record = snapshot
+        .worktrees
+        .iter()
+        .find(|record| !record.is_main && record.path.ends_with("wt-crlf"))
+        .expect("the linked worktree is reported");
+
+    assert_eq!(record.dirty_files, 0, "CRLF is the checkout, not a change");
+    assert!(
+        !record
+            .safety
+            .reasons
+            .iter()
+            .any(|reason| reason.code == ReasonCode::WtDirty),
+        "the checkout setting must not produce wt.dirty"
+    );
+    assert_eq!(
+        record.safety.status,
+        SafetyStatus::Safe,
+        "a clean, merged worktree must stay Safe: {:?}",
+        record.safety.reasons
+    );
+}

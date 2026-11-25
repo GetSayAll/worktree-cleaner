@@ -9,9 +9,11 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Git is built in.** The app reads repositories through libgit2 and removes
   worktrees through gix; it no longer spawns `git` or needs the Xcode Command Line
-  Tools on macOS or Git for Windows on Windows. System and global Git
-  configuration is ignored, so a repository's verdict does not depend on the
-  machine that scanned it.
+  Tools on macOS or Git for Windows on Windows. Machine configuration is isolated
+  except the status-relevant core settings the checkout already reflects (line
+  endings, case folding, file mode, symlinks), so a clean Windows worktree checked
+  out with `core.autocrlf=true` is not reported as dirty. Ignore rules and hooks
+  still cannot change a verdict.
 - **Absorption is a content check.** A branch is `wt.absorbed` when the files it
   changed relative to the merge base hold the same content in the default branch;
   a difference is `wt.unmerged` at Review. The patch-id answer and its

@@ -400,7 +400,7 @@ guarantee is named next to it.
 
 | Stage | Criterion | Status |
 |---|---|---|
-| P0 | 1 · `cargo test` green | Met — 255 unit tests plus six integration files (13 + 2 + 2 + 5 + 7 + 4) and the doc-tests |
+| P0 | 1 · `cargo test` green | Met — 257 unit tests plus six integration files (13 + 2 + 2 + 5 + 7 + 4) and the doc-tests |
 | P0 | 2 · every `wt.*` reason code has a test case | Met — all 18 emitted codes in the decision table have a positive and a negative case, every reason asserts non-empty `text` and `evidence`, and `wt.stash` — retained for old audit logs, no longer emitted — has a test asserting it cannot reach a record |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 86 entries. The floor is set to the current count rather than left at 60, so the corpus cannot shrink unnoticed; a generated property test covers 20,000 random paths on top |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
@@ -962,10 +962,15 @@ was checked to fail without the fix:
    crate for every read (worktree list, status, refs, diff, merge-base, stash,
    ignore/tracked checks) and gix for the one operation libgit2 does not expose,
    recursive worktree removal. No `git` program is spawned; there is no Xcode
-   Command Line Tools requirement and no Git for Windows requirement. The system and
-   global configuration search paths point at an empty directory, so the machine's
-   `~/.gitconfig` cannot change a verdict. `ProcessGitRunner` remains as the CLI
-   oracle for differential tests, not as a shipping path.
+   Command Line Tools requirement and no Git for Windows requirement. The transport
+   uses an isolated config that carries only the status-relevant `core.*` settings
+   (`core.autocrlf`, `core.eol`, `core.ignorecase`, `core.filemode`, `core.symlinks`)
+   read from the effective config. The checkout already reflects those settings;
+   ignoring them made a clean Windows worktree with CRLF look dirty when Git for
+   Windows used `core.autocrlf=true`. Every other machine setting, including ignore
+   files, hooks paths and filters, stays out of a verdict; the repository's own config
+   still overrides the isolated values. `ProcessGitRunner` remains as the CLI oracle
+   for differential tests, not as a shipping path.
    The compatibility layer renders only the porcelain the existing parsers consume;
    `tests/git_transport_parity.rs` runs both transports on one repository and
    compares the parsed facts. This keeps the decision tables, reason codes and

@@ -25,6 +25,17 @@ impl Repo {
     /// Creates a repository whose first commit is dated 90 days ago, so the
     /// activity window never fires on the initial state.
     pub fn new(name: &str) -> Self {
+        Self::new_with(name, true)
+    }
+
+    /// Creates the same repository but leaves line-ending conversion to the host.
+    /// Used on Windows to prove that the transport reads the checkout settings.
+    #[cfg(windows)]
+    pub fn new_with_host_autocrlf(name: &str) -> Self {
+        Self::new_with(name, false)
+    }
+
+    fn new_with(name: &str, pin_lf: bool) -> Self {
         let base = std::env::temp_dir().join(format!(
             "worktree-cleaner-exec-{name}-{}",
             std::process::id()
@@ -38,10 +49,11 @@ impl Repo {
         repo.git(&["config", "user.email", "test@example.com"]);
         repo.git(&["config", "user.name", "Test"]);
         repo.git(&["config", "commit.gpgsign", "false"]);
-        // The fixture must not inherit the host Git's line-ending conversion.
-        // The transport reads the repository config and deliberately not the
-        // machine config, so pin the checkout to LF for both the CLI and libgit2.
-        repo.git(&["config", "core.autocrlf", "false"]);
+        if pin_lf {
+            // The CLI oracle and the fixture must not inherit the host's line-ending
+            // conversion; the transport reads the checkout settings either way.
+            repo.git(&["config", "core.autocrlf", "false"]);
+        }
         std::fs::write(repo.root.join("a.txt"), "one\n").expect("write a.txt");
         repo.git(&["add", "a.txt"]);
         repo.git_dated_in(&repo.root, &["commit", "--quiet", "-m", "init"], 90);
