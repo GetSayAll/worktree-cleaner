@@ -121,6 +121,10 @@ fn build_repo(name: &str) -> Repo {
     repo.run(&["init", "--quiet", "-b", "main"]);
     repo.run(&["config", "user.email", "test@example.com"]);
     repo.run(&["config", "user.name", "Test"]);
+    // The CLI oracle ignores the machine config, and the transport does too.
+    // Pin the fixture to LF so a host autocrlf setting cannot make the
+    // detached worktree look dirty on Windows.
+    repo.run(&["config", "core.autocrlf", "false"]);
     std::fs::write(repo.root.join("a.txt"), "one\n").expect("write a.txt");
     repo.run(&["add", "a.txt"]);
     // The initial commit is dated 90 days ago, so a worktree that sits on it (the
