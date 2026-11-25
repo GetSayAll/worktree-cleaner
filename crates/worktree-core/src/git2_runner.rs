@@ -130,9 +130,10 @@ const STATUS_CONFIG_KEYS: [&str; 5] = [
 ];
 
 fn status_config_entries() -> Vec<(String, String)> {
-    git2::Config::open_default()
-        .map(|config| status_config_entries_from(&config))
-        .unwrap_or_default()
+    match git2::Config::open_default() {
+        Ok(config) => status_config_entries_from(&config),
+        Err(_) => Vec::new(),
+    }
 }
 
 fn status_config_entries_from(config: &git2::Config) -> Vec<(String, String)> {
