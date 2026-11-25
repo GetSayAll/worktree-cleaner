@@ -118,3 +118,11 @@ jobs:
 
       - name: Compile every target
         run: cargo check --workspace --all-targets
+
+      # Build one real Windows installer. `cargo check` proves the code compiles;
+      # it does not prove that the NSIS bundle, the WebView2 bootstrapper and the
+      # Windows-specific tauri.windows.conf.json still assemble. The updater
+      # artifacts need the release key, so this unsigned CI build turns them off.
+      - name: Build the Windows installer (unsigned)
+        shell: bash
+        run: pnpm tauri build --debug --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'

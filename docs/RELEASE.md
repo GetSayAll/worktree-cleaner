@@ -88,7 +88,12 @@ Without them the script stops before it builds. A build without them is
 unsigned, and Gatekeeper refuses it on every machine but the one that made it.
 
 
-### 2.3 The Windows code-signing certificate
+### 2.3 The Windows build and code-signing certificate
+
+The Windows build needs Rust with the MSVC toolchain, Node/pnpm, and CMake: the
+vendored libgit2 is built from C. Tauri downloads NSIS for the `nsis` target. CI
+builds an unsigned installer on every change; the release job supplies the updater
+key, and code signing is the remaining external prerequisite.
 
 Windows Defender SmartScreen warns about an unsigned installer, and the warning
 is the difference between "install it" and "do not install this". A signing
@@ -285,10 +290,11 @@ release, and each one has caught something.
 - [ ] Download the `.exe`, install it as the current user, and run it. **No
       terminal window opens** — not at the end of the installation, where the
       finish page starts the app, and not on a later launch from the Start menu.
-- [ ] The **Recycle Bin** path works: delete one safe worktree and find it in
-      the Recycle Bin. This is D16, and it is still open in
-      `docs/DEV_CONTRACT.md` §7 — no Windows machine has run it yet. Until one
-      does, the Windows release is the one carrying the untested path.
+- [ ] The **Recycle Bin** path works: delete one safe worktree, find it in the
+      Recycle Bin, and put it back. The Windows CI moves a fixture through the
+      system Recycle Bin; the installed app's delete/find/restore pass is still
+      required. D16 remains open in `docs/DEV_CONTRACT.md` §7 until that record
+      exists.
 - [ ] The app scans a real repository.
 
 ### 4.3 The update path
@@ -325,5 +331,5 @@ release, and each one has caught something.
 | `pnpm test:layout` | the page grid in a real browser |
 | `pnpm test:theme` | the light and dark palettes in a real browser |
 
-`.github/workflows/ci.yml` runs all five, plus a Windows compile, on every push
-and every pull request.
+`.github/workflows/ci.yml` runs all five, plus a Windows compile and an unsigned
+NSIS installer build, on every push and every pull request.

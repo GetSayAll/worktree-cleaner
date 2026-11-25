@@ -45,8 +45,8 @@ install it:
 | macOS (Apple silicon and Intel) | `Worktree-Cleaner_<version>_macos_universal.dmg` | Open it and drag the app into **Applications** |
 | Windows | `Worktree-Cleaner_<version>_windows_x86_64-setup.exe` | Run it; it installs for the current user and needs no administrator rights |
 
-Nothing else is needed: the application is self-contained. There is no runtime to
-install, no runtime to keep up to date, and no server to run.
+Windows 10 and 11 include WebView2; the installer downloads the runtime when a
+machine does not have it. There is no Git runtime to install and no server to run.
 
 ### Git is built in
 
@@ -54,8 +54,8 @@ The app links the Git implementation instead of calling a `git` program: libgit2
 for repository reads and gix for worktree removal. There is no command-line tool
 to install, no Xcode Command Line Tools requirement, and no child process. A fresh
 Mac or Windows machine can scan and clean a repository without a developer
-toolchain, and a repository is judged without the machine's global Git
-configuration.
+toolchain. Ignore rules and hooks never come from the machine; the checkout's
+line-ending, case, file-mode and symlink settings are honored.
 
 ---
 

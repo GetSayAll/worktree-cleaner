@@ -426,7 +426,7 @@ guarantee is named next to it.
 | P4 | 5 · a target whose identity or activity changed is skipped with a stated reason (D11) | Met |
 | P4 | 6 · a failure on one item does not affect the others (D14) | Met |
 | P4 | 7 · the log has time / action / target / reason / result / size, with no network call (D15) | Met |
-| P4 | 8 · Windows: the Recycle Bin path verified separately (D16) | Blocked — no Windows machine has run it; open item 1 |
+| P4 | 8 · Windows: the Recycle Bin path verified separately (D16) | Partially met — the Windows CI moves a real fixture through the system Recycle Bin; finding and restoring the installed app's directory is still the manual check in open item 1 |
 | P5 | daemon and browser-UI criteria | Blocked — P5 not started |
 | P6 | wrap-up criteria | Partly met — settings persist on the device, the history page reads the real log, the language picker ships, and the prototype wording is gone. Plan export copies JSON to the clipboard rather than writing a file. Appearance has `pnpm test:theme` and the page grid `pnpm test:layout`, both in a real browser (decision 5) |
 | P6 | 5 · the desktop build updates itself (D25) | Partly met — the updater is wired to the release feed with signature verification, the check runs once per launch and is silent on failure, and the state machine is covered by `src/update.test.ts`; the browser preview refuses to pretend it can. The end-to-end half — an install from a real published release, and a feed whose signature does not verify — waits for the first release and is on the checklist in `docs/RELEASE.md` |
@@ -1015,8 +1015,9 @@ was checked to fail without the fix:
 **Open**
 
 1. **How to verify the Windows Recycle Bin path**: D16 requires separate verification
-   per platform. How does Form A / Form B obtain and retain that record on a real
-   Windows machine?
+   per platform. The Windows CI now moves a real fixture through the system Recycle
+   Bin. The remaining record is the installed app's delete, find and restore pass on
+   a real Windows machine; how Form A / Form B retain that record is still open.
 2. **How Form B's daemon is distributed**: as a `worktree-cleaner serve` subcommand
    (single binary) or as a separate executable.
 3. **Where `snapshot.json` is written**: stdout or a conventional default path, and
