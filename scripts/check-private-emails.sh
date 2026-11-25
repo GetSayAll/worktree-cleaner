@@ -1,30 +1,58 @@
 #!/bin/sh
-# Reject the maintainers' private email addresses in files and commit metadata.
+# Reject the maintainers' blocked email addresses in files and commit metadata.
 #
-# The addresses are assembled from parts so this file does not contain either
-# one in full. Matches are reported by file, commit, or identity field, never by
-# value: a checker that printed the address would publish it again.
+# Only SHA-256 digests are stored here. The checker extracts address-shaped
+# candidates from the content, hashes them, and compares. An address is never
+# stored or printed; a failed check names the file, commit, or identity field.
 
 set -eu
 
-local_one='hd838a'
-domain_one='outlook.com'
-local_two='qeeing'
-domain_two='foxmail.com'
-pattern="${local_one}@${domain_one}|${local_two}@${domain_two}"
+blocked='9320d1655cd951297a1c0e1d65db51e2e78377d2a28189e0c17a99a8a11cf34f 7fe0578ed4935375cc367a919ee30353dcbce114f6608b42f8381f2ca6585a86'
+email_re='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
 
 failed=0
 
 report() {
-    echo "error: a private email address was found in $1" >&2
+    echo "error: a blocked email address was found in $1" >&2
     failed=1
 }
 
+hash_of() {
+    if command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | shasum -a 256 | awk '{print $1}'
+    else
+        printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sha256sum | awk '{print $1}'
+    fi
+}
+
+check_candidates() {
+    candidates=$1
+    description=$2
+    while IFS= read -r candidate; do
+        if [ -z "$candidate" ]; then
+            continue
+        fi
+        digest=$(hash_of "$candidate")
+        case " $blocked " in
+        *" $digest "*)
+            report "$description"
+            return
+            ;;
+        esac
+    done <<EOF
+$candidates
+EOF
+}
+
+check_text() {
+    check_candidates "$(printf '%s\n' "$1" | grep -oE "$email_re" || true)" "$2"
+}
+
 check_tree() {
-    list=$(git grep -lE "$pattern" -- . || true)
+    list=$(git grep -lE "$email_re" -- . || true)
     while IFS= read -r file; do
         if [ -n "$file" ]; then
-            report "the checked-out file $file"
+            check_candidates "$(grep -oE "$email_re" "$file" 2>/dev/null || true)" "the checked-out file $file"
         fi
     done <<EOF
 $list
@@ -32,10 +60,10 @@ EOF
 }
 
 check_index() {
-    list=$(git grep --cached -lE "$pattern" -- . || true)
+    list=$(git grep --cached -lE "$email_re" -- . || true)
     while IFS= read -r file; do
         if [ -n "$file" ]; then
-            report "the staged content of $file"
+            check_candidates "$(git show ":$file" 2>/dev/null | grep -oE "$email_re" || true)" "the staged content of $file"
         fi
     done <<EOF
 $list
@@ -49,15 +77,9 @@ case "${1:-}" in
     ;;
 --message)
     message="${2:?--message needs the commit message file}"
-    if grep -qE "$pattern" "$message"; then
-        report "the commit message"
-    fi
-    if git var GIT_AUTHOR_IDENT | grep -qE "$pattern"; then
-        report "the author identity"
-    fi
-    if git var GIT_COMMITTER_IDENT | grep -qE "$pattern"; then
-        report "the committer identity"
-    fi
+    check_text "$(cat "$message")" "the commit message"
+    check_text "$(git var GIT_AUTHOR_IDENT)" "the author identity"
+    check_text "$(git var GIT_COMMITTER_IDENT)" "the committer identity"
     exit "$failed"
     ;;
 esac
@@ -66,11 +88,13 @@ check_tree
 
 base="${1:-}"
 if [ -n "$base" ] && git rev-parse --verify "$base^{commit}" >/dev/null 2>&1; then
-    for commit in $(git log --format=%H "$base..HEAD"); do
-        if git show -s --format='%ae%n%ce%n%b' "$commit" | grep -qE "$pattern"; then
-            report "commit $commit"
+    while IFS= read -r commit; do
+        if [ -n "$commit" ]; then
+            check_text "$(git show -s --format='%ae%n%ce%n%b' "$commit")" "commit $commit"
         fi
-    done
+    done <<EOF
+$(git log --format=%H "$base..HEAD")
+EOF
 fi
 
 exit "$failed"
