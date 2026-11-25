@@ -26,10 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The address is never printed: a failed check names the file, commit or
-      # identity field, not the value. The range is new work only, because the
-      # old history contains the address by decision.
-      - name: No private email addresses
+      # The list is a repository secret, never a value in this file. A failed
+      # check names the file, commit or identity field, not the address. The
+      # range is new work only, because the old history contains the address by
+      # decision. Fork pull requests receive no secrets, so the checker skips
+      # there.
+      - name: No blocked email addresses
+        env:
+          BLOCKED_EMAILS: ${{ secrets.BLOCKED_EMAILS }}
         run: |
           base="${{ github.event.pull_request.base.sha || github.event.before }}"
           case "$base" in
