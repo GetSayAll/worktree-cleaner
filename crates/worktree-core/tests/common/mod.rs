@@ -38,6 +38,10 @@ impl Repo {
         repo.git(&["config", "user.email", "test@example.com"]);
         repo.git(&["config", "user.name", "Test"]);
         repo.git(&["config", "commit.gpgsign", "false"]);
+        // The fixture must not inherit the host Git's line-ending conversion.
+        // The transport reads the repository config and deliberately not the
+        // machine config, so pin the checkout to LF for both the CLI and libgit2.
+        repo.git(&["config", "core.autocrlf", "false"]);
         std::fs::write(repo.root.join("a.txt"), "one\n").expect("write a.txt");
         repo.git(&["add", "a.txt"]);
         repo.git_dated_in(&repo.root, &["commit", "--quiet", "-m", "init"], 90);

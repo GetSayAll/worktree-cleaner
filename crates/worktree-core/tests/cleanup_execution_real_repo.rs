@@ -4,8 +4,8 @@
 //! The unit tests in `src/cleanup.rs` pin the decision logic against fixtures.
 //! This file proves the three execution guarantees hold in the world the app
 //! actually runs in: D11 (a stale plan is skipped, never run), D5 (a directory
-//! leaves through the system Trash) and D6 (a worktree leaves through
-//! `git worktree remove` plus `prune`).
+//! leaves through the system Trash) and D6 (a worktree leaves through Git's
+//! worktree API plus `prune`).
 
 mod common;
 
@@ -218,10 +218,10 @@ fn plan_removing(path: &str) -> CleanupPlan {
     }
 }
 
-// ---- D6: worktrees leave through Git ---------------------------------------
+// ---- D6: worktrees leave through Git's worktree API -------------------------
 
 #[test]
-fn a_safe_worktree_is_removed_by_git_and_pruned() {
+fn a_safe_worktree_is_removed_and_pruned() {
     let (repo, linked, _marker) = repo_with_a_safe_worktree("remove");
     let snapshot = scan(&repo);
     let record = safe_worktree(&snapshot);
