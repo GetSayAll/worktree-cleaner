@@ -126,3 +126,11 @@ jobs:
       - name: Build the Windows installer (unsigned)
         shell: bash
         run: pnpm tauri build --debug --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      # The GUI and the Recycle Bin still need a human on Windows. Give that
+      # person the installer this job just built instead of waiting for a tag.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-unsigned
+          path: target/debug/bundle/nsis/*.exe
+          if-no-files-found: error

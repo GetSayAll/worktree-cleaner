@@ -287,6 +287,10 @@ release, and each one has caught something.
 
 ### 4.2 The Windows app
 
+The Windows CI job uploads its unsigned debug installer as
+`windows-installer-unsigned`; use that one for the checks below before a tag, and
+repeat them on the signed installer from the draft release.
+
 - [ ] Download the `.exe`, install it as the current user, and run it. **No
       terminal window opens** — not at the end of the installation, where the
       finish page starts the app, and not on a later launch from the Start menu.
