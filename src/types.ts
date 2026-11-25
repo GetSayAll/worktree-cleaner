@@ -65,13 +65,11 @@ export interface WorktreeRecord {
   has_upstream: boolean;
   merged_into_default: boolean | null;
   /**
-   * Every commit here already has an equivalent patch in the default branch,
-   * though the commits are not ancestors of it — the squash-merge answer from
-   * `git cherry`. Separate from `merged_into_default` because the two are
-   * different facts; `false` means "not established", never "known not to be".
-   * The content answer is separate: a matching patch whose files changed
-   * afterwards keeps this `true` and emits `wt.absorbed_content_changed` at
-   * `Review` beside `wt.absorbed`.
+   * The files this branch changed hold the same content in the default branch,
+   * though the commits are not ancestors of it — the squash-merge answer.
+   * Separate from `merged_into_default` because the two are different facts;
+   * `false` means "not established", never "known not to be". A difference in
+   * the touched files is `wt.unmerged` at `Review`, never `Safe`.
    */
   absorbed_into_default: boolean;
   stash_count: number;
@@ -352,7 +350,6 @@ export type ScanFailure =
   | { code: "not_found"; path: string }
   | { code: "not_a_git_repository"; path: string; detail: string }
   | { code: "git_unavailable"; detail: string }
-  | { code: "git_missing" }
   | { code: "task_failed"; detail: string }
   | { code: "unknown"; detail: string };
 

@@ -16,20 +16,18 @@ thiserror = "2"
 # The gate, stated once for the whole workspace (`pnpm lint:rust`).
 #
 # `all` is denied, so a new default-level lint fails the build rather than scrolling
-# past. `unsafe_code` is denied because nothing here needs it: the deletion path goes
-# through the Trash and Git, and the platform calls the `trash` crate makes are its
-# business, not ours.
+# past. `unsafe_code` is denied. The one exception is the libgit2 configuration
+# search-path call in `git2_runner.rs`: it is unsafe in the `git2` API and is isolated
+# with its safety argument beside it; nothing else needs unsafe.
 #
 # `all` and `pedantic` are denied, so a new lint at either level fails the build
 # rather than scrolling past. `nursery` stays a warning on purpose: those lints are
 # explicitly experimental and can change or disappear between Clippy releases, and a
 # gate that goes red because the toolchain moved is a gate people learn to ignore.
 #
-# `unsafe_code` is denied because nothing here needs it: the deletion path goes
-# through the Trash and Git, and the platform calls the `trash` crate makes are its
-# business, not ours. `unused` is denied (a warning by default) so a leftover variable
-# or import fails the gate, which is the behaviour the proposal's acceptance check
-# asks for.
+# `unsafe_code` is denied apart from that single, documented libgit2 boundary.
+# `unused` is denied (a warning by default) so a leftover variable or import fails the
+# gate, which is the behaviour the proposal's acceptance check asks for.
 [workspace.lints.rust]
 unsafe_code = "deny"
 unused = "deny"

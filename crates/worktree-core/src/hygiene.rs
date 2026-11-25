@@ -643,7 +643,7 @@ impl Audit<'_> {
                 Ok(output) if output.success() || output.code == Some(1) => output,
                 Ok(output) => {
                     self.warnings.push(format!(
-                        "git check-ignore could not answer for {probe}: exited with {:?}: {}",
+                        "the ignore check could not answer for {probe}: exited with {:?}: {}",
                         output.code,
                         output.stderr.trim()
                     ));
@@ -651,7 +651,7 @@ impl Audit<'_> {
                 }
                 Err(error) => {
                     self.warnings.push(format!(
-                        "git check-ignore could not answer for {probe}: {error}"
+                        "the ignore check could not answer for {probe}: {error}"
                     ));
                     continue;
                 }
@@ -675,7 +675,7 @@ impl Audit<'_> {
                             HygieneRule::L5,
                             level,
                             subject,
-                            format!("git check-ignore {probe}: no rule matches"),
+                            format!("no ignore rule matches {probe}"),
                         )
                         .state(state)
                         .arg("entry", DetailArg::Text(required)),
@@ -1319,7 +1319,7 @@ fn repository_root(runner: &dyn GitRunner, root: &Path) -> PathBuf {
     std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf())
 }
 
-/// One line of `git check-ignore -v` output.
+/// One line of the ignore check output.
 struct IgnoreRule {
     source: String,
     line: u64,

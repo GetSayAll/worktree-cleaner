@@ -123,7 +123,8 @@ The one command that is a release:
 ```
 
 It refuses to start unless the four `APPLE_*` variables of §2.2 are set and the
-`.p8` is mode `600`. Then, in order: checks the tree is clean and the version
+`.p8` is mode `600`. The build also needs `cmake` for the vendored libgit2; the
+release Mac and the CI runners have it. Then, in order: checks the tree is clean and the version
 agrees in `package.json`, `src-tauri/tauri.conf.json` and `Cargo.toml`; runs the
 gate (`pnpm test`, `pnpm lint:rust`); builds a universal app with
 `pnpm tauri build --target universal-apple-darwin`; lets Tauri sign and notarize

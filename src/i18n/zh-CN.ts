@@ -110,7 +110,8 @@ export const zhCN = {
       whitelisted: "命中白名单规则",
       prunable: "工作目录已不存在",
       merged: "已合并进默认分支",
-      absorbed: "所有提交的改动都已在默认分支中",
+      absorbed: "该分支的改动已在默认分支中",
+      // 扫描不再产生：吸收判定改为内容判定，内容不同即 unmerged。保留只为让旧审计日志仍能渲染。
       absorbed_content_changed: "改动已在默认分支中，但相关文件之后又改过",
       clean: "工作区干净"
     },
@@ -298,7 +299,6 @@ export const zhCN = {
         `${path} 不是 Git 仓库，也不在某个 Git 仓库里面。请选择包含 .git 的项目目录，或先运行 git init。`,
       gitUnavailable:
         "无法读取这个文件夹的 Git 信息。请确认文件夹可访问。技术详情见操作日志。",
-      gitMissing: "没有找到 Git。请安装 Git，或把 Git 加入 PATH，然后重试。",
       unknown: "扫描没有完成。请重试；技术详情见操作日志。"
     }
   },

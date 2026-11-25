@@ -1,11 +1,22 @@
-//! Read-only Git command wrapper.
+//! The Git transport boundary.
 //!
-//! Every Git call in the scanner goes through [`GitRunner`] (product plan section 5.1:
-//! "all data sources are read-only Git commands; the `.git` file format is never
-//! parsed"). The runner is a **trait** so tests can inject timeouts, permission
-//! errors, and canned output without a real repository (development contract D3).
+//! Every Git operation in the scanner goes through [`GitRunner`] (product plan
+//! section 5.1: "all data sources are read-only; the `.git` file format is never
+//! parsed"). The production implementation is [`crate::Git2Runner`], which links
+//! libgit2 and never spawns a process. [`ProcessGitRunner`] is the CLI oracle the
+//! parity tests compare against; it no longer ships in the app.
 //!
-//! Read-only guarantees enforced by [`ProcessGitRunner`]:
+//! The runner is a **trait** so tests can inject timeouts, permission errors, and
+//! canned output without a real repository (development contract D3).
+//!
+//! The guarantees the in-process transport keeps:
+//!
+//! - no hooks, filters, external diff tools or textconv: libgit2 does not run them;
+//! - system and global configuration are read from an empty directory, so a
+//!   developer's `gitconfig` cannot change a verdict;
+//! - the network is not available in the vendored build.
+//!
+//! Additional guarantees the CLI oracle keeps (it is still used by the tests):
 //!
 //! - `GIT_OPTIONAL_LOCKS=0` — `git status` refreshes the index and takes
 //!   `.git/index.lock` as a side effect; disabling optional locks keeps a scan from
@@ -18,11 +29,9 @@
 //!   that exported them), an inherited value would silently redirect every
 //!   `git -C <repo>` call to the wrong repository.
 //!
-//! One property that is not about reading: on Windows the child is started with
-//! `CREATE_NO_WINDOW`. The release build is a GUI-subsystem binary with no console, and
-//! Windows hands a console — a window, drawn by Windows Terminal on Windows 11 — to
-//! every console-subsystem child of a process that has none, so without the flag each
-//! Git call in a scan would open a terminal of its own.
+//! On Windows the oracle passes `CREATE_NO_WINDOW`: a console-subsystem child of a
+//! GUI process would otherwise open a terminal of its own. The shipped app no longer
+//! starts a child, so this is a test-oracle detail.
 //!
 //! Scanning code must only pass read-only verbs (`status`, `worktree list`,
 //! `merge-base`, `stash list`, `ls-files`, `log`, `rev-parse`, `symbolic-ref`). The
@@ -86,17 +95,16 @@ pub enum GitError {
 
 /// The read-only Git entry point.
 pub trait GitRunner {
-    /// Runs `git -C <repo> <args...>` and returns its captured output.
+    /// Runs the operation named by `args` against `repo` and returns its captured
+    /// output in the shape the parsers consume.
     fn run(&self, repo: &Path, args: &[&str]) -> Result<GitOutput, GitError>;
 }
 
 impl GitError {
     /// Whether the failure was that the program could not be started at all.
     ///
-    /// The usual cause is that Git is not installed, or is not on the `PATH` the
-    /// desktop shell inherited. That is a different answer from "the command
-    /// failed", and it is one the reader can act on: install Git, then try
-    /// again. A timeout or a non-zero exit is not this.
+    /// This is a property of the CLI test oracle; the in-process transport never
+    /// produces it. A timeout or a non-zero exit is not this.
     pub fn is_missing_program(&self) -> bool {
         match self {
             Self::Io { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
@@ -105,7 +113,8 @@ impl GitError {
     }
 }
 
-/// Runs real Git processes with a per-command timeout.
+/// Runs real Git processes with a per-command timeout. Test oracle only: the app
+/// uses [`crate::Git2Runner`], which links libgit2 instead of spawning Git.
 #[derive(Debug, Clone)]
 pub struct ProcessGitRunner {
     timeout: Duration,
@@ -129,12 +138,19 @@ impl GitRunner for ProcessGitRunner {
     fn run(&self, repo: &Path, args: &[&str]) -> Result<GitOutput, GitError> {
         let command = display_command(repo, args);
         let mut process = Command::new("git");
+        // The CLI is now the differential test oracle; it has to see the same
+        // configuration as the in-process transport. System and global config are
+        // ignored there, so they are ignored here too: a developer's `gitconfig`
+        // must not be able to change a safety verdict.
+        let null_config = if cfg!(windows) { "NUL" } else { "/dev/null" };
         process
             .arg("-C")
             .arg(repo)
             .args(args)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", null_config)
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env_remove("GIT_INDEX_FILE")

@@ -10,9 +10,11 @@
 //!   plan.
 //! - **Isolation (D14).** Execution is serial and one failure does not stop the
 //!   others; each item carries its own result.
-//! - **Trash only (D5) and `git worktree remove` only (D6).** Directories go to
-//!   the system Trash through the `trash` crate; worktrees go through Git. There
-//!   is no permanent-delete path and no bypass switch.
+//! - **Trash for artifacts (D5) and Git's worktree API for worktrees (D6).**
+//!   Directories go to the system Trash through the `trash` crate; worktrees go
+//!   through gix's recursive worktree removal, which keeps the Git metadata
+//!   consistent and the branch ref. There is no raw-delete path and no bypass
+//!   switch.
 //!
 //! Every action is appended to the local operation log (D15). Nothing here talks
 //! to the network.
@@ -24,7 +26,8 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 use crate::artifact::{check_artifact, lookup_kind, ArtifactScanOptions};
-use crate::git::{GitError, GitRunner, ProcessGitRunner};
+use crate::git::{GitError, GitRunner};
+use crate::git2_runner::Git2Runner;
 use crate::log;
 use crate::path::{validate_path_for_deletion, DeletionContext};
 use crate::reason::{ReasonCode, SafetyStatus};
@@ -110,7 +113,7 @@ pub fn execute_plan_with_progress<F>(
 where
     F: FnMut(&ResultEntry),
 {
-    let runner = ProcessGitRunner::new(opts.git_timeout);
+    let runner = Git2Runner::new(opts.git_timeout);
     let whitelist: Vec<PathBuf> = opts
         .whitelist
         .iter()
@@ -573,7 +576,7 @@ fn move_to_trash(path: &str) -> Result<(), trash::Error> {
     context.delete(path)
 }
 
-/// Whether a directory `git worktree remove` reported as removed is still there.
+/// Whether a directory the worktree removal reported as removed is still there.
 ///
 /// A zero exit code means Git removed the *worktree*, not that the last directory
 /// went with it: it deletes every file it can and stops at a directory it cannot
@@ -1391,7 +1394,7 @@ mod tests {
 
     #[test]
     fn a_successful_removal_is_only_called_clean_when_the_directory_is_gone() {
-        // The distinction `worktree.remnants` exists for. `git worktree remove`
+        // The distinction `worktree.remnants` exists for. The worktree removal
         // exited 0 on a worktree that still held 203 directories, because the only
         // entries left were pnpm reparse points it would not follow; the log called
         // it removed and the reader had no way to learn otherwise.

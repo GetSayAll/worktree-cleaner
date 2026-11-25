@@ -237,8 +237,6 @@ export function scanFailureText(failure: ScanFailure): string {
       return messages.errors.scan.notRepository(failure.path);
     case "git_unavailable":
       return messages.errors.scan.gitUnavailable;
-    case "git_missing":
-      return messages.errors.scan.gitMissing;
     case "task_failed":
     case "unknown":
       return messages.errors.scan.unknown;

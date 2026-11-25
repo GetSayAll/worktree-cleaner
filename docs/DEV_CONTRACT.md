@@ -63,8 +63,8 @@ bug. D17–D24 are form-factor and repository-wide constraints.
 | D2 | The level of a record is decided by the **most severe** entry in `reasons`. No independent scoring | Every level must trace back to concrete evidence | Unit test: the presence of any Unsafe reason forces the whole record to Unsafe |
 | D3 | Failures downgrade: a timeout, a permission error, or a non-zero command exit produces `Review`, **never `Safe`** | Without evidence you cannot call something safe | Inject a timeout and assert the level is Review and carries `cannot_verify` |
 | D4 | The main worktree is never deletable, even when clean | Deleting the main worktree deletes the repository | Assert the main worktree carries `wt.main` and is Unsafe |
-| D5 | Artifact directories are removed only through the system Trash. **No permanent delete of artifact directories, no bypass switch.** Worktree directories are governed by D6 and are permanently removed with `git worktree remove` | Artifact directories inside a user's workspace must be recoverable; worktrees must keep Git metadata consistent, and removing their working directory with Git is permanent | On macOS, a deleted artifact directory can be found in the Trash and put back; the plan and result state that worktree removal is permanent and does not use the Trash |
-| D6 | Worktrees are removed only with `git worktree remove` / `git worktree prune`. Raw `rm -rf` on a worktree directory is forbidden. This removal is permanent: the working directory and any untracked files are deleted, and the branch ref remains | Git metadata must stay consistent, and the reader must not mistake worktree removal for a recoverable Trash move | `git worktree list` shows no leftovers after removal; no bare-delete call exists in the code paths; the confirmation and result copy name the permanence |
+| D5 | Artifact directories are removed only through the system Trash. **No permanent delete of artifact directories, no bypass switch.** Worktree directories are governed by D6 and are permanently removed through Git's worktree API (gix) | Artifact directories inside a user's workspace must be recoverable; worktrees must keep Git metadata consistent, and removing their working directory with Git is permanent | On macOS, a deleted artifact directory can be found in the Trash and put back; the plan and result state that worktree removal is permanent and does not use the Trash |
+| D6 | Worktrees are removed only through Git's worktree API: gix's recursive `remove_worktree` performs the removal, and the metadata is pruned afterwards. Raw `rm -rf` / `remove_dir_all` on a worktree directory is forbidden. This removal is permanent: the working directory and any untracked files are deleted, and the branch ref remains | Git metadata must stay consistent, and the reader must not mistake worktree removal for a recoverable Trash move | `git worktree list` shows no leftovers after removal; no raw-delete call exists in the code paths; the confirmation and result copy name the permanence |
 | D7 | An artifact directory name is only a candidate hint. The verdict must rest on: whether Git tracks it, whether it holds authored content, its activity, and whether it is a symlink escaping the project | "It is called build, so delete it" destroys source code | Counter-example test: a `build/` directory containing tracked files must be Unsafe |
 | D8 | An artifact directory must never be treated as a project root and walked into | Treating `node_modules` as a project root deletes package-internal `dist/`, leaving a tree that looks installed but is corrupt and needs a network restore | Counter-example test: a `node_modules` containing `package.json` must not be recognised as a project root |
 | D9 | Every decision carries four elements: `code` + `severity` + `text` + `evidence` | "A verifiable reason" is the core promise of this product | Struct fields are not optional; every reason in the UI can be expanded to show its evidence |
@@ -79,7 +79,7 @@ bug. D17–D24 are form-factor and repository-wide constraints.
 | D18 | Deletion and writing may only be performed by a local process, and only when driven by a plan object. No form may let a web page trigger a filesystem write directly | Execution authority must live locally and stay reviewable | Form A has no write path; Form B's `execute` accepts only a plan object |
 | D19 | Form B's daemon must: bind to `127.0.0.1` only; generate a random token on every start; strictly validate `Origin` and `Host` against DNS rebinding; never use a wildcard CORS policy; and require in-UI confirmation in addition to the token for destructive endpoints | A local port is reachable from the browser, so a malicious page can send requests | `lsof` shows no externally reachable listener; requests without a token and cross-origin requests are rejected; execution without confirmation is refused |
 | D20 | `snapshot.json` must carry `schema_version` and is the only contract between the CLI and the web page. On a higher version the page must say the viewer needs an upgrade; it must never guess at fields | Once published, an interface cannot assume both ends upgrade together | Round-trip test on the contract; feed a higher version and assert a clear error |
-| D21 | No form may weaken the existing constraints: D5 (artifact directories through the Trash only) and D6 (`git worktree remove` only) hold in every form | Changing the form is not a reason to relax safety | One verification record per form, each covering D5 and D6 |
+| D21 | No form may weaken the existing constraints: D5 (artifact directories through the Trash only) and D6 (Git's worktree API only) hold in every form | Changing the form is not a reason to relax safety | One verification record per form, each covering D5 and D6 |
 | D22 | The report web page must open with no network and no server (assets inlined) and must not introduce a runtime backend dependency | The availability of a read-only form should not depend on the environment | Open it offline over `file://` and complete a full review |
 | D23 | **English for everything that ships as open source.** Code, comments, identifiers, documentation, commit messages, file names, and user-visible strings in the repository are English, and English is the default and the source locale. The one exception is UI locale data under `src/i18n/`: the English source table plus one translated table per additional locale, keys identical to the source table, file names and keys in English. Content deliberately kept out of the open-source distribution may be written in Chinese | This is an international open-source project; a mixed-language repository is not reviewable by the community it targets | A scan of tracked files finds no non-English natural language outside `src/i18n/`; every commit message reads in English; a test fails when any locale table's keys differ from `en.ts` |
 | D24 | **The disk-hygiene audit is advisory and never an input to a deletion decision.** It is read-only (D1), it reports `Unknown` — never "met" — for every rule it cannot observe from inside one repository, and no part of the cleanup path may read it. A rule's level is the worst finding it has; `Ok` means a check ran and found nothing. The rule set is the one in `docs/DISK_HYGIENE.md`, and its ids, its situations and its copy are pinned to that document by test | A cleanup verdict and a policy report answer different questions. Letting one move the other would either block a removal for a reason the user cannot act on in that step, or read a policy breach as permission to delete. And a rule reported as met when nothing was checked is D3's failure mode wearing a different hat | `cleanup.rs` builds a plan from worktree and artifact records only; a plan built alongside a report full of violations is unchanged. A test asserts the audit's rule ids equal the policy document's table, and that only the rules the document itself marks unobservable are reported `Unknown` |
@@ -160,7 +160,8 @@ Form C: Tauri desktop shell ── IPC ──────────┤
 - Every reason must carry a non-empty `text` and a non-empty `evidence`. The
   constructors assert this in test builds.
 - Internal naming is free, but field names that appear externally, reason codes,
-  and command text (such as `git worktree remove --force -- "<path>"`) are part of
+  and operation text (such as `git worktree remove --force -- "<path>"`, the
+  equivalent Git operation) are part of
   the contract and must not change casually. A path reaches Git after a `--`
   separator, and the command shown in the plan is the one the executor builds: the
   executor re-derives it from its own re-check rather than parsing that string.
@@ -231,7 +232,8 @@ Form C: Tauri desktop shell ── IPC ──────────┤
 - Rust: `pnpm lint:rust` must pass. It runs `cargo fmt --all -- --check` and
   `cargo clippy --workspace --all-targets`, and what that fails on is declared in
   `[workspace.lints]` in the root `Cargo.toml`: `clippy::all`, `clippy::pedantic`,
-  the rustc `unused` group and `unsafe_code` are **denied**. `clippy::nursery` stays a
+  the rustc `unused` group and `unsafe_code` are **denied** — with the single
+  documented libgit2 configuration exception in `git2_runner.rs`. `clippy::nursery` stays a
   warning on purpose — those lints are experimental and change between Clippy
   releases. The ten `pedantic` lints that remain allowed are each listed with their
   reason in `Cargo.toml` and in `AGENTS.md`; adding an exception without one is the
@@ -338,16 +340,16 @@ cleanup plan as JSON.
 ### P4 · Local cleanup execution and logging (the execution side of Form A)
 
 **Deliverables**: the `clean --plan <file>` command, the execution module, the
-three-tier Trash fallback, the `git worktree remove` / `prune` calls, and operation
+three-tier Trash fallback, the Git worktree removal (gix) / `prune` calls, and operation
 log writing.
 
 **Acceptance criteria**
 
 1. macOS: after deletion an artifact directory can be found in the Trash and put back (D5); worktree removal is reported as permanent;
-2. after `git worktree remove`, `git worktree list` shows no leftovers and `prune`
+2. after the worktree removal, the worktree list shows no leftovers and `prune`
    runs as a follow-up (D6);
 3. a worktree with untracked files **refuses to execute** until confirmed; after
-   confirmation the command is `git worktree remove --force`, and the untracked file
+   confirmation names the forced removal, and the untracked file
    list was already shown line by line in the plan;
 4. a whitelist hit blocks the item and keeps it out of execution;
 5. a target whose identity or activity changed after planning is skipped with a
@@ -398,14 +400,14 @@ guarantee is named next to it.
 
 | Stage | Criterion | Status |
 |---|---|---|
-| P0 | 1 · `cargo test` green | Met — 242 unit tests plus five integration files (11 + 2 + 5 + 6 + 4) |
+| P0 | 1 · `cargo test` green | Met — 255 unit tests plus six integration files (13 + 2 + 2 + 5 + 7 + 4) and the doc-tests |
 | P0 | 2 · every `wt.*` reason code has a test case | Met — all 18 emitted codes in the decision table have a positive and a negative case, every reason asserts non-empty `text` and `evidence`, and `wt.stash` — retained for old audit logs, no longer emitted — has a test asserting it cannot reach a record |
 | P0 | 3 · a corpus of 60+ adversarial paths is rejected | Met — 86 entries. The floor is set to the current count rather than left at 60, so the corpus cannot shrink unnoticed; a generated property test covers 20,000 random paths on top |
 | P0 | 4 · an injected timeout or permission error yields `Review` with `cannot_verify` | Met — the injectable Git runner fails every call in turn (timeout, spawn error, non-zero exit, unknown default branch, unknown merge base) and each path yields `wt.cannot_verify` at `Review`, never a positive reason |
-| P0 | 5 · `cargo clippy -- -D warnings` | Met, and widened into a real gate: `pnpm lint:rust` runs the format check and `cargo clippy --workspace --all-targets`, with `clippy::all`, `clippy::pedantic`, the rustc `unused` group and `unsafe_code` denied in `[workspace.lints]`. `clippy::nursery` stays a warning because those lints are experimental. The ten `pedantic` lints that remain allowed each carry their reason in `Cargo.toml` |
+| P0 | 5 · `cargo clippy -- -D warnings` | Met, and widened into a real gate: `pnpm lint:rust` runs the format check and `cargo clippy --workspace --all-targets`, with `clippy::all`, `clippy::pedantic`, the rustc `unused` group and `unsafe_code` denied in `[workspace.lints]` (the one local `#[allow(unsafe_code)]` is the documented libgit2 config boundary). `clippy::nursery` stays a warning because those lints are experimental. The ten `pedantic` lints that remain allowed each carry their reason in `Cargo.toml` |
 | P1 | 1 · a tracked `build/` is `Unsafe`, evidence naming the match count | Met — unit, plus a real repository where `dist/` is committed despite an ignore rule |
 | P1 | 2 · `node_modules` is not recognised as a project root | Met — the walk never descends into a directory it has recognised as an artifact, and a real scan reports one record per worktree |
-| P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met — `.git` through `af.nested_git`, credentials through `af.credentials`. Credentials needed a code of their own: they are usually Git-*ignored*, which is precisely the case `af.authored_content` cannot see. The worktree root has its own bounded `wt.credentials` check, because `git worktree remove` deletes ignored files too |
+| P1 | 3 · a directory with a nested `.git` or credential files is `Unsafe` | Met — `.git` through `af.nested_git`, credentials through `af.credentials`. Credentials needed a code of their own: they are usually Git-*ignored*, which is precisely the case `af.authored_content` cannot see. The worktree root has its own bounded `wt.credentials` check, because worktree removal deletes ignored files too |
 | P1 | 4 · an escaping symlink is `Unsafe` with the target in evidence | Met |
 | P1 | 5 · a size-measurement timeout is reported honestly | **Renegotiated** — the criterion asked for `Review`; the verdict is now left alone and the size is recorded as `null` with a warning (decision 5) |
 | P1 | 6 · every `af.*` reason code has a test case | Met — all 11 codes |
@@ -418,7 +420,7 @@ guarantee is named next to it.
 | P3 | 6 · `src/mock/` is not referenced by production code | **Renegotiated** — the preview is part of the shipped bundle, so `mock/` stays by design and its pages are labelled as sample data; `vue-tsc --noEmit` is at zero errors and the build passes (decision 7) |
 | P3 | 7 · the hygiene page calls a rule met only where a check ran, and reports what it cannot see as not checked (D24) | Met — the audit's rule list, its situations and its copy are pinned to `docs/DISK_HYGIENE.md` by a Rust test that compiles the document in and a front-end test that walks both locale tables; the seven rules no scan can observe report `not checked` with the audit's own reason; `cleanup.rs` does not read the report, and a plan is unchanged by it |
 | P4 | 1 · macOS: the artifact directory is found in the Trash afterwards (D5), and worktree removal is reported as permanent | Met — an integration test moves a real directory through the real Trash and takes it back out; the result copy names worktree removal as permanent |
-| P4 | 2 · no leftovers after `git worktree remove`, with `prune` as a follow-up (D6) | Met |
+| P4 | 2 · no leftovers after worktree removal, with `prune` as a follow-up (D6) | Met |
 | P4 | 3 · untracked files force confirmation, then `--force` | Met — `--force` is re-derived from the re-check and never parsed out of the plan, and the plan page shows the file list line by line before it lets the run start |
 | P4 | 4 · a whitelist hit blocks the item | Met |
 | P4 | 5 · a target whose identity or activity changed is skipped with a stated reason (D11) | Met |
@@ -538,7 +540,7 @@ message):
 3. **The desktop shell runs the real scanner and the real executor.** `scan_project`
    is implemented in `worktree-core`: worktree checks (which already existed) plus
    artifact scanning and boundary detection, assembled into one `ProjectSnapshot`.
-   Execution moves items through the system Trash and `git worktree remove` /
+   Execution moves items through the system Trash and Git's worktree removal /
    `prune`, re-verifies identity and activity first (D11), runs serially with
    isolated failures (D14), and appends to the local operation log (D15). The
    `src/mock/` snapshot stays for the browser preview only, is always labelled as
@@ -642,7 +644,7 @@ arbitrary later.
 1. **The disk-hygiene policy is checked from inside the repository, and the report
    never moves a deletion (D24).** `docs/DISK_HYGIENE.md` was a document; it is now
    also a pass over the scan's own worktree and artifact records, plus two more
-   questions to Git (`git check-ignore -v`, the volume's free space) and one walk per
+   questions to the repository's ignore rules and the volume's free space, and one walk per
    cache slot. Fifteen of the twenty-two rules are observable that way. The other
    seven — a second clone, `git clean` that already ran, editor indexes, a session's
    exit, shared-versus-isolated dependencies, "disposable by construction", admission
@@ -656,7 +658,7 @@ arbitrary later.
    compliance. The page is a list page like the other four — same row anatomy, same
    `reason` chips — and gained one tone, `reason--neutral`, for `unknown`: tinting an
    unmeasured rule green or red would each be a claim the audit did not make.
-3. **`git check-ignore` exit status 1 is an answer, not a failure.** It is how the
+3. **The ignore check's exit status 1 is an answer, not a failure.** It is how the
    command says "no rule matches this path", which is precisely the finding the
    ignore rule is about. Only a fatal error (128 — not a repository, an unusable
    index) leaves the question unanswered, and only that becomes a scan warning. The
@@ -775,7 +777,8 @@ was checked to fail without the fix:
    The second defect is squash merges: `merge-base --is-ancestor` answers "is this
    commit in the default branch", not "is this change in it", and GitHub's default
    strategy rewrites the commit. 11 of 33 branches reported `wt.unmerged` were fully
-   absorbed. `commits_absorbed` now asks `git cherry`, which compares patch-ids, and
+   absorbed. `commits_absorbed` then asked `git cherry` (superseded 2026-11-25: the
+   content check is the absorption answer), and
    emits `wt.absorbed` at `Safe` — a command's answer, not a judgement about a diff.
    `WorktreeRecord.absorbed_into_default` carries the fact separately from
    `merged_into_default` because they are different facts, and `wt.no_upstream` treats
@@ -815,7 +818,8 @@ was checked to fail without the fix:
    them meant a change to one silently rewrote the other against its own policy
    document; `hygiene::IDLE_DAYS` is now passed explicitly.
 
-   The revert hole in decision 1 is closed. `git cherry` compares patch-ids, and a
+   The revert hole in decision 1 is closed (the patch-id mechanism itself was later
+   superseded by the content check, 2026-11-25). `git cherry` compares patch-ids, and a
    patch-id survives a revert — the applying commit still matches after another commit
    undoes it — so matching the patch proved only that the patch *had been* applied.
    `content_still_present` now asks whether the default branch holds the same content
@@ -838,7 +842,7 @@ was checked to fail without the fix:
    the previous rule on one machine put 47 clean-and-merged worktrees in `Review`
    for no reason beyond a commit inside the three-day window.
 
-2. **Unpushed commits are a branch fact, not a worktree fact.** `git worktree remove`
+2. **Unpushed commits are a branch fact, not a worktree fact.** Worktree removal
    keeps every branch ref, and the product never runs `git branch -d`, so `ahead > 0`
    cannot make the directory unsafe. The append-only rule forbids changing the old
    `wt.unpushed` code from `Unsafe` to `Review`, so `wt.unpushed` is deprecated and no
@@ -856,16 +860,20 @@ was checked to fail without the fix:
    `wt.cannot_verify` only when the work is not already merged or absorbed.
 
 4. **Absorption keeps its patch-id meaning, and a content change has its own code.**
+   **Superseded 2026-11-25:** absorption is now the content answer; a difference is
+   `wt.unmerged` at `Review`, and `wt.absorbed_content_changed` is retained only for
+   old audit logs. The paragraph below is the record of the earlier decision.
    `wt.absorbed` still means "every commit has an equivalent patch in the default
    branch" and stays `Safe`; the append-only rule forbids redefining it as "patch and
    content". When the patch-id matches but the files changed afterwards,
    `absorbed_into_default` stays `true`, `wt.absorbed` is emitted, and
-   `wt.absorbed_content_changed` is emitted beside it at `Review`. The Review reason
+   `wt.absorbed_content_changed` was emitted beside it at `Review` (superseded
+   2026-11-25: absorption is now the content check, and a difference is `wt.unmerged`). The Review reason
    is what keeps the overall verdict out of `Safe`. It is not `wt.unmerged`, which
    claimed something the check did not establish, and not a revert, which a tree
    comparison cannot distinguish from an ordinary edit.
 
-5. **The worktree verdict checks credentials too.** `git worktree remove` deletes
+5. **The worktree verdict checks credentials too.** Worktree removal deletes
    ignored files, so a clean worktree can still contain the one thing that must not be
    destroyed silently. When the tracked files are clean, the root is walked with the
    same name table as `af.credentials`, skipping the recognised artifact directories
@@ -948,6 +956,57 @@ was checked to fail without the fix:
    The Windows half of check 6 — a drive root, and the directories the environment
    names — is its own test, added with this change.
 
+**Decided (2026-11-25)**
+
+1. **The Git transport runs in-process.** The app links libgit2 through the `git2`
+   crate for every read (worktree list, status, refs, diff, merge-base, stash,
+   ignore/tracked checks) and gix for the one operation libgit2 does not expose,
+   recursive worktree removal. No `git` program is spawned; there is no Xcode
+   Command Line Tools requirement and no Git for Windows requirement. The system and
+   global configuration search paths point at an empty directory, so the machine's
+   `~/.gitconfig` cannot change a verdict. `ProcessGitRunner` remains as the CLI
+   oracle for differential tests, not as a shipping path.
+   The compatibility layer renders only the porcelain the existing parsers consume;
+   `tests/git_transport_parity.rs` runs both transports on one repository and
+   compares the parsed facts. This keeps the decision tables, reason codes and
+   canned tests intact while the transport changes.
+
+2. **Absorption is the content answer.** A branch that is not an ancestor of the
+   default branch is `wt.absorbed` only when the files it changed relative to the
+   merge base hold the same content in the default branch. A difference is
+   `wt.unmerged` at `Review`, never `Safe`. The patch-id answer and
+   `wt.absorbed_content_changed` were retired with the in-process transport: libgit2
+   has no patch-id API and a second patch-id implementation would be a new source of
+   verdict drift. Both codes remain in the enum so older audit logs still render,
+   and are never emitted again. `docs/PRODUCT_PLAN.md` §5, `docs/WORKTREE_TRIAGE.md`
+   and the locale tables say so.
+
+3. **A prunable worktree with no HEAD is still prune-safe.** libgit2 cannot open a
+   worktree whose checkout is gone, so the worktree list has no HEAD for it. A
+   verifiably gone directory with `prunable` takes the prune-only channel and does
+   not gain `wt.cannot_verify` merely because the informational merge question
+   cannot be asked. The `wt.prunable` Safe reason is the guard.
+
+4. **The ignore check preserves the CLI answer.** `git check-ignore` without
+   `--no-index` does not report a tracked path as ignored, even when a pattern
+   matches it; the in-process check consults the index and returns the same answer.
+   The artifact channel uses that boolean; the hygiene L5 check passes
+   `--no-index` and reads the matching rule and line from the repository's own
+   `.gitignore` or `.git/info/exclude`. `docs/DISK_HYGIENE.md` §8 and its Chinese
+   translation say what the audit reads.
+
+5. **The gate has one documented unsafe boundary.** `git2::opts::set_search_path`
+   is unsafe in the binding; it is called once, before any repository is opened,
+   inside `configure_libgit2` with the safety argument beside it. Nothing else in
+   the workspace uses `unsafe`. The gate keeps `unsafe_code = "deny"`; the local
+   `#[allow(unsafe_code)]` is the single exception.
+
+6. **Build and licensing follow the linked libraries.** The vendored libgit2 build
+   needs `cmake` and a C compiler on macOS and Windows; the release script checks
+   for `cmake`. libgit2 is GPL-2.0-only with a linking exception, and gix/git2 are
+   MIT OR Apache-2.0; the license texts ship in `public/licenses/` and are listed
+   in `ATTRIBUTION.md`.
+
 **Open**
 
 1. **How to verify the Windows Recycle Bin path**: D16 requires separate verification
@@ -969,7 +1028,7 @@ was checked to fail without the fix:
    pass. What stays open: a secret whose name gives nothing away (`config.json` holding
    an API key).
 5. **The one thing the automated checks cannot reach.** Driving the native folder
-   picker, the system Trash and `git worktree remove` in the packaged app needs a
+   picker, the system Trash and the worktree removal in the packaged app needs a
    human at the keyboard: the checks in this repository can dock the window and
    screenshot it, but not click a button in another process. The Rust integration
    tests cover the executor and `pnpm test:theme` covers rendering, so what is left

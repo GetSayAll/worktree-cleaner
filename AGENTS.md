@@ -24,16 +24,18 @@ when the language changes. `locale.test.ts` fails if a table's keys differ.
   crate `worktree-core`.
 - Core scanning must not depend on any single agent vendor's directory layout.
 - Scanning is read-only by default.
-- Worktrees are removed with `git worktree remove`.
-- Directories are removed through the macOS Trash or the Windows Recycle Bin.
+- Worktrees are removed through Git's worktree API (gix); never with a raw
+  directory delete.
+- Artifact directories are removed through the macOS Trash or the Windows Recycle
+  Bin.
 - Never use permanent-delete commands to clean up a user's directories.
 - Every deletion decision must be backed by a verifiable reason.
 - macOS and Windows behaviour are verified separately.
 - **Every Tauri command that does real work is `async`, and its body runs on
   `spawn_blocking`.** A command without the `async` keyword runs on the main thread,
   which is the one that draws the window: a scan takes over a second (1.16 s for a
-  single-worktree project, 1.34 s for five) and an execution spawns Git and moves
-  directories, so either one freezes the UI for its whole duration. The work is
+  single-worktree project, 1.34 s for five) and an execution removes worktrees and
+  moves directories, so either one freezes the UI for its whole duration. The work is
   blocking by nature, so it does not belong on an async worker either.
 
 ## Where a change belongs
@@ -69,8 +71,10 @@ What that fails on is declared in `[workspace.lints]` in the root `Cargo.toml`:
   the build.
 - the rustc `unused` group — **denied**. A leftover variable or import fails the build
   rather than being scrolled past.
-- `unsafe_code` — **denied**. Nothing here needs it: deletion goes through the Trash
-  and Git, and the platform calls the `trash` crate makes are its business.
+- `unsafe_code` — **denied**. The one exception is the libgit2 configuration
+  search-path call in `git2_runner.rs`: it is `unsafe` in the `git2` API and is
+  isolated in `configure_libgit2` with its safety argument beside it. Nothing else
+  needs it.
 - `clippy::nursery` — a **warning**, on purpose. Those lints are explicitly
   experimental and come and go between Clippy releases; a gate that turns red because
   the toolchain moved is a gate people learn to ignore.

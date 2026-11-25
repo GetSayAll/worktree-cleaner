@@ -32,7 +32,7 @@ guess.
 | Tier | Condition | Command | Evidence for the merge question |
 |---|---|---|---|
 | **A** | `HEAD` is an ancestor of the default branch | `git merge-base --is-ancestor HEAD origin/<default>` | verifiable |
-| **B** | every local commit's patch is already in the default branch | `git cherry origin/<default> HEAD` prints no `+` line | verifiable |
+| **B** | the files this branch changed hold the same content in the default branch | content check: the branch's touched files, compared with the default branch | verifiable |
 | **C** | every local commit touches only version or build stamps | read `git log --name-only origin/<default>..HEAD` per branch | judgement |
 | **D** | the uncommitted changes are only stamps a build wrote | `git diff --name-only` | judgement |
 
@@ -41,23 +41,20 @@ default branch. It is not a verdict. A worktree still has to pass the other chec
 before it is `Safe`: it is not the main working tree, it is clean, it has no
 untracked files, and nobody touched it inside the activity window.
 
-A and B are verifiable: the answer is a command's exit status or its output, and it
-is either true or it is not. C and D are judgements about whether a diff has value,
+A and B are verifiable: the answer is a Git object comparison, and it is either true
+or it is not. C and D are judgements about whether a diff has value,
 and a judgement must never reach `Safe` on its own — that is D2/D3 read plainly.
 
-**Tier B is two questions, not one.** A matching patch-id proves the patch *was
-applied*, not that it is still there: apply a change, revert it, and the patch-id of
-the applying commit still matches while the default branch no longer holds the code.
-So B also compares content — `git diff <head> <target> -- <the files this branch
-touched>` — and requires the two sides to agree. A revert makes them disagree; the
-patch answer stays `wt.absorbed`, the content answer is
-`wt.absorbed_content_changed` at `Review`, and the overall verdict is `Review`. The
-second reason says "cannot confirm", not "reverted", because a later revert and an
-ordinary edit after the merge look the same to a tree comparison. The comparison only
-covers the branch's own files, so unrelated work on the default branch cannot make it
-fail, and it is strict on purpose: if the default branch changed one of those files
-again after the merge,
-the answer is "cannot confirm", which costs a re-read rather than a silent deletion.
+**Tier B is a content question.** The branch's touched files — the diff from the
+merge base to `HEAD` — are compared with the same paths in the default branch. If the
+two sides hold the same content, the change is there even though its commits are not;
+`wt.absorbed` is `Safe`. If they differ, the answer is `wt.unmerged` at `Review`,
+never `Safe`. A revert and an ordinary edit after a merge look the same to a tree
+comparison, so the reason says "does not hold the same content", not "reverted". The
+comparison only covers the branch's own files, so unrelated work on the default branch
+cannot make it fail, and it is strict on purpose: if the default branch changed one of
+those files again, the answer is "cannot confirm", which costs a re-read rather than a
+silent deletion.
 
 Measured cost of getting this wrong: of 22 branches that survived A and B, **19
 carried real code**. A stamp-only tail is the exception, not the rule. Tier C is
@@ -67,7 +64,7 @@ is not worth encoding as a rule that promotes to `Safe`.
 ## Hard rules
 
 1. **Deleting a worktree is not deleting a branch.** The ref lives in the common Git
-   directory and survives `git worktree remove`. What is lost is the checkout, and
+   directory and survives worktree removal. What is lost is the checkout, and
    with it the build output. Say this out loud before proposing a bulk delete,
    because "389 GB of branches" is what it looks like from the size column.
 2. **A commit on a remote is preserved, but pushed is not the same as merged.**
@@ -112,12 +109,12 @@ that was merged an hour ago still reports unmerged.
 Measured: of 33 branches reported unmerged, **11 were fully absorbed**.
 
 Verified example — `d5e32229 test(membership): avoid same-process file lock
-simulation` is not an ancestor of `origin/main`, yet its patch-id `2d2a550b…`
-matches `70cdbc6 test(membership): avoid same-process file lock simulation (#333)`.
-Tier A calls it unmerged; tier B calls it absorbed; the change is in main.
+simulation` is not an ancestor of `origin/main`, but the files it changed hold the
+same content in main. Tier A calls it unmerged; tier B calls it absorbed; the change
+is in main.
 
-`git cherry` compares patch-ids, which is why B exists and why A alone is not enough
-on any repository that squash-merges.
+The content comparison is why B exists and why A alone is not enough on any
+repository that squash-merges.
 
 ### 4. `main` does not mean the default branch
 
@@ -135,11 +132,11 @@ Always compare against `origin/<default>`. Never against a bare branch name.
 
 ## What the tiers cannot see
 
-- **Applied then reverted.** The patch-id still matches while the default branch no
-  longer contains the change, which is why tier B pairs the patch question with the
-  content comparison above. A branch that was merged and then had its file rewritten
-  afterwards also fails that comparison; it stays `Review` because the content answer
-  is unconfirmed — the cost of never calling the removal safe when the content is not.
+- **Applied then reverted.** The content is no longer in the default branch, so tier
+  B does not call it absorbed; it stays `Review`. A branch that was merged and then
+  had its file rewritten afterwards also fails the comparison, for the same reason:
+  the content answer is unconfirmed, and the cost is a re-read rather than a silent
+  deletion.
 - **A branch pushed nowhere reachable.** Reconciled by requiring the default branch
   to be a real remote-tracking ref; a fork nobody can reach is not covered.
 - **Ignored files that matter.** Credentials and local configuration are usually

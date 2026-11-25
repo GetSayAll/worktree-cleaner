@@ -42,7 +42,7 @@
     "licenseFile": "../LICENSE",
     "homepage": "https://github.com/GetSayAll/worktree-cleaner",
     "shortDescription": "Audit and clean Git worktrees and build artifacts safely",
-    "longDescription": "Worktree Cleaner scans a repository, lists every Git worktree and build artifact directory, and explains item by item why each one can or cannot be deleted. Scanning is read-only; deletions go through git worktree remove and the system Trash or Recycle Bin.",
+    "longDescription": "Worktree Cleaner scans a repository, lists every Git worktree and build artifact directory, and explains item by item why each one can or cannot be deleted. Scanning is read-only; worktrees are removed through Git and build directories go to the system Trash or Recycle Bin.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -54,7 +54,12 @@
       "../LICENSE": "LICENSE",
       "../ATTRIBUTION.md": "ATTRIBUTION.md",
       "../public/fonts/LICENSE-Inter.txt": "LICENSE-Inter.txt",
-      "../public/fonts/LICENSE-JetBrainsMono.txt": "LICENSE-JetBrainsMono.txt"
+      "../public/fonts/LICENSE-JetBrainsMono.txt": "LICENSE-JetBrainsMono.txt",
+      "../public/licenses/LICENSE-libgit2.txt": "LICENSE-libgit2.txt",
+      "../public/licenses/LICENSE-gix-MIT.txt": "LICENSE-gix-MIT.txt",
+      "../public/licenses/LICENSE-gix-APACHE.txt": "LICENSE-gix-APACHE.txt",
+      "../public/licenses/LICENSE-git2-MIT.txt": "LICENSE-git2-MIT.txt",
+      "../public/licenses/LICENSE-git2-APACHE.txt": "LICENSE-git2-APACHE.txt"
     }
   },
   "plugins": {

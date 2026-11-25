@@ -355,16 +355,13 @@ function normaliseScanFailure(error: unknown, path: string): ScanFailure {
     if (typeof code === "string") return error as ScanFailure;
   }
   // A shell that serializes a command error as a string still gets the useful
-  // copy for the two errors a reader can act on. Neither branch prints `detail`.
+  // copy for the errors a reader can act on. No branch prints `detail`.
   const detail = error instanceof Error ? error.message : String(error);
   if (detail.includes("not a Git repository")) {
     return { code: "not_a_git_repository", path, detail };
   }
   if (detail.includes("does not exist")) {
     return { code: "not_found", path };
-  }
-  if (detail.includes("Git was not found")) {
-    return { code: "git_missing" };
   }
   if (detail.includes("git could not be queried") || detail.includes("git command")) {
     return { code: "git_unavailable", detail };

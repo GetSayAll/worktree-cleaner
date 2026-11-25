@@ -20,6 +20,21 @@ is what those two files are for.
 The Chinese UI is not bundled: it renders in PingFang SC on macOS, Microsoft YaHei
 on Windows, and Hiragino Sans GB where neither exists.
 
+## Bundled Git libraries
+
+- **libgit2** — linked through the `git2` crate for repository reads.
+  - GPL-2.0-only with a linking exception — see `public/licenses/LICENSE-libgit2.txt`
+  - https://libgit2.org/
+- **gix** (gitoxide) — the pure-Rust Git implementation used for safe recursive
+  worktree removal.
+  - MIT OR Apache-2.0 — see `public/licenses/LICENSE-gix-MIT.txt` and
+    `public/licenses/LICENSE-gix-APACHE.txt`
+  - https://github.com/GitoxideLabs/gitoxide
+- **git2** — Rust bindings to libgit2.
+  - MIT OR Apache-2.0 — see `public/licenses/LICENSE-git2-MIT.txt` and
+    `public/licenses/LICENSE-git2-APACHE.txt`
+  - https://github.com/rust-lang/git2-rs
+
 ## Tech-stack references
 
 - GetSayAll/remote-mic-app-windows

@@ -51,7 +51,7 @@ done
 die() { echo "release: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
 
-for command_name in cargo codesign ditto git node pnpm shasum spctl xcrun; do
+for command_name in cargo cmake codesign ditto git node pnpm shasum spctl xcrun; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is unavailable: $command_name"
 done
 

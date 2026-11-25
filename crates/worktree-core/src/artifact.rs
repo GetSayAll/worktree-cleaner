@@ -642,16 +642,20 @@ fn check_artifact_with_credential_limit(
                     reasons.push(Reason::blocking(
                         ReasonCode::AfGitTracked,
                         "the directory contains files committed to the repository",
-                        format!("git ls-files matches {tracked} files, so it is not a pure build artifact"),
+                        format!(
+                            "the index tracks {tracked} files, so it is not a pure build artifact"
+                        ),
                     ));
                 }
             }
             Ok(output) => reasons.push(cannot_verify(&format!(
-                "git ls-files exited with {:?}: {}",
+                "the tracked-file check exited with {:?}: {}",
                 output.code,
                 output.stderr.trim()
             ))),
-            Err(error) => reasons.push(cannot_verify(&format!("git ls-files failed: {error}"))),
+            Err(error) => reasons.push(cannot_verify(&format!(
+                "the tracked-file check failed: {error}"
+            ))),
         }
     }
 
@@ -661,8 +665,9 @@ fn check_artifact_with_credential_limit(
         match runner.run(root, &["check-ignore", "-v", "--", &dir_text]) {
             Ok(output) if output.success() => {
                 git_ignored = Some(true);
-                let evidence = parse_ignore_source(&output.stdout)
-                    .unwrap_or_else(|| "git check-ignore reports it as ignored".to_string());
+                let evidence = parse_ignore_source(&output.stdout).unwrap_or_else(|| {
+                    "the repository's ignore rules report it as ignored".to_string()
+                });
                 reasons.push(Reason::safe(
                     ReasonCode::AfGitIgnored,
                     "ignored by .gitignore",
@@ -672,11 +677,11 @@ fn check_artifact_with_credential_limit(
             // Exit 1 means "not ignored", which is a real answer, not a failure.
             Ok(output) if output.code == Some(1) => git_ignored = Some(false),
             Ok(output) => reasons.push(cannot_verify(&format!(
-                "git check-ignore exited with {:?}: {}",
+                "the ignore check exited with {:?}: {}",
                 output.code,
                 output.stderr.trim()
             ))),
-            Err(error) => reasons.push(cannot_verify(&format!("git check-ignore failed: {error}"))),
+            Err(error) => reasons.push(cannot_verify(&format!("the ignore check failed: {error}"))),
         }
     }
 
@@ -935,7 +940,7 @@ fn credential_in_within(dir: &Path, limit: usize, budget: Duration) -> Credentia
 /// The worktree-level credential check: the same walk, but past the build and
 /// cache directories instead of through them.
 ///
-/// `git worktree remove` deletes ignored files, so a `.env` at the root of an
+/// worktree removal deletes ignored files, so a `.env` at the root of an
 /// otherwise clean worktree is exactly the file the Safe verdict must not miss.
 /// Walking `node_modules` or `target` here would make every scan pay for the
 /// dependency tree twice; those directories are artifact candidates and the
@@ -1078,7 +1083,7 @@ fn looks_like_credential(name: &str) -> bool {
     lower.starts_with("service-account") && extension == Some("json")
 }
 
-/// Parses `git check-ignore -v` output (`<source>:<line>:<pattern>\t<path>`) into
+/// Parses the ignore check output (`<source>:<line>:<pattern>\t<path>`) into
 /// the `.gitignore:12` form the UI shows as evidence.
 fn parse_ignore_source(stdout: &str) -> Option<String> {
     let line = stdout.lines().next()?;

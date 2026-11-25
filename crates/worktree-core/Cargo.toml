@@ -10,6 +10,17 @@ workspace = true
 
 [dependencies]
 fs4 = "1.1.0"
+# The Git transport is libgit2, linked into the app. It is GPL-2.0-only with a
+# linking exception, so it can be used by this GPL-3.0-only crate and by a
+# dual-licensed Mac App Store build. Network transports are not used and stay
+# disabled; the vendored build keeps the binary self-contained.
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+# libgit2 has no worktree-removal API: it can add, list, lock and prune, but the
+# CLI's `worktree remove` is not exposed. gix (gitoxide) is the in-process Git
+# implementation that does implement safe recursive worktree removal. It is
+# MIT/Apache-2.0 and pure Rust, so this crate keeps its linking-exception story
+# and the app keeps its self-contained build.
+gix = { version = "0.91", default-features = false, features = ["worktree-mutation", "sha1", "sha256"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

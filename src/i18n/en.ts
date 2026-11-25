@@ -126,7 +126,9 @@ export const en = {
       whitelisted: "matches a whitelist rule",
       prunable: "the working directory no longer exists",
       merged: "merged into the default branch",
-      absorbed: "every commit has an equivalent patch in the default branch",
+      absorbed: "the changes this branch made are already in the default branch",
+      // No longer produced: absorption is the content answer, and a difference is
+      // `unmerged`. Kept so audit logs written before the change still render.
       absorbed_content_changed:
         "the change is in the default branch, but the files it touched changed afterwards",
       clean: "clean working tree"
@@ -328,8 +330,6 @@ export const en = {
         `${path} is not a Git repository, and it is not inside one. Choose the project folder that contains .git, or run git init first.`,
       gitUnavailable:
         "Git information could not be read. Check that the folder is accessible. The operation log has the technical detail.",
-      gitMissing:
-        "Git is not installed, or this app cannot find it. Install Git or add it to PATH, then try again.",
       unknown:
         "The scan did not finish. Try again; the operation log has the technical detail."
     }
@@ -836,7 +836,7 @@ export const en = {
       spaceFreedSubUnknown: (n: number) =>
         `At least the measured sizes · ${n} items had no measurable size`,
       // A count that mixes worktrees and directories cannot be checked against the
-      // Trash: `git worktree remove` deletes in place and never goes through it.
+      // Trash: worktree removal deletes in place and never goes through it.
       // Saying so here is what stops "4 succeeded, 1 in the Trash" looking wrong.
       succeeded: "Handled",
       succeededSub: (trashed: number) =>

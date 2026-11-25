@@ -5,7 +5,18 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **Git is built in.** The app reads repositories through libgit2 and removes
+  worktrees through gix; it no longer spawns `git` or needs the Xcode Command Line
+  Tools on macOS or Git for Windows on Windows. System and global Git
+  configuration is ignored, so a repository's verdict does not depend on the
+  machine that scanned it.
+- **Absorption is a content check.** A branch is `wt.absorbed` when the files it
+  changed relative to the merge base hold the same content in the default branch;
+  a difference is `wt.unmerged` at Review. The patch-id answer and its
+  `wt.absorbed_content_changed` companion are retained only so older audit logs
+  still render.
 
 ## [0.2.1] — 2026-11-21
 

@@ -9,7 +9,7 @@
 //! `spawn_blocking`.** A command without the `async` keyword runs on the main
 //! thread, and the main thread is the one that draws the window: a scan of a real
 //! repository takes over a second — measured at 1.16 s for a single-worktree
-//! project on this machine — and an execution spawns Git and moves directories, so
+//! project on this machine — and an execution removes worktrees and moves directories, so
 //! either one freezes the UI for its whole duration. The work itself is blocking by
 //! nature (it starts processes and walks the filesystem), so it belongs on the
 //! blocking pool rather than on an async worker.
@@ -38,7 +38,6 @@ enum ScanFailure {
     NotFound { path: String },
     NotAGitRepository { path: String, detail: String },
     GitUnavailable { detail: String },
-    GitMissing,
     TaskFailed { detail: String },
 }
 
@@ -52,7 +51,6 @@ impl ScanFailure {
                 detail,
             },
             ScanError::GitFailed(detail) => Self::GitUnavailable { detail },
-            ScanError::GitMissing => Self::GitMissing,
         }
     }
 }

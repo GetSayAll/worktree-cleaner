@@ -35,7 +35,7 @@ pub enum ReasonCode {
     WtDirty,
     /// **No longer emitted.** The old code meant "ahead > 0" at `Unsafe`: the
     /// commits existed only on the branch and the verdict treated that as a reason
-    /// the directory could not go. `git worktree remove` keeps the branch ref, so
+    /// the directory could not go. Worktree removal keeps the branch ref, so
     /// that was a branch fact, not a worktree fact. The new code is
     /// [`Self::WtUnpushedBranch`]; this one stays for audit logs written before the
     /// change and is never reused for another meaning.
@@ -52,36 +52,27 @@ pub enum ReasonCode {
     WtNoUpstream,
     #[serde(rename = "wt.unmerged")]
     WtUnmerged,
-    /// Every commit on this branch has an equivalent patch in the default branch,
-    /// although the commits themselves are not ancestors of it.
+    /// The files this branch changed relative to the merge base hold the same
+    /// content in the default branch, although the commits are not ancestors of it.
     ///
     /// This is the squash-merge answer. A branch merged through GitHub's default
     /// strategy is rewritten into one new commit, so `merge-base --is-ancestor`
-    /// says "not merged" about work that is entirely in the default branch —
-    /// measured on one machine at 11 of 33 branches reported unmerged. The check is
-    /// `git cherry`, which compares patch-ids rather than ancestry.
-    ///
-    /// It is `Safe` because it is a command's answer, not a judgement about a diff.
-    /// The code keeps its original meaning: the patch-id is upstream. A commit
-    /// applied and then reverted still matches its patch-id, so the content question
-    /// is a separate reason ([`Self::WtAbsorbedContentChanged`]) emitted beside this
-    /// one; that reason is `Review` and is what keeps the verdict from `Safe`.
+    /// says "not merged" about work that is entirely in the default branch. The
+    /// check is a tree comparison over the files the branch touched, which is a
+    /// content answer rather than a patch-id answer; a difference is
+    /// [`Self::WtUnmerged`] at `Review`, never `Safe` (D3).
     #[serde(rename = "wt.absorbed")]
     WtAbsorbed,
-    /// The patch is in the default branch, but the files it touched no longer hold
-    /// the content this branch produced.
-    ///
-    /// Emitted **beside** [`Self::WtAbsorbed`], not instead of it: the patch answer
-    /// and the content answer are two facts. A later revert and an ordinary edit
-    /// after the merge look the same to the comparison, so this reason says "cannot
-    /// confirm" rather than asserting a revert. It is `Review`, never `Safe`, and
-    /// its presence is what keeps the overall verdict out of `Safe`.
+    /// **No longer emitted.** The old code meant "the patch-id is upstream, but the
+    /// files it touched changed afterwards". Absorption is now the content answer:
+    /// a difference is [`Self::WtUnmerged`] at `Review`. This code stays for audit
+    /// logs written before the change and is never reused for another meaning.
     #[serde(rename = "wt.absorbed_content_changed")]
     WtAbsorbedContentChanged,
     #[serde(rename = "wt.untracked")]
     WtUntracked,
     /// A credential-looking file sits in the worktree outside the build and cache
-    /// directories. `git worktree remove` deletes ignored files too, so this is the
+    /// directories. Worktree removal deletes ignored files too, so this is the
     /// worktree-level counterpart of [`Self::AfCredentials`].
     #[serde(rename = "wt.credentials")]
     WtCredentials,

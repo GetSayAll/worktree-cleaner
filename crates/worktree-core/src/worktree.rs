@@ -12,7 +12,7 @@
 //!
 //! One datum is deliberately **not** a reason: the stash count. `refs/stash` lives in
 //! the common Git directory, so every linked worktree reports the same list, and
-//! `git worktree remove` never touches it. A stash is therefore a fact about the
+//! worktree removal never touches it. A stash is therefore a fact about the
 //! repository, not about the worktree being judged: reporting it per worktree
 //! downgraded every clean worktree of a repository holding a single stash (measured
 //! on a 109-worktree repository: 48 of 48 clean-and-merged worktrees). The count is
@@ -511,7 +511,7 @@ pub fn check_worktree(
             }
         }
 
-        // The worktree itself is deleted by `git worktree remove`, ignored files
+        // The worktree itself is deleted by worktree removal, ignored files
         // included, so the credential check has to run at the root. It is limited
         // to a worktree with no tracked changes: a dirty worktree is already
         // blocked, and walking it would only add cost. Untracked files do not stop
@@ -653,51 +653,30 @@ pub fn check_worktree(
                     Some(true)
                 }
                 Ok((false, evidence)) => {
-                    // Not an ancestor, which is what a squash merge looks like: the
-                    // change is in the default branch but as a different commit. Ask
-                    // the patch question before falling back to "unmerged". The three
-                    // answers are distinct: the patch is there and so is the content
-                    // (`wt.absorbed`, Safe); the patch is there but the content
-                    // changed (`wt.absorbed` plus `wt.absorbed_content_changed`,
-                    // Review); or at least one commit has no equivalent patch
-                    // (`wt.unmerged`, Review). A patch check that could not run is not
-                    // an upgrade — it must never make a worktree look safer than it
-                    // did (D3).
-                    match commits_absorbed(runner, repo, head, default_branch) {
-                        Ok(AbsorbedAnswer::Absorbed(absorbed_evidence)) => {
+                    // Not an ancestor is what a squash merge looks like: the change
+                    // is in the default branch as different commits. The content is
+                    // the evidence: the files this branch changed relative to the
+                    // merge base must hold the same content in the default branch.
+                    // This is deliberately conservative — a difference is Review,
+                    // never "absorbed" — and does not depend on patch-id, which
+                    // libgit2 cannot reproduce without a second implementation.
+                    match absorbed_content(runner, repo, head, default_branch) {
+                        Ok((true, why)) => {
                             absorbed = true;
                             reasons.push(Reason::safe(
                                 ReasonCode::WtAbsorbed,
-                                "every commit has an equivalent patch in the default branch",
-                                absorbed_evidence,
+                                "the changes this branch made are already in the default branch",
+                                why,
                             ));
                         }
-                        // The patch-id matched, but the files it touched no longer
-                        // hold the content this branch produced. The patch answer
-                        // keeps its original meaning and stays Safe; the content
-                        // answer is a second reason at Review, so the overall
-                        // verdict cannot be Safe. A later revert and an ordinary
-                        // edit after the merge look the same here, so the second
-                        // reason says what was observed rather than claiming a
-                        // revert.
-                        Ok(AbsorbedAnswer::ContentChanged(why)) => {
-                            absorbed = true;
-                            reasons.push(Reason::safe(
-                                ReasonCode::WtAbsorbed,
-                                "every commit has an equivalent patch in the default branch",
-                                why.clone(),
-                            ));
-                            reasons.push(Reason::review(
-                                ReasonCode::WtAbsorbedContentChanged,
-                                "the patch is in the default branch, but the content changed afterwards",
-                                format!("{evidence}; {why}"),
-                            ));
-                        }
-                        Ok(AbsorbedAnswer::NotAbsorbed(why)) => reasons.push(Reason::review(
+                        Ok((false, why)) => reasons.push(Reason::review(
                             ReasonCode::WtUnmerged,
                             "not merged into the default branch",
                             format!("{evidence}; {why}"),
                         )),
+                        // A content check that could not run is not an upgrade — it
+                        // must never make a worktree look safer than the ancestry
+                        // answer alone did (D3).
                         Err(_) => reasons.push(Reason::review(
                             ReasonCode::WtUnmerged,
                             "not merged into the default branch",
@@ -722,6 +701,9 @@ pub fn check_worktree(
             ));
             None
         }
+        // A prunable worktree has no checkout left to lose; the merge question is
+        // informational and its missing HEAD must not downgrade `wt.prunable`.
+        (_, None) if is_prunable => None,
         (_, None) => {
             reasons.push(Reason::review(
                 ReasonCode::WtCannotVerify,
@@ -915,42 +897,25 @@ fn merge_base_is_ancestor(
     }))
 }
 
-/// What `git cherry` plus the content comparison established.
-enum AbsorbedAnswer {
-    /// Every commit has an equivalent patch, and the default branch still holds
-    /// the content. This is the only answer that may be `Safe`.
-    Absorbed(String),
-    /// Every commit has an equivalent patch, but the files it touched no longer
-    /// hold the content this branch produced. A later revert and an ordinary edit
-    /// after the merge look the same; the answer is `Review`, not "unmerged".
-    ContentChanged(String),
-    /// At least one commit has no equivalent patch upstream.
-    NotAbsorbed(String),
-}
-
-/// Asks `git cherry` whether every commit on this branch already has an equivalent
-/// patch in the default branch.
+/// Checks whether the files this branch changed relative to the merge base hold
+/// the same content in the default branch.
 ///
-/// `git cherry <upstream> <head>` prints one line per commit in
-/// `<upstream>..<head>`: `-` when an equivalent patch is already upstream, `+` when
-/// it is not. No `+` line means the work is there even though the commits are not
-/// ancestors of it, which is what a squash merge produces and what
-/// `merge-base --is-ancestor` cannot see.
+/// This is the whole absorption answer now. It is deliberately conservative: a
+/// difference is `Review` (`wt.unmerged`), never `Safe`, and a check that could not
+/// run does not upgrade the ancestry answer (D3). It does not depend on patch-id;
+/// a patch is one way the content can arrive, but the content is the fact that
+/// matters for deleting the checkout.
 ///
 /// The candidates mirror [`merge_base_is_ancestor`] — `origin/<name>` first, then
 /// the bare name — so both halves of the merge answer are asked against the same
-/// ref. A name that does not resolve exits 128 and the next one is tried; a
-/// transport error is returned as-is, because another name cannot fix it.
-///
-/// A patch-id survives a revert, so the patch answer is paired with a content
-/// answer. When the content differs, the result is [`AbsorbedAnswer::ContentChanged`]
-/// rather than "absorbed": the patch is upstream, but its effect is not confirmed.
-fn commits_absorbed(
+/// ref. A name that does not resolve is tried next; a transport error is returned
+/// as-is, because another name cannot fix it.
+fn absorbed_content(
     runner: &dyn GitRunner,
     repo: &Path,
     head: &str,
     default_branch: &str,
-) -> Result<AbsorbedAnswer, GitError> {
+) -> Result<(bool, String), GitError> {
     let mut candidates = Vec::with_capacity(2);
     if !default_branch.starts_with("origin/") {
         candidates.push(format!("origin/{default_branch}"));
@@ -958,51 +923,17 @@ fn commits_absorbed(
     candidates.push(default_branch.to_string());
     let mut last_error: Option<GitError> = None;
     for candidate in &candidates {
-        let args = ["cherry", "--", candidate.as_str(), head];
-        match runner.run(repo, &args) {
-            Ok(output) if output.code == Some(0) => {
-                let mut unique = 0_usize;
-                let mut absorbed = 0_usize;
-                for line in output.stdout.lines() {
-                    match line.chars().next() {
-                        Some('+') => unique += 1,
-                        Some('-') => absorbed += 1,
-                        _ => {}
-                    }
-                }
-                if unique > 0 {
-                    return Ok(AbsorbedAnswer::NotAbsorbed(format!(
-                        "{unique} commit(s) not in {candidate}"
-                    )));
-                }
-                // A matching patch-id says the patch was applied, not that it is still
-                // there: a later revert leaves the patch-id matching and the code gone.
-                let (present, detail) = content_still_present(runner, repo, head, candidate)?;
-                let subject = if absorbed == 0 {
-                    format!("no commit of its own beyond {candidate}")
-                } else {
-                    format!("{absorbed} commit(s) have an equivalent patch in {candidate}")
-                };
-                return Ok(if present {
-                    AbsorbedAnswer::Absorbed(format!("{subject}, and {detail}"))
-                } else {
-                    AbsorbedAnswer::ContentChanged(format!("{subject}, but {detail}"))
-                });
+        match content_still_present(runner, repo, head, candidate) {
+            Ok((present, detail)) => {
+                return Ok((present, format!("{detail} in {candidate}")));
             }
-            Ok(output) => {
-                last_error = Some(GitError::Failed {
-                    command: display_command(repo, &args),
-                    code: output.code,
-                    stderr: output.stderr.clone(),
-                });
-            }
-            Err(error) => return Err(error),
+            Err(error) => last_error = Some(error),
         }
     }
     Err(last_error.unwrap_or_else(|| GitError::Failed {
-        command: display_command(repo, &["cherry", "--", head]),
+        command: display_command(repo, &["diff", "--name-only", head]),
         code: None,
-        stderr: "no cherry candidate resolved".to_string(),
+        stderr: "no default-branch candidate resolved".to_string(),
     }))
 }
 
@@ -1013,24 +944,18 @@ fn commits_absorbed(
 /// hundreds is not one this check should sign off on without reading it.
 const MAX_CONFIRM_PATHS: usize = 200;
 
-/// Confirms that the default branch still holds the content this branch produces.
+/// Confirms that the default branch holds the content this branch produces.
 ///
-/// `git cherry` compares patch-ids, and a patch-id survives a revert: the commit that
-/// applied the change still matches even after another commit undid it. Matching the
-/// patch is therefore not the same as the change being there now — the hole the
-/// triage document names and this closes.
-///
-/// The test is a tree comparison, not a history one. `git diff <head> <target> -- <the
+/// The test is a tree comparison, not a history one. `diff <head> <target> -- <the
 /// files this branch touched>` asks whether the two sides hold the same content for
 /// exactly those files; the file list comes from `<target>...<head>`, which is the
-/// branch's own diff against the merge base. A revert or an ordinary edit after
-/// the merge makes the two sides differ, so the branch stays `Review`. Because the
-/// comparison covers only the files the branch touched, unrelated work on the
-/// default branch cannot make it fail.
+/// branch's own diff against the merge base. A revert, an ordinary edit, or a branch
+/// that was never applied makes the two sides differ, so the branch stays `Review`.
+/// Because the comparison covers only the files the branch touched, unrelated work
+/// on the default branch cannot make it fail.
 ///
-/// The answer is "cannot confirm", not "reverted": whole-file equality cannot tell
-/// the two apart. The caller reports that distinction as
-/// `wt.absorbed_content_changed`.
+/// The answer is "the content is not the same", not "reverted": whole-file equality
+/// cannot tell the two apart.
 fn content_still_present(
     runner: &dyn GitRunner,
     repo: &Path,
@@ -1076,7 +1001,7 @@ fn content_still_present(
         Some(1) => Ok((
             false,
             format!(
-                "{} touched file(s) changed after the merge, so the content this branch produced is no longer identical",
+                "{} touched file(s) do not hold the same content in the default branch",
                 paths.len()
             ),
         )),
@@ -1376,14 +1301,23 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 code: Some(1),
             }),
         ));
-        rules.push(canned(
-            &[
-                "cherry",
-                "--",
-                "origin/main",
-                "19402c62a2bdb19e2271df95ecfc1a272aad4bf6",
+        let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
+        let range = format!("origin/main...{head}");
+        rules.push(canned(&["diff", "--name-only", &range, "--"], "a.txt\n"));
+        rules.push((
+            vec![
+                "diff".to_string(),
+                "--quiet".to_string(),
+                head.to_string(),
+                "origin/main".to_string(),
+                "--".to_string(),
+                "a.txt".to_string(),
             ],
-            "+ 2222222222222222222222222222222222222222\n",
+            Canned::Out(GitOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code: Some(1),
+            }),
         ));
         rules
     }
@@ -1723,7 +1657,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         );
 
         // Merged: the upstream being behind says nothing about this directory.
-        // `git worktree remove` keeps the branch, and the work is in the default
+        // worktree removal keeps the branch, and the work is in the default
         // branch already, so the reason must not appear at all.
         let runner = FakeGitRunner::new(calm_rules(AHEAD_STATUS));
         let record = check_worktree(
@@ -1912,10 +1846,6 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 code: Some(1),
             }),
         ));
-        rules.push(canned(
-            &["cherry", "--", "origin/release/2.0", head],
-            "- 1111111111111111111111111111111111111111\n",
-        ));
         let range = format!("origin/release/2.0...{head}");
         rules.push(canned(&["diff", "--name-only", &range, "--"], "a.txt\n"));
         rules.push(canned(
@@ -1929,11 +1859,16 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         assert!(has(&record, ReasonCode::WtAbsorbed));
         assert!(!has(&record, ReasonCode::WtUnmerged));
         assert!(
-            runner.called(&["cherry", "--", "origin/release/2.0", head]),
+            runner.called(&["diff", "--name-only", &range, "--"]),
             "the remote-qualified name must be asked"
         );
         assert!(
-            !runner.called(&["cherry", "--", "release/2.0", head]),
+            !runner.called(&[
+                "diff",
+                "--name-only",
+                &format!("release/2.0...{head}"),
+                "--"
+            ]),
             "the bare name must not be asked before the remote one"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -1941,9 +1876,8 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
 
     #[test]
     fn a_squash_merged_branch_is_absorbed_rather_than_unmerged() {
-        // `git cherry` printing only `-` lines means every commit has an equivalent
-        // patch upstream: the change is in the default branch under a rewritten
-        // commit, which is what GitHub's default merge strategy produces and what
+        // The files this branch changed hold the same content in the default branch:
+        // that is what GitHub's default merge strategy leaves behind, and what
         // `merge-base --is-ancestor` reports as "not merged".
         let dir = temp_dir("absorbed");
         backdate(&dir, 30 * 86_400);
@@ -1964,12 +1898,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 code: Some(1),
             }),
         ));
-        rules.push(canned(
-            &["cherry", "--", "origin/main", head],
-            "- 1111111111111111111111111111111111111111\n- 2222222222222222222222222222222222222222\n",
-        ));
-        // The patch is in the default branch, and so is the content: the confirmation
-        // pass has to agree before the branch may be called absorbed.
+        // The content is in the default branch: that is the absorption answer.
         let range = format!("origin/main...{head}");
         rules.push(canned(&["diff", "--name-only", &range, "--"], "a.txt\n"));
         rules.push(canned(
@@ -2001,22 +1930,20 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             .find(|reason| reason.code == ReasonCode::WtAbsorbed)
             .expect("absorbed reason");
         assert!(
-            reason.evidence.contains("2 commit(s)") && reason.evidence.contains("origin/main"),
-            "the evidence must count the patches and name the ref: {}",
+            reason.evidence.contains("hold the same content")
+                && reason.evidence.contains("origin/main"),
+            "the evidence must name the content check and the ref: {}",
             reason.evidence
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn a_content_change_after_the_merge_is_review_but_the_patch_is_absorbed() {
-        // The hole that `git cherry` alone leaves open: the commit that applied the
-        // change still matches its patch-id after the content changed, so the patch
-        // answer is still "absorbed" while the default branch no longer holds the
-        // same content. The patch reason keeps its original meaning; a second reason
-        // at Review carries the content answer and keeps the verdict out of Safe. It
-        // must not claim a revert: a later revert and an ordinary edit look the same
-        // to a tree comparison.
+    fn a_content_change_after_the_merge_is_review() {
+        // The content check is the whole absorption answer: the files this branch
+        // changed do not hold the same content in the default branch, so the branch
+        // stays unmerged at Review. It must not claim a revert: a later revert and
+        // an ordinary edit look the same to a tree comparison.
         let dir = temp_dir("absorbed-then-changed");
         backdate(&dir, 30 * 86_400);
         let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
@@ -2035,10 +1962,6 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 stderr: String::new(),
                 code: Some(1),
             }),
-        ));
-        rules.push(canned(
-            &["cherry", "--", "origin/main", head],
-            "- 1111111111111111111111111111111111111111\n",
         ));
         let range = format!("origin/main...{head}");
         rules.push(canned(&["diff", "--name-only", &range, "--"], "a.txt\n"));
@@ -2067,26 +1990,11 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             &default_options(),
         );
         assert_eq!(record.merged_into_default, Some(false));
-        assert!(
-            record.absorbed_into_default,
-            "the patch-id is upstream; the content answer is separate"
-        );
-        assert!(has(&record, ReasonCode::WtAbsorbed));
-        assert!(has(&record, ReasonCode::WtAbsorbedContentChanged));
-        assert!(!has(&record, ReasonCode::WtUnmerged));
+        assert!(!record.absorbed_into_default);
+        assert!(!has(&record, ReasonCode::WtAbsorbed));
+        assert!(!has(&record, ReasonCode::WtAbsorbedContentChanged));
+        assert!(has(&record, ReasonCode::WtUnmerged));
         assert_eq!(record.safety.status, SafetyStatus::Review);
-        let reason = record
-            .safety
-            .reasons
-            .iter()
-            .find(|reason| reason.code == ReasonCode::WtAbsorbedContentChanged)
-            .expect("content-changed reason");
-        assert!(
-            reason.evidence.contains("equivalent patch")
-                && reason.evidence.contains("changed after the merge"),
-            "the evidence must show both halves: {}",
-            reason.evidence
-        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2113,10 +2021,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
                 code: Some(1),
             }),
         ));
-        rules.push(canned(
-            &["cherry", "--", "origin/main", head],
-            "- 1111111111111111111111111111111111111111\n+ 3333333333333333333333333333333333333333\n",
-        ));
+        // The content differs in the default branch: the branch is not absorbed.
         let runner = FakeGitRunner::new(rules);
         let record = check_worktree(
             &runner,
@@ -2134,10 +2039,10 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
-    fn a_failing_patch_check_never_upgrades_a_branch_to_absorbed() {
-        // `git cherry` failing answers nothing, and an unanswerable check must not
-        // make a worktree look safer than the ancestry answer alone did (D3).
-        let dir = temp_dir("cherry-failed");
+    fn a_failing_content_check_never_upgrades_a_branch_to_absorbed() {
+        // The content check failing answers nothing, and an unanswerable check must
+        // not make a worktree look safer than the ancestry answer alone did (D3).
+        let dir = temp_dir("content-check-failed");
         backdate(&dir, 30 * 86_400);
         let head = "19402c62a2bdb19e2271df95ecfc1a272aad4bf6";
         let mut rules = calm_rules(CLEAN_STATUS);
@@ -2158,10 +2063,10 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         ));
         rules.push((
             vec![
-                "cherry".to_string(),
+                "diff".to_string(),
+                "--name-only".to_string(),
+                format!("origin/main...{head}"),
                 "--".to_string(),
-                "origin/main".to_string(),
-                head.to_string(),
             ],
             Canned::Failed {
                 code: Some(128),
@@ -2275,7 +2180,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         // so every linked worktree answered with the same list. A repository holding a
         // single stash therefore downgraded *all* of its clean worktrees to Review —
         // 48 of 48 clean-and-merged worktrees in a 109-worktree repository — even
-        // though `git worktree remove` never touches a stash. The count is now measured
+        // though worktree removal never touches a stash. The count is now measured
         // once per scan and carried as a fact: it must not reach the reason list, and no
         // per-worktree stash command may run.
         let dir = temp_dir("stash");
@@ -3362,7 +3267,7 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
 
     #[test]
     fn a_credential_in_the_worktree_blocks_removal() {
-        // `git worktree remove` deletes ignored files, so a `.env` at the root of
+        // worktree removal deletes ignored files, so a `.env` at the root of
         // an otherwise clean worktree is exactly the file the Safe verdict must
         // not miss. The artifact channel had `af.credentials`; this is the
         // worktree-level counterpart.

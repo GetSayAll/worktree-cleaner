@@ -1,6 +1,6 @@
 # Worktree Cleaner Product Plan
 
-A cross-agent Git worktree and build-artifact safety audit tool. Read-only scanning by default; before deletion it gives verifiable reasons. Artifact directories go through the system Trash; worktrees are permanently removed with `git worktree remove`.
+A cross-agent Git worktree and build-artifact safety audit tool. Read-only scanning by default; before deletion it gives verifiable reasons. Artifact directories go through the system Trash; worktrees are permanently removed through Git's worktree API.
 
 Platforms: macOS, Windows. Tech: Vue 3 + Tauri 2 + Rust (worktree-core).
 
@@ -20,7 +20,7 @@ Platforms: macOS, Windows. Tech: Vue 3 + Tauri 2 + Rust (worktree-core).
 
 - A deletion decision must rest on a verifiable piece of evidence (command output, path, count), not "looks like garbage."
 - If evidence can't be obtained, treat it as "unknown", and unknown is never judged safe to delete.
-- Never permanently delete artifact directory contents; artifact directories go to the system Trash. Worktrees are permanently removed with `git worktree remove`, and the plan and result must say so before and after execution.
+- Never permanently delete artifact directory contents; artifact directories go to the system Trash. Worktrees are permanently removed through Git's worktree API, and the plan and result must say so before and after execution.
 - The main working tree can never be deleted.
 
 **Target users**: intermediate and advanced developers who use 2 or more AI coding agents at the same time; their own machines, with sufficient local permissions, and no enterprise centralized control.
@@ -58,7 +58,7 @@ Before a scan, only "Welcome" in the sidebar is available; data pages appear onl
 
 - Path input field + "Choose folder" (Tauri dialog plugin); supports dragging a folder into the window.
 - "Recent projects" card list: path, last scan time, summary of the last result (N items cleanable / X releasable), three-level dots.
-- Three capability description cards: read-only scan, verifiable reasons, and the two deletion paths (artifact directories through the Trash, worktrees through `git worktree remove`).
+- Three capability description cards: read-only scan, verifiable reasons, and the two deletion paths (artifact directories through the Trash, worktrees through Git's worktree API).
 - Default behavior on first use: automatically list repositories under common directories such as `~/MySrc`, `~/dev`, `~/Projects`, `~/Code`, as a fallback for "Recent projects".
 - An explicit read-only promise: the scan phase writes no files.
 
@@ -85,9 +85,9 @@ Table columns: checkbox / branch / status (clean · dirty N · locked) / Agent /
 Expanded detail panel:
 
 - Full path, short HEAD SHA, whether detached.
-- Relationship to upstream: ahead / behind; when there is no upstream, explicitly write "no upstream branch" rather than leaving it blank. Being ahead of the upstream is a **branch** fact: `git worktree remove` keeps the ref, so it is shown as information and only adds `wt.unpushed_branch` at `Review` when the work is not already in the default branch.
+- Relationship to upstream: ahead / behind; when there is no upstream, explicitly write "no upstream branch" rather than leaving it blank. Being ahead of the upstream is a **branch** fact: worktree removal keeps the ref, so it is shown as information and only adds `wt.unpushed_branch` at `Review` when the work is not already in the default branch.
 - Whether merged into the default branch (the default branch name is displayed and can be changed).
-- stash count (a **repository** fact, shown for information and never a reason — `refs/stash` is shared by every worktree and `git worktree remove` does not touch it), untracked file count.
+- stash count (a **repository** fact, shown for information and never a reason — `refs/stash` is shared by every worktree and worktree removal does not touch it), untracked file count.
 - The inferred owning agent (identify `codex` / `claude` / `cursor` / `aider` / `workbuddy` by path features; when the path has no marker, use the branch name as a fallback; show "unknown" only when neither has a marker). The path is the stronger signal; the branch is a naming convention. This label is informational and never changes a safety verdict.
 - **Reason list**: one line per reason; green is positive evidence (merged / clean), amber and red are risk items, each followed by its evidence text.
 
@@ -109,7 +109,7 @@ Split "what will be done" into two channels shown separately, each landing on a 
 
 **Channel A: remove worktrees**
 
-- Each entry shows: path, branch, the command to be executed (`git worktree remove <path>`).
+- Each entry shows: path, branch, and the equivalent Git operation (`git worktree remove <path>`; the app performs it in-process through Git's worktree API).
 - Entries that need `--force` (untracked files present) are marked separately, and the **list of untracked files that will be force-deleted** is listed line by line — this is what users most need to see.
 - Lost worktrees (directory no longer exists) go through `git worktree prune`, with a note that only metadata is cleaned up and no files are touched.
 - Undeletable entries do not appear here, but the footer shows "N undeletable items automatically excluded, view".
@@ -156,7 +156,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 - **Scan scope**: additional scan paths (one per line), maximum scan depth, per-directory timeout (default 300 s), whole-scan budget.
 - **Protection rules**: whitelist paths (matched directories are never deleted under any circumstances), protected branch names (the default branch is auto-detected and displayed by default), agent directories to protect.
 - **Decision thresholds**: activity days (default 3), artifact display size threshold (default 10 MB), whether "untracked files" count as unsafe (counts by default).
-- **Deletion method**: artifact directories use the system Trash (default and not changeable; no bypass switch). Worktrees use `git worktree remove` and are permanently deleted; the UI must state this before execution and on the result page.
+- **Deletion method**: artifact directories use the system Trash (default and not changeable; no bypass switch). Worktrees are permanently deleted through Git's worktree API; the UI must state this before execution and on the result page.
 - Appearance: follow system / light / dark.
 - Language: follow system / English / 中文. English is the source locale; the interface follows the system language by default and can be switched manually.
 
@@ -165,7 +165,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 Every other page answers "what can I remove now". This one answers "why did it get this bad, and what makes sure it does not happen again". It is `docs/DISK_HYGIENE.md` made checkable from inside a repository: one row per rule, one finding per broken instance, and the wiring that keeps the rule true afterwards.
 
 - **Rule status**: all 22 rules with one of four states — met, worth fixing, broken, not checked. The count of met rules is the page's headline.
-- **Findings, grouped by rule**: each row names the path, says what is wrong in one sentence, shows the evidence the audit actually read (a path, a count, `git check-ignore -v` output, a free-space figure), and gives the one-line fix. Ordered broken first.
+- **Findings, grouped by rule**: each row names the path, says what is wrong in one sentence, shows the evidence the audit actually read (a path, a count, the matching ignore rule, a free-space figure), and gives the one-line fix. Ordered broken first.
 - **Accepted exceptions**: a path waived by `.worktree-keep` stays on the page with the date its waiver expires. Hiding it would make a written exception look like compliance.
 - **Before the first worktree**: four copyable snippets, each tied to the rule it makes true — the two anchored ignore entries, `WORKTREE_BUILD_CACHE` for pointing a build at its slot, the shell wrapper that makes `git clean -x`/`-X` refuse to run, and the two-command close (`git worktree remove` then delete the slot).
 - **What this page cannot see**: the rules no scan can observe from inside one repository (a second clone, `git clean` that already ran, editor indexes, admission decisions) are listed with the audit's own reason, at `not checked` rather than at "met". A page that reported them as passing would be claiming a check that never happened.
@@ -259,14 +259,14 @@ pub struct ProjectSnapshot {
 
 ### 5.1 Worktree checks
 
-All data sources are read-only Git commands; the `.git` file format is never parsed:
+The data sources are read-only libgit2 calls; the `.git` file format is never parsed:
 
-- `git worktree list --porcelain` — path, HEAD, branch, `locked`, `prunable`, bare; the first entry is the main working tree.
-- `git -C <wt> status --porcelain=v2 --branch` — number of uncommitted changes, number of untracked files, ahead/behind, upstream branch.
-- `git -C <wt> merge-base --is-ancestor <wt-head> <default>` — whether merged (exit code 0 means yes, 1 means no, anything else means cannot determine).
-- `git -C <root> stash list --format=%gd` — stash count, read **once per scan** from the repository root. A stash is a repository fact, not a worktree one: `refs/stash` lives in the common Git directory, so every worktree answers with the same list, and `git worktree remove` never touches it. It is carried on the record as a fact and contributes no reason (see §5.1 note).
+- the **worktree list** — path, HEAD, branch, `locked`, `prunable`, bare; the first entry is the main working tree.
+- the **worktree status** — number of uncommitted changes, number of untracked files, ahead/behind, upstream branch.
+- the **merge-base answer** — whether the worktree HEAD is an ancestor of the default branch (0 means yes, 1 means no, anything else means cannot determine).
+- the **repository stash list**, read **once per scan** from the repository root. A stash is a repository fact, not a worktree one: `refs/stash` lives in the common Git directory, so every worktree answers with the same list, and worktree removal never touches it. It is carried on the record as a fact and contributes no reason (see §5.1 note).
 - The **HEAD commit time** is taken as "last activity". The directory mtime is *not* part of the signal: it moves only when a top-level entry is created, deleted or renamed, not when a file deeper inside is edited, so a bulk touch (indexer, backup, cleanup script) marks a worktree "recent" that nobody worked in — measured: 22 clean-and-merged worktrees with an 8-10-day-old HEAD were downgraded by one such touch. Genuine recent work is already covered by `wt.dirty` / `wt.untracked` / `wt.agent_active`. If the HEAD time cannot be read, `last_updated_at` stays empty and the failure adds `wt.cannot_verify`; a more severe reason still decides the overall level.
-- `git -C <wt> ls-files --others --exclude-standard` — list of untracked files (shown when `--force`).
+- the **untracked file list** — shown when `--force`.
 - A bounded walk of the worktree root for credential-looking file names. It skips the recognised artifact directories — the artifact scanner's `af.credentials` checks those when it visits them — and the reproducible dependency and build trees such as `.build`, `SourcePackages` and `checkouts`. Passing the walk's time bound, which is the per-directory budget capped at five seconds, produces `wt.cannot_verify`, never a silent pass.
 
 Decision table:
@@ -280,8 +280,8 @@ Decision table:
 | `wt.detached` | detached HEAD with no upstream **and** not merged/absorbed | Review | `HEAD is detached` |
 | `wt.no_upstream` | no upstream and the work is not in the default branch (neither merged nor absorbed) | Review | `branch has no upstream and is not merged into main` |
 | `wt.unmerged` | not merged into the default branch | Review | `not merged into main` |
-| `wt.absorbed` | every commit already has an equivalent patch in the default branch, though the commits are not ancestors of it | Safe (positive) | `2 commits have an equivalent patch in origin/main` |
-| `wt.absorbed_content_changed` | the patch-id matches, but files the branch touched changed afterwards | Review | `N touched files changed after the merge; the content this branch produced is no longer identical` |
+| `wt.absorbed` | the files this branch changed relative to the merge base hold the same content in the default branch, though the commits are not ancestors of it | Safe (positive) | `the 2 touched file(s) hold the same content in origin/main` |
+| `wt.absorbed_content_changed` | **No longer emitted.** The old patch-id answer for a matching patch whose files changed afterwards; retained so older audit logs render | Review (old) | old logs only |
 | `wt.untracked` | untracked files > 0 | Review (configurable to Unsafe) | `N untracked files` |
 | `wt.credentials` | on a worktree with no tracked changes, a credential-looking file sits outside the artifact, dependency and build directories, and Git does not track it | Unsafe | `<relative path> is inside; deleting the worktree would delete it too` |
 | `wt.recent_activity` | the HEAD commit is newer than the activity window (default 3 days) **and** the worktree is not clean-and-already-in-the-default-branch | Review | `last activity: 2 days ago` |
@@ -292,21 +292,21 @@ Decision table:
 | `wt.merged` | merged into the default branch | Safe (positive) | `merged into main` |
 | `wt.clean` | no changes, no untracked files | Safe (positive) | `working tree clean` |
 
-`wt.unpushed` is no longer emitted. It was the `Unsafe` code for the same branch fact; `git worktree remove` keeps the branch ref, so the code was a branch fact wearing a worktree verdict. The enum keeps it for audit logs written before this change and never reuses it; `wt.unpushed_branch` is the append-only replacement at `Review`.
+`wt.unpushed` is no longer emitted. It was the `Unsafe` code for the same branch fact; worktree removal keeps the branch ref, so the code was a branch fact wearing a worktree verdict. The enum keeps it for audit logs written before this change and never reuses it; `wt.unpushed_branch` is the append-only replacement at `Review`.
 
 The necessary and sufficient condition for **Safe**: not the main working tree, not locked, no uncommitted changes, no untracked files, the work is in the default branch (`merged_into_default == Some(true)`, or `absorbed_into_default` with the content check agreeing — no `wt.absorbed_content_changed`), no untracked credential, and no `cannot_verify`. If any one is not satisfied, downgrade.
 
-**Ahead of the upstream is a branch fact, not a worktree fact.** `git worktree remove` deletes the directory and keeps every branch ref; the product never runs `git branch -d`. `ahead > 0` therefore says nothing about whether this directory can go. When the work is not in the default branch it is `wt.unpushed_branch` at `Review` — the reader should see the commits, and the branch remains — and when the work is already merged or absorbed it is not emitted at all. This is the same distinction that removed the stash count from the verdict; the stash lives in the common Git directory, and an unpushed commit lives on the branch ref. The old `wt.unpushed` code was `Unsafe` and is retained only for audit logs.
+**Ahead of the upstream is a branch fact, not a worktree fact.** Worktree removal deletes the directory and keeps every branch ref; the product never runs `git branch -d`. `ahead > 0` therefore says nothing about whether this directory can go. When the work is not in the default branch it is `wt.unpushed_branch` at `Review` — the reader should see the commits, and the branch remains — and when the work is already merged or absorbed it is not emitted at all. This is the same distinction that removed the stash count from the verdict; the stash lives in the common Git directory, and an unpushed commit lives on the branch ref. The old `wt.unpushed` code was `Unsafe` and is retained only for audit logs.
 
 **A recent commit on a clean, already-merged worktree is attention, not risk.** The HEAD time remains the only activity signal (the directory mtime is not used, for the reason above), and `last_updated_at` still carries it to the detail panel. It only becomes a `Review` reason when the worktree is dirty, untracked, or not already in the default branch — the states in which something could still be lost.
 
-**Merged and absorbed are two facts, not one.** `merged_into_default` answers "is this commit an ancestor of the default branch"; `absorbed_into_default` answers "does every commit here have an equivalent patch there", which is `git cherry`'s patch-id comparison. Both are Safe evidence because both are commands' answers rather than a judgement about a diff. A branch that is an ancestor is never also reported as absorbed. The content question is a third answer: when the patch-id matches but the files changed after the merge — a later revert and an ordinary edit look the same to a tree comparison — `wt.absorbed` stays `Safe` (the patch is there), `absorbed_into_default` stays `true`, and `wt.absorbed_content_changed` is emitted beside it at `Review`. The Review reason is what keeps the overall verdict out of `Safe`; the patch code keeps its original meaning. Measured when the check was added: 11 of 33 branches reported `wt.unmerged` were fully absorbed.
+**Merged and absorbed are two facts, not one.** `merged_into_default` answers "is this commit an ancestor of the default branch"; `absorbed_into_default` answers "do the files this branch changed hold the same content there", which is a tree comparison over the files the branch touched. A branch that is an ancestor is never also reported as absorbed. Content is the whole absorption answer: a difference — a later revert and an ordinary edit look the same to a tree comparison — is `wt.unmerged` at `Review`, never `Safe`. The old patch-id answer and its `wt.absorbed_content_changed` companion are retained only for audit logs written before the in-process transport. Measured when the content check was introduced: 11 of 33 branches reported `wt.unmerged` were fully absorbed.
 
-**Ignored files are deleted too.** A worktree with no tracked changes can still hold a `.env`, a signing key, or a local configuration file that Git ignores; `git worktree remove` deletes the directory and those files with it. The artifact channel has `af.credentials` for exactly this reason, so the worktree channel runs the same name table at the root, bounded by time. It skips the recognised artifact directories (the artifact scanner checks those) and the reproducible dependency and build trees such as `.build/checkouts`. The walk runs when the worktree has no tracked changes; a dirty worktree is already `Unsafe`, and walking it would only add cost. A hit is `Unsafe`; a partial walk is `Review`. An absent file after a full walk is the only pass. A credential-looking file that Git tracks is not a worktree loss — it is in the repository — so it does not block the directory removal.
+**Ignored files are deleted too.** A worktree with no tracked changes can still hold a `.env`, a signing key, or a local configuration file that Git ignores; worktree removal deletes the directory and those files with it. The artifact channel has `af.credentials` for exactly this reason, so the worktree channel runs the same name table at the root, bounded by time. It skips the recognised artifact directories (the artifact scanner checks those) and the reproducible dependency and build trees such as `.build/checkouts`. The walk runs when the worktree has no tracked changes; a dirty worktree is already `Unsafe`, and walking it would only add cost. A hit is `Unsafe`; a partial walk is `Review`. An absent file after a full walk is the only pass. A credential-looking file that Git tracks is not a worktree loss — it is in the repository — so it does not block the directory removal.
 
 **A deleted upstream does not hide the file counts.** Git omits `# branch.ab` when the upstream ref is gone, and ahead/behind are then unknown; the changed and untracked entries are still printed. The check reads those counts and reports `wt.dirty` / `wt.untracked` from them. The unknown ahead/behind adds `wt.cannot_verify` only when the work is not already merged or absorbed; a clean worktree whose work is in the default branch is not downgraded for an upstream that no longer exists.
 
-**Stash is deliberately absent from this table.** It was a Review row (`wt.stash`), and it was wrong: `refs/stash` lives in the common Git directory, so all worktrees of a repository report the same list, and `git worktree remove` never touches it. One stash in a repository therefore downgraded every clean worktree it had — measured on a 109-worktree repository, 48 of 48 clean-and-merged worktrees, none of which would have lost anything. The count stays on the record as a fact the detail panel shows; it can no longer move a verdict. The code `wt.stash` is no longer emitted and must not be reused for another meaning (audit logs written before this change still render it).
+**Stash is deliberately absent from this table.** It was a Review row (`wt.stash`), and it was wrong: `refs/stash` lives in the common Git directory, so all worktrees of a repository report the same list, and worktree removal never touches it. One stash in a repository therefore downgraded every clean worktree it had — measured on a 109-worktree repository, 48 of 48 clean-and-merged worktrees, none of which would have lost anything. The count stays on the record as a fact the detail panel shows; it can no longer move a verdict. The code `wt.stash` is no longer emitted and must not be reused for another meaning (audit logs written before this change still render it).
 
 **It is not allowed to treat `merged_into_default == None` (cannot determine) as merged.**
 
@@ -364,7 +364,7 @@ Any failure during the scan must raise the level, never lower it:
 
 ### 5.4 Disk hygiene audit
 
-A second, independent pass over the same scan results, checking the policy in `docs/DISK_HYGIENE.md`: where worktrees live, how they are named, how long they live, where build output goes, what the volume has left. It reuses the worktree and artifact records the scan already built and asks Git only two further questions (`git check-ignore -v`, free space), so it costs one extra directory walk per cache slot rather than a second scan.
+A second, independent pass over the same scan results, checking the policy in `docs/DISK_HYGIENE.md`: where worktrees live, how they are named, how long they live, where build output goes, what the volume has left. It reuses the worktree and artifact records the scan already built and asks only two further questions (the repository's ignore rules for the two declared paths, and free space), so it costs one extra directory walk per cache slot rather than a second scan.
 
 What it reads for each rule is a table in `docs/DISK_HYGIENE.md` §8, kept next to the policy it implements, and a test fails when the two drift apart.
 
@@ -406,17 +406,17 @@ Three properties are part of the contract rather than the implementation:
 
 ### 6.1 Execution order and deduplication
 
-1. **Remove worktrees first, then handle artifacts.** Artifacts inside a worktree checked for deletion are not deleted separately — `git worktree remove` already removes the entire directory.
+1. **Remove worktrees first, then handle artifacts.** Artifacts inside a worktree checked for deletion are not deleted separately — worktree removal already removes the entire directory.
 2. Deduplication is done when the plan is generated: any artifact inside a "worktree to be removed" is moved out of the Trash channel and labeled "deleted together with the worktree (not recoverable)" in the UI, with its size counted only once.
 3. Serial execution, no concurrent deletion; each item's result is recorded independently, so a single failure doesn't affect the rest.
 
 ### 6.2 Worktree removal
 
-- Clean and merged: `git worktree remove <path>`.
-- Untracked files present: `git worktree remove --force <path>`, and the untracked file list must have been shown line by line on the confirmation page; `--force` is used only after the user confirms.
-- Directory already gone: `git worktree prune` (or fall back to prune after `git worktree remove` errors), cleaning up only the `.git/worktrees/<name>` metadata.
-- After removal, always run `git worktree prune` once to finish up and clean up leftover metadata.
-- **A removal that leaves a directory behind says so.** `git worktree remove` exits 0 after deleting every file it can empty, and on Windows a directory whose remaining entries are reparse points it does not follow — a pnpm `node_modules` is a stack of them — survives that pass. The directory is no longer a worktree (the metadata is pruned with it), so the result line reads `worktree.remnants` instead of `worktree.removed`, and the next scan reports what is left inside. The leftover itself stays Git's business: the tool never deletes it with a raw delete.
+- Clean and merged: remove the worktree through Git's worktree API (gix).
+- Untracked files present: remove the worktree with the force path, and the untracked file list must have been shown line by line on the confirmation page; force is used only after the user confirms.
+- Directory already gone: prune through libgit2's worktree API, cleaning up only the `.git/worktrees/<name>` metadata.
+- After removal, always prune once to finish up and clean up leftover metadata.
+- **A removal that leaves a directory behind says so.** The worktree removal can report success while a directory whose remaining entries are reparse points it does not follow — a pnpm `node_modules` is a stack of them — survives that pass. The directory is no longer a worktree (the metadata is pruned with it), so the result line reads `worktree.remnants` instead of `worktree.removed`, and the next scan reports what is left inside. The leftover itself stays Git's business: the tool never deletes it with a raw delete.
 - **Do not call `rm -rf`**. When removal fails, keep the original directory and truthfully report the failure; do not fall back to a brute-force delete.
 
 ### 6.3 Artifact deletion: system Trash
@@ -472,11 +472,11 @@ Item 6 also guards against accidents such as "a variable being empty during conc
 
 ## 7. Boundaries and non-goals
 
-- **No permanent deletion of artifact directories**, and no switch to bypass the Trash. Worktrees are permanently removed with `git worktree remove`; that is the only permanent path, and the UI must say so before execution.
+- **No permanent deletion of artifact directories**, and no switch to bypass the Trash. Worktrees are permanently removed through Git's worktree API; that is the only permanent path, and the UI must say so before execution.
 - **Never delete the main working tree**, even if it looks clean.
 - **Never execute cleanup automatically**; scanning and cleanup are always two explicit steps.
 - **No cleaning of system caches, `~/Library`, the Downloads directory, or installers** — that's another product.
-- **No modifying repository contents**: apart from `git worktree remove` / `prune`, no command that writes to the repository is executed; no automatic `git branch -d`, no automatic push.
+- **No modifying repository contents**: apart from the worktree removal / prune API, no write to the repository is executed; no automatic `git branch -d`, no automatic push.
 - **No judging "whether this branch is still needed"**: report only verifiable facts (unmerged, the branch's upstream state, how many days idle) and leave the conclusion to the user.
 - No multi-project batch cleanup; one project at a time.
 
@@ -607,9 +607,9 @@ a development environment:
 1. **One download, no prerequisites.** macOS gets a `.dmg` with a universal
    application inside; Windows gets one NSIS installer for the current user. The
    application carries its own runtime: there is nothing to install, nothing to
-   keep up to date and no server to run. The one dependency is `git`, which the
-   tool asks for the repository's state and which a person using worktrees
-   already has.
+   keep up to date and no server to run. Git is linked in (libgit2 for reads and
+   gix for worktree removal), so there is no `git` program and no Xcode Command
+   Line Tools requirement.
 2. **The application updates itself.** At launch it checks the project's own
    release page once, and if a newer version exists it says which version it
    found and offers the download and the restart. Every published artifact is

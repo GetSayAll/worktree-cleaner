@@ -8,6 +8,7 @@
 pub mod artifact;
 pub mod cleanup;
 pub mod git;
+pub mod git2_runner;
 pub mod hygiene;
 pub mod log;
 pub mod path;
@@ -16,6 +17,7 @@ pub mod timefmt;
 pub mod worktree;
 
 pub use git::{GitError, GitOutput, GitRunner, ProcessGitRunner, DEFAULT_GIT_TIMEOUT};
+pub use git2_runner::Git2Runner;
 pub use hygiene::{
     audit_hygiene, HygieneFinding, HygieneLevel, HygieneOptions, HygieneReport, HygieneRule,
     HygieneRuleStatus, VolumeSpace,
@@ -63,16 +65,8 @@ pub enum ScanError {
     NotFound(String),
     #[error("not a Git repository: {0}")]
     NotAGitRepository(String),
-    #[error("git could not be queried: {0}")]
+    #[error("the repository could not be read: {0}")]
     GitFailed(String),
-    /// Git itself could not be started.
-    ///
-    /// Its own variant, because "Git is not installed" is a different answer from
-    /// "the repository could not be read", and a person can do something about
-    /// the first one. The desktop shell is started from Finder or Explorer, so
-    /// the `PATH` it inherits is not always the one a terminal would have.
-    #[error("Git was not found on this machine; install Git, then try again")]
-    GitMissing,
 }
 
 /// How recently a worktree must have been committed to before it stops being a
@@ -135,7 +129,7 @@ pub enum PlanItemKind {
     Artifact,
 }
 
-/// One `git worktree remove` / `git worktree prune` in a plan.
+/// One Git worktree removal (and its follow-up prune) in a plan.
 ///
 /// Mirrors `WorktreeRemovalItem` in `src/types.ts` field for field.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,9 +137,9 @@ pub struct WorktreeRemovalItem {
     pub kind: PlanItemKind,
     pub path: String,
     pub branch: Option<String>,
-    /// Display only: the executor re-derives the command from the re-checked
-    /// record instead of parsing this string, so a stale plan cannot run a
-    /// command the re-check disagrees with.
+    /// Display only: the equivalent Git operation, shown as evidence. The executor
+    /// re-derives the target from the re-checked record instead of parsing this
+    /// string, so a stale plan cannot act on something the re-check disagrees with.
     pub command: String,
     pub force: bool,
     pub untracked_files: Vec<String>,
@@ -241,11 +235,11 @@ pub enum DetailCode {
     /// which is a reason code.
     #[serde(rename = "worktree.no_longer_safe")]
     WorktreeNoLongerSafe,
-    /// `git worktree remove` succeeded. Carries `prune_error` when the follow-up
+    /// The worktree removal succeeded. Carries `prune_error` when the follow-up
     /// prune did not.
     #[serde(rename = "worktree.removed")]
     WorktreeRemoved,
-    /// `git worktree remove` succeeded, but its directory is still on disk.
+    /// The worktree removal succeeded, but its directory is still on disk.
     /// Carries `prune_error` when the follow-up prune did not.
     #[serde(rename = "worktree.remnants")]
     WorktreeRemnants,
@@ -442,16 +436,14 @@ pub struct WorktreeRecord {
     pub has_upstream: bool,
     /// `None` means undetermined, and **must not** be treated as merged.
     pub merged_into_default: Option<bool>,
-    /// Every commit on this branch has an equivalent patch in the default branch,
-    /// although the commits themselves are not ancestors of it — the squash-merge
-    /// answer, from `git cherry`'s patch-id comparison.
+    /// The files this branch changed hold the same content in the default branch,
+    /// although the commits are not ancestors of it — the squash-merge answer.
     ///
     /// Separate from `merged_into_default` rather than folded into it: the two are
     /// different facts, and a reader who wants "is the work in the default branch"
     /// has to see which of the two answered. `false` means "not established", never
-    /// "known not to be absorbed". The content answer is separate: a matching patch
-    /// whose files changed afterwards keeps this `true` and emits
-    /// `wt.absorbed_content_changed` at `Review` beside `wt.absorbed`.
+    /// "known not to be absorbed". A difference in the touched files is
+    /// `wt.unmerged` at `Review`, never `Safe`.
     #[serde(default)]
     pub absorbed_into_default: bool,
     pub stash_count: u32,
@@ -529,21 +521,15 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
     let per_dir_timeout = Duration::from_millis(options.per_dir_timeout_ms.max(1));
     let git_timeout = Duration::from_millis(options.git_timeout_ms.max(1));
     let budget = Duration::from_millis(options.scan_budget_ms);
-    let runner = ProcessGitRunner::new(git_timeout);
+    let runner = Git2Runner::new(git_timeout);
     let started = Instant::now();
 
     let listing = runner
         .run(&root, &["worktree", "list", "--porcelain", "-z"])
-        .map_err(|error| {
-            if error.is_missing_program() {
-                ScanError::GitMissing
-            } else {
-                ScanError::GitFailed(error.to_string())
-            }
-        })?;
+        .map_err(|error| ScanError::GitFailed(error.to_string()))?;
     if !listing.success() {
         return Err(ScanError::NotAGitRepository(format!(
-            "git worktree list failed: {}",
+            "the worktree list failed: {}",
             listing.stderr.trim()
         )));
     }
@@ -565,7 +551,7 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
 
     // ---- repository-level Git facts ----
     // `refs/stash` lives in the common Git directory, so every worktree answers with
-    // the same list and `git worktree remove` never touches it. It is read once here
+    // the same list and worktree removal never touches it. It is read once here
     // rather than once per worktree: a 109-worktree repository was paying 108 extra
     // git processes for an identical answer, and — because the count was reported as
     // a per-worktree reason — every clean worktree of a repository holding a single

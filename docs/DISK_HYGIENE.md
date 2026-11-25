@@ -290,7 +290,7 @@ to delete.
 |---|---|
 | L1, L3 | the registered worktree paths, against `<repo>/.worktree/` and against each other |
 | L4 | each worktree directory name: slug, length, date suffix, repository prefix |
-| L5 | `git check-ignore -v` for both declared paths: present, anchored, and in the repository's own `.gitignore` |
+| L5 | the repository's ignore rules for both declared paths: present, anchored, and in the repository's own `.gitignore`; the matching rule and line are reported |
 | T1 | the number of registered worktrees, warned at 90% of the cap |
 | T2 | worktrees whose branch is already merged into the default branch |
 | T3 | the newer of the HEAD commit time and the directory's creation time |

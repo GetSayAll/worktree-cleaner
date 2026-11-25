@@ -4,11 +4,12 @@ A cross-agent safety audit tool for Git worktrees and build artifacts.
 
 It scans a repository, lists every Git worktree and build-artifact directory
 inside it, and explains item by item why each one can or cannot be deleted.
-Scanning is read-only. Deletions go through `git worktree remove` and the system
-Trash or Recycle Bin — never through a permanent delete, never through `rm -rf`.
+Scanning is read-only. Worktrees leave through Git's worktree API; artifact
+directories go to the system Trash or Recycle Bin — never through a raw delete,
+never through `rm -rf`.
 
 - **Platforms**: macOS 11.3+, Windows 10 and 11
-- **Stack**: Vue 3, Tauri 2, a Rust workspace
+- **Stack**: Vue 3, Tauri 2, a Rust workspace, libgit2 and gix
 - **License**: GPL-3.0-only
 
 ## Screenshots
@@ -47,14 +48,14 @@ install it:
 Nothing else is needed: the application is self-contained. There is no runtime to
 install, no runtime to keep up to date, and no server to run.
 
-### Git has to be installed
+### Git is built in
 
-The tool asks Git about the repository — that is where the worktree list, the
-status and the merge state come from — so a working `git` has to be on the
-machine. It comes with the Xcode Command Line Tools on macOS, and with
-[Git for Windows](https://git-scm.com/download/win) on Windows.
-
-Without it, the scan cannot complete, and the app says so instead of guessing.
+The app links the Git implementation instead of calling a `git` program: libgit2
+for repository reads and gix for worktree removal. There is no command-line tool
+to install, no Xcode Command Line Tools requirement, and no child process. A fresh
+Mac or Windows machine can scan and clean a repository without a developer
+toolchain, and a repository is judged without the machine's global Git
+configuration.
 
 ---
 
@@ -106,10 +107,11 @@ rather than installed.
 These are the rules the code is written around, and the tests assert them:
 
 - Scanning never writes to the repository or to anything it scans.
-- A directory is deleted by moving it to the system Trash or Recycle Bin, never
-  by removing it permanently.
-- A worktree is removed by `git worktree remove`, and `git worktree prune` only
-  afterwards.
+- An artifact directory is deleted by moving it to the system Trash or Recycle
+  Bin, never by removing it permanently.
+- A worktree is removed through Git's worktree API (gix) and is permanent; the
+  branch ref remains. Its metadata is pruned afterwards. No raw directory delete
+  is used.
 - Every deletion decision is backed by a reason that names what was observed.
 - An item that cannot be verified is *needs review*, never *safe*.
 - The initial scan and the execution re-check use the same rules. A verdict
