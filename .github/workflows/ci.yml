@@ -26,6 +26,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The address is never printed: a failed check names the file, commit or
+      # identity field, not the value. The range is new work only, because the
+      # old history contains the address by decision.
+      - name: No private email addresses
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          case "$base" in
+            ""|0000000000000000000000000000000000000000) base="HEAD~1" ;;
+          esac
+          sh scripts/check-private-emails.sh "$base"
+
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4

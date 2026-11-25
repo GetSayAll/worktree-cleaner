@@ -1,0 +1,5 @@
+#!/bin/sh
+# Reject a private email address in the message, author, committer or trailers.
+
+set -eu
+exec sh "$(git rev-parse --show-toplevel)/scripts/check-private-emails.sh" --message "$1"

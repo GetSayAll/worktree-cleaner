@@ -1,0 +1,5 @@
+#!/bin/sh
+# Reject a private email address in the content about to be committed.
+
+set -eu
+exec sh "$(git rev-parse --show-toplevel)/scripts/check-private-emails.sh" --staged
