@@ -1,6 +1,6 @@
 # Localized Result Copy and Operation Log — Plan
 
-作者：Andy（hd838a@outlook.com）
+作者：Andy
 
 This plan covers five defects observed in the desktop app, all of them in the
 same area: what the result page says about what just happened, and what the
@@ -204,7 +204,7 @@ locale test that asserts both tables carry the same keys extends naturally to
 this table, and a missing entry becomes a test failure rather than a silent
 English string on a Chinese screen.
 
-作者：Andy（hd838a@outlook.com）
+作者：Andy
 
 ---
 
@@ -435,4 +435,4 @@ Phase 3 is the one that needs the most care: it changes a frozen contract, and
 
 ---
 
-作者：Andy（hd838a@outlook.com）
+作者：Andy
