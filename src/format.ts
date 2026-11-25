@@ -1,5 +1,5 @@
 import { messages } from "./i18n";
-import type { DetailArg, DetailCode, HygieneFinding, Reason, ReasonCode } from "./types";
+import type { DetailArg, DetailCode, HygieneFinding, Reason, ReasonCode, ScanFailure } from "./types";
 
 const KB = 1024;
 
@@ -192,8 +192,7 @@ export function detailText(code: DetailCode | null, args: Record<string, DetailA
     .replace("{before}", detailArg(args.before))
     .replace("{after}", detailArg(args.after))
     .replace("{reason}", reasonCode ?? messages.common.unknown)
-    .replace("{pruneError}", detailArg(args.prune_error))
-    .replace("{error}", detailArg(args.error));
+    .replace("{pruneError}", detailArg(args.prune_error));
 }
 
 /**
@@ -220,6 +219,32 @@ export function activityText(action: string, args: Record<string, DetailArg> = {
     return detailArg(value);
   };
   return copy.replace(/\{(\w+)\}/g, (_, name: string) => text(name));
+}
+
+/**
+ * The sentence for a failed scan, from its stable code.
+ *
+ * The raw Git or host error is deliberately not part of this mapping: the
+ * operation log keeps it, and the reader gets a cause and a next step instead.
+ */
+export function scanFailureText(failure: ScanFailure): string {
+  switch (failure.code) {
+    case "empty":
+      return messages.errors.scan.empty;
+    case "not_found":
+      return messages.errors.scan.notFound(failure.path);
+    case "not_a_git_repository":
+      return messages.errors.scan.notRepository(failure.path);
+    case "git_unavailable":
+      return messages.errors.scan.gitUnavailable;
+    case "git_missing":
+      return messages.errors.scan.gitMissing;
+    case "task_failed":
+    case "unknown":
+      return messages.errors.scan.unknown;
+    default:
+      return messages.errors.scan.unknown;
+  }
 }
 
 /**

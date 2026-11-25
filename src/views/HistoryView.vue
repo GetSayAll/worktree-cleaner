@@ -91,7 +91,7 @@ async function copyAll() {
       <button class="btn" @click="copyAll">{{ copied ? messages.common.copied : messages.history.copyLog }}</button>
     </div>
 
-    <p v-if="historyError" class="notice notice--unsafe">{{ messages.history.readFailed(historyError) }}</p>
+    <p v-if="historyError" class="notice notice--unsafe">{{ messages.errors.historyRead }}</p>
 
     <div class="toolbar">
       <div class="segmented">

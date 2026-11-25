@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use worktree_core::cleanup::{
     execute_plan_with_progress as core_execute, ExecuteOptions, ExecutionOutcome,
@@ -26,20 +26,51 @@ use worktree_core::cleanup::{
 use worktree_core::log;
 use worktree_core::{
     scan_project as core_scan, ActivityAction, ActivityEvent, CleanupPlan, DetailArg, HistoryEntry,
-    ProjectSnapshot, ScanOptions,
+    ProjectSnapshot, ScanError, ScanOptions,
 };
+
+/// A scan failure with a stable code for the interface and diagnostic text that
+/// belongs in the operation log, never in the primary message.
+#[derive(Debug, Serialize)]
+#[serde(tag = "code", rename_all = "snake_case")]
+enum ScanFailure {
+    Empty,
+    NotFound { path: String },
+    NotAGitRepository { path: String, detail: String },
+    GitUnavailable { detail: String },
+    GitMissing,
+    TaskFailed { detail: String },
+}
+
+impl ScanFailure {
+    fn from_core(error: ScanError, requested: &str) -> Self {
+        match error {
+            ScanError::Empty => Self::Empty,
+            ScanError::NotFound(path) => Self::NotFound { path },
+            ScanError::NotAGitRepository(detail) => Self::NotAGitRepository {
+                path: requested.to_string(),
+                detail,
+            },
+            ScanError::GitFailed(detail) => Self::GitUnavailable { detail },
+            ScanError::GitMissing => Self::GitMissing,
+        }
+    }
+}
 
 /// Runs one scan.
 ///
 /// `options` carries milliseconds rather than Rust durations, so the front end
 /// never has to know how `Duration` encodes.
 #[tauri::command]
-async fn scan_project(path: String, options: ScanOptions) -> Result<ProjectSnapshot, String> {
+async fn scan_project(path: String, options: ScanOptions) -> Result<ProjectSnapshot, ScanFailure> {
+    let requested = path.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        core_scan(&path, &options).map_err(|error| error.to_string())
+        core_scan(&path, &options).map_err(|error| ScanFailure::from_core(error, &requested))
     })
     .await
-    .map_err(|error| format!("the scan task did not finish: {error}"))?
+    .map_err(|error| ScanFailure::TaskFailed {
+        detail: error.to_string(),
+    })?
 }
 
 /// Everything the executor needs, in one request.

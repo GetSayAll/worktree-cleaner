@@ -3,11 +3,13 @@ import {
   activityText,
   compareByActionability,
   compareSizeNullsFirst,
+  detailText,
   formatBytes,
   formatCount,
   homePath,
   isUnder,
-  reasonText
+  reasonText,
+  scanFailureText
 } from "./format";
 import { applyLocale, messages, SOURCE_LOCALE } from "./i18n";
 import { en } from "./i18n/en";
@@ -246,5 +248,37 @@ describe("reasonText", () => {
       };
       expect(reasonText(artifact)).toBe(zhCN.reasons.af.git_tracked);
     });
+  });
+});
+
+describe("scanFailureText", () => {
+  it("gives the not-a-repository cause and next step without the raw Git text", () => {
+    const failure = {
+      code: "not_a_git_repository" as const,
+      path: "/tmp/plain-folder",
+      detail: "git worktree list failed: fatal: not a git repository (or any parent directories)"
+    };
+    const text = scanFailureText(failure);
+    expect(text).toBe(messages.errors.scan.notRepository("/tmp/plain-folder"));
+    expect(text).not.toContain("fatal");
+    expect(text).not.toContain("worktree list");
+  });
+
+  it("names a missing path and falls back to a generic scan sentence", () => {
+    expect(scanFailureText({ code: "not_found", path: "/tmp/gone" })).toContain("/tmp/gone");
+    expect(scanFailureText({ code: "unknown", detail: "fatal: unexpected" })).not.toContain(
+      "fatal"
+    );
+  });
+});
+
+describe("per-item failure copy", () => {
+  it("keeps Git's raw stderr out of the result sentence", () => {
+    const text = detailText("worktree.remove_failed", {
+      error: "fatal: '/repo/wt' contains modified or untracked files"
+    });
+    expect(text).not.toContain("fatal");
+    expect(text).not.toContain("contains modified");
+    expect(text).toBe(messages.detail.codes.worktree.remove_failed);
   });
 });

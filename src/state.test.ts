@@ -827,3 +827,44 @@ describe("canOpen", () => {
     expect(state.canOpen("result")).toBe(true);
   });
 });
+
+describe("scan failures", () => {
+  it("keeps the structured code and sends the raw detail to the activity log", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", {
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    });
+    const logActivity = vi.fn(
+      async (_action: string, _target: string, _args: Record<string, unknown>) => undefined
+    );
+    const failure = {
+      code: "not_a_git_repository",
+      path: "/tmp/plain-folder",
+      detail: "git worktree list failed: fatal: not a git repository"
+    };
+    vi.doMock("./platform", () => ({
+      isDesktop: () => true,
+      hostOs: () => "macos" as const,
+      scanProject: async () => {
+        throw failure;
+      },
+      executePlan: vi.fn(),
+      logPath: async () => null,
+      readHistory: async () => [],
+      readActivity: async () => [],
+      logActivity,
+      onExecutionProgress: async () => null
+    }));
+    const state = await import("./state");
+    await state.startScan("/tmp/plain-folder");
+    unmockPlatform();
+    vi.unstubAllGlobals();
+
+    expect(state.scanFailure.value).toEqual(failure);
+    const failed = logActivity.mock.calls.find(([action]) => action === "scan.failed");
+    expect(failed?.[2]).toEqual({ error: failure.detail });
+  });
+});

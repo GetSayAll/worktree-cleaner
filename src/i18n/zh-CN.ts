@@ -132,8 +132,8 @@ export const zhCN = {
   // 和原始值，句子写在这里 —— 所以这一列跟着界面语言走，而不是永远英文。
   //
   // `{before}` 与 `{after}` 是发生变化的字段的两侧，`{reason}` 是原因码（下面
-  // 的 reasons 表认识它），`{error}` 是 Git 或系统给的话。`{field}` 在渲染前
-  // 已从 `fields` 表查好并替换掉。
+  // 的 reasons 表认识它）。Git 或系统的原始错误只留在记录的参数和日志里，不进入
+  // 读者看到的句子。`{field}` 在渲染前已从 `fields` 表查好并替换掉。
   detail: {
     yes: "是",
     no: "否",
@@ -146,9 +146,10 @@ export const zhCN = {
         no_longer_safe: "不再判定为可安全删除：{reason}",
         removed: "已移除",
         remnants: "已移除，但目录仍在磁盘上。",
-        remove_failed: "移除失败：{error}",
+        remove_failed:
+          "无法删除这个工作树。可能有未提交改动、未跟踪文件，或文件正在被使用。",
         pruned: "已清理残留记录",
-        prune_failed: "清理失败：{error}"
+        prune_failed: "无法清理这个工作树的 Git 记录。请稍后重试。"
       },
       artifact: {
         not_in_scan: "已不存在，未执行任何操作。",
@@ -158,7 +159,7 @@ export const zhCN = {
         vanished: "该目录已不在磁盘上，无需删除",
         unmeasurable: "无法测量体积，未删除。",
         trashed: "已移入{{trash}}",
-        trash_failed: "无法移入{{trash}}：{error}"
+        trash_failed: "无法把这个目录移入{{trash}}。可能被其他程序占用，或当前账户没有权限。"
       },
       prunable: {
         metadata_only: "该目录早已不存在，只清理了残留记录，未触碰任何文件。"
@@ -192,7 +193,7 @@ export const zhCN = {
       scan: {
         started: "开始扫描",
         finished: "扫描完成：{worktrees} 个工作树、{artifacts} 个产物目录",
-        failed: "扫描没有完成：{error}",
+        failed: "扫描没有完成。技术详情见操作日志。",
         cancelled: "扫描在 {elapsed} 后被取消"
       },
       project: {
@@ -281,16 +282,34 @@ export const zhCN = {
       }
     }
   },
+  errors: {
+    picker: "无法打开文件夹选择器。请手动输入或粘贴项目路径。",
+    historyRead: "无法读取本地操作日志。请检查日志文件的权限。",
+    openTrash: "无法打开{{trash}}。请手动打开。",
+    openLogDirectory: "无法打开日志目录。请检查路径是否仍然存在。",
+    clearLog: "无法清空日志。请检查文件权限。",
+    execute: "清理没有执行完成。请重试；如果仍然失败，请查看操作日志。",
+    logWrite: (path: string) =>
+      `清理已经执行，但操作日志 ${path} 写入失败，审计记录不完整。请检查磁盘空间和日志目录权限。`,
+    scan: {
+      empty: "请先选择一个项目文件夹。",
+      notFound: (path: string) => `找不到这个文件夹：${path}。请检查路径后重试。`,
+      notRepository: (path: string) =>
+        `${path} 不是 Git 仓库，也不在某个 Git 仓库里面。请选择包含 .git 的项目目录，或先运行 git init。`,
+      gitUnavailable:
+        "无法读取这个文件夹的 Git 信息。请确认文件夹可访问。技术详情见操作日志。",
+      gitMissing: "没有找到 Git。请安装 Git，或把 Git 加入 PATH，然后重试。",
+      unknown: "扫描没有完成。请重试；技术详情见操作日志。"
+    }
+  },
   welcome: {
     lede: "扫描仓库，列出全部工作树和构建产物，并说明哪些能删、哪些不能删。",
     pathPlaceholder: "绝对路径，例如 {{path}}",
     chooseFolder: "选择文件夹",
     chooseFolderTitle: "打开系统文件夹选择器",
     chooseFolderUnavailable: "请直接输入路径。",
-    pickerFailed: (message: string) => `文件夹选择器没能打开：${message}`,
     startScan: "开始扫描",
     dropHint: "也可以把项目文件夹拖进这个窗口。",
-    scanFailed: (message: string) => `扫描没有运行：${message}`,
     promises: {
       readOnlyTitle: "只读扫描",
       readOnlyBody:
@@ -749,8 +768,6 @@ export const zhCN = {
       `${n} 个工作树已永久删除，分支仍保留；工作目录和未跟踪文件不会保留。`,
     openLog: "打开日志",
     logFailedTitle: "操作日志没能写入",
-    logFailedBody: (path: string, error: string) =>
-      `处理已完成，但日志 ${path} 写入失败：${error}`,
     stats: {
       spaceFreed: "已释放空间",
       spaceFreedSub: "包含{{trash}}移动与工作树移除",
@@ -792,7 +809,6 @@ export const zhCN = {
     filterWorktreeRemove: "移除工作树",
     filterTrashMove: "移入{{trash}}",
     empty: "没有记录",
-    readFailed: (message: string) => `日志读取失败：${message}`,
     reason: {
       confirmed: "经用户确认后执行",
       rebuildable: "可重建的产物",

@@ -5,7 +5,7 @@ import {
   cleanupPlan,
   confirmText,
   executeCleanup,
-  executeError,
+  executeErrorMessage,
   executing,
   executionProgress,
   goTo,
@@ -400,6 +400,6 @@ async function copyPlan() {
     </div>
 
     <p v-if="!desktop" class="notice">{{ messages.preview.notice }}</p>
-    <p v-if="executeError" class="notice notice--unsafe">{{ executeError }}</p>
+    <p v-if="executeErrorMessage" class="notice notice--unsafe">{{ executeErrorMessage }}</p>
   </div>
 </template>

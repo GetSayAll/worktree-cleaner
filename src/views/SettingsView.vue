@@ -77,7 +77,7 @@ function themeLabel(choice: (typeof themeChoices)[number]): string {
 // The log path is asked for, not assumed: hardcoding one platform's layout is how
 // the settings page ends up pointing at a file the app never writes.
 const logFile = ref<string | null>(null);
-const logNotice = ref<string | null>(null);
+const logNotice = ref<"open" | "clear" | null>(null);
 
 onMounted(async () => {
   logFile.value = await resolveLogPath();
@@ -93,8 +93,8 @@ async function openLogDirectory() {
   if (!logFile.value) return;
   try {
     await revealInFileManager(logFile.value);
-  } catch (error) {
-    logNotice.value = error instanceof Error ? error.message : String(error);
+  } catch {
+    logNotice.value = "open";
   }
 }
 
@@ -107,8 +107,8 @@ async function onClearLog() {
     await clearLogFile();
     await refreshHistory();
     logNotice.value = null;
-  } catch (error) {
-    logNotice.value = error instanceof Error ? error.message : String(error);
+  } catch {
+    logNotice.value = "clear";
   }
 }
 
@@ -341,7 +341,9 @@ const updateNotes = computed(() => updateState.notes ?? "");
           </div>
         </div>
       </div>
-      <p v-if="logNotice" class="notice notice--unsafe">{{ logNotice }}</p>
+      <p v-if="logNotice" class="notice notice--unsafe">
+        {{ logNotice === "open" ? messages.errors.openLogDirectory : messages.errors.clearLog }}
+      </p>
     </div>
 
     <div class="card">

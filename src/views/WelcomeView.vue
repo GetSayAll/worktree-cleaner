@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { recentProjects, scanError, startScan } from "../state";
-import { homePath } from "../format";
+import { recentProjects, scanFailure, startScan } from "../state";
+import { homePath, scanFailureText } from "../format";
 import { messages } from "../i18n";
 import { isDesktop, onPathsDropped, pickDirectory } from "../platform";
 
 const path = ref("");
 const dragActive = ref(false);
 const pickerUnavailable = ref(false);
-const pickerError = ref<string | null>(null);
+const pickerError = ref(false);
 const desktop = isDesktop();
 
 let stopDropListener: (() => void) | null = null;
@@ -29,13 +29,18 @@ const dropStyle = computed(() =>
   dragActive.value ? { borderColor: "var(--accent)", background: "var(--accent-weak)" } : undefined
 );
 
+/** The localized sentence for the last scan failure; never the raw Git text. */
+const scanFailureMessage = computed(() =>
+  scanFailure.value ? scanFailureText(scanFailure.value) : ""
+);
+
 function submit() {
   if (!path.value.trim()) return;
   void startScan(path.value);
 }
 
 async function chooseFolder() {
-  pickerError.value = null;
+  pickerError.value = false;
   try {
     const picked = await pickDirectory(messages.welcome.chooseFolderTitle);
     if (picked !== null) {
@@ -46,12 +51,12 @@ async function chooseFolder() {
     // `null` means the user cancelled *or* there was no picker to open. Only the
     // second case needs saying out loud, and the field stays the way in.
     pickerUnavailable.value = true;
-  } catch (error) {
+  } catch {
     // The picker can fail on its own — no permission, no display, a plugin that
     // is not registered. A click that raises silently is the exact failure this
     // button was rewritten to remove, so the reason goes on the page.
     pickerUnavailable.value = false;
-    pickerError.value = error instanceof Error ? error.message : String(error);
+    pickerError.value = true;
   }
 }
 
@@ -123,12 +128,12 @@ function scannedAt(iso: string): string {
         {{ messages.welcome.chooseFolderUnavailable }}
       </p>
       <p v-if="pickerError" class="field__hint field__hint--warn">
-        {{ messages.welcome.pickerFailed(pickerError) }}
+        {{ messages.errors.picker }}
       </p>
       <p class="field__hint">{{ messages.welcome.dropHint }}</p>
     </div>
 
-    <p v-if="scanError" class="notice notice--unsafe">{{ messages.welcome.scanFailed(scanError) }}</p>
+    <p v-if="scanFailureMessage" class="notice notice--unsafe">{{ scanFailureMessage }}</p>
 
     <div class="promise-grid">
       <div class="promise">

@@ -7,6 +7,7 @@ import type {
   ProjectSnapshot,
   Reason,
   ResultEntry,
+  ScanFailure,
   ScanOptions,
   Settings,
   TrashMoveItem,
@@ -93,7 +94,7 @@ export const history = ref<HistoryEntry[]>([]);
  * kind marked, rather than pretending a setting change is a deletion.
  */
 export const activity = ref<ActivityEvent[]>([]);
-export const historyError = ref<string | null>(null);
+export const historyError = ref(false);
 export const lastResult = ref<ResultEntry[]>([]);
 export const resultSummary = ref({ freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 0 });
 export const acknowledged = ref(false);
@@ -116,9 +117,15 @@ export const scanState = reactive({
   running: false
 });
 
-/** Why the last scan or execution did not run; `null` when it did. */
-export const scanError = ref<string | null>(null);
-export const executeError = ref<string | null>(null);
+/** Why the last scan did not run; `null` when it did. */
+export const scanFailure = ref<ScanFailure | null>(null);
+/** A stable execution failure code; the copy is looked up while rendering. */
+export const executeError = ref<"desktop-only" | "failed" | null>(null);
+export const executeErrorMessage = computed(() => {
+  if (executeError.value === "desktop-only") return messages.app.desktopOnly;
+  if (executeError.value === "failed") return messages.errors.execute;
+  return null;
+});
 /** Set when the executor could not write the audit log: the actions still ran. */
 export const logError = ref<string | null>(null);
 export const executing = ref(false);
@@ -341,6 +348,30 @@ export function recordSettingChange(key: string, before: string, after: string):
   record("settings.changed", key, { before, after });
 }
 
+/** Turns the Tauri rejection into the code the welcome page switches on. */
+function normaliseScanFailure(error: unknown, path: string): ScanFailure {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string") return error as ScanFailure;
+  }
+  // A shell that serializes a command error as a string still gets the useful
+  // copy for the two errors a reader can act on. Neither branch prints `detail`.
+  const detail = error instanceof Error ? error.message : String(error);
+  if (detail.includes("not a Git repository")) {
+    return { code: "not_a_git_repository", path, detail };
+  }
+  if (detail.includes("does not exist")) {
+    return { code: "not_found", path };
+  }
+  if (detail.includes("Git was not found")) {
+    return { code: "git_missing" };
+  }
+  if (detail.includes("git could not be queried") || detail.includes("git command")) {
+    return { code: "git_unavailable", detail };
+  }
+  return { code: "unknown", detail };
+}
+
 export async function startScan(path: string) {
   if (executing.value) return;
   const target = path.trim();
@@ -359,7 +390,7 @@ export async function startScan(path: string) {
   scanState.traceLine = 0;  scanState.elapsed = 0;
   scanState.cancelled = false;
   scanState.running = true;
-  scanError.value = null;
+  scanFailure.value = null;
   executeError.value = null;
   logError.value = null;
   view.value = "scanning";
@@ -382,8 +413,11 @@ export async function startScan(path: string) {
     if (scanState.cancelled) return;
     scanState.running = false;
     clearTimers();
-    scanError.value = error instanceof Error ? error.message : String(error);
-    record("scan.failed", target, { error: scanError.value });
+    const failure = normaliseScanFailure(error, target);
+    scanFailure.value = failure;
+    const detail =
+      "detail" in failure ? failure.detail : "path" in failure ? failure.path : failure.code;
+    record("scan.failed", target, { error: detail });
     view.value = "welcome";
   }
 }
@@ -436,7 +470,7 @@ export function resetToWelcome() {
   selectedWorktrees.value = [];
   selectedArtifacts.value = [];
   lastResult.value = [];
-  scanError.value = null;
+  scanFailure.value = null;
   executeError.value = null;
   logError.value = null;
   recordedPlan = "";
@@ -799,7 +833,7 @@ export async function executeCleanup() {
   if (!isDesktop()) {
     // The preview cannot reach the file system, and there is no honest way to
     // pretend otherwise: it says why instead of showing a fake result page.
-    executeError.value = messages.app.desktopOnly;
+    executeError.value = "desktop-only";
     return;
   }
 
@@ -836,7 +870,7 @@ export async function executeCleanup() {
     });
     await applyOutcome(outcome, plan);
   } catch (error) {
-    executeError.value = error instanceof Error ? error.message : String(error);
+    executeError.value = "failed";
   } finally {
     unlisten?.();
     executing.value = false;
@@ -976,7 +1010,7 @@ export async function refreshHistory() {
   if (!isDesktop()) {
     history.value = [...mockHistory].reverse();
     activity.value = [...mockActivity].reverse();
-    historyError.value = null;
+    historyError.value = false;
     return;
   }
   try {
@@ -984,9 +1018,9 @@ export async function refreshHistory() {
     const [deletions, actions] = await Promise.all([readHistory(), readActivity()]);
     history.value = deletions.reverse();
     activity.value = actions.reverse();
-    historyError.value = null;
-  } catch (error) {
-    historyError.value = error instanceof Error ? error.message : String(error);
+    historyError.value = false;
+  } catch {
+    historyError.value = true;
   }
 }
 

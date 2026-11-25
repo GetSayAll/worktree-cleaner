@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { executeError, executing, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
+import { executeErrorMessage, executing, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
 import { detailText, formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
@@ -51,14 +51,14 @@ const skippedTrashMoves = computed(
  * Opening the Trash or the log can fail — the path may not exist, the opener may
  * refuse. None of those should leave a click with no effect and no explanation.
  */
-const systemError = ref<string | null>(null);
+const trashOpenFailed = ref(false);
 
 async function openSystemTrash() {
-  systemError.value = null;
+  trashOpenFailed.value = false;
   try {
     await openTrash();
-  } catch (error) {
-    systemError.value = error instanceof Error ? error.message : String(error);
+  } catch {
+    trashOpenFailed.value = true;
   }
 }
 
@@ -93,11 +93,11 @@ const logFailure = computed(() => {
     </div>
 
     <p v-if="!desktop" class="notice">{{ messages.preview.notice }}</p>
-    <p v-if="executeError" class="notice notice--unsafe">{{ executeError }}</p>
-    <p v-if="systemError" class="notice notice--unsafe">{{ systemError }}</p>
+    <p v-if="executeErrorMessage" class="notice notice--unsafe">{{ executeErrorMessage }}</p>
+    <p v-if="trashOpenFailed" class="notice notice--unsafe">{{ messages.errors.openTrash }}</p>
     <p v-if="logFailure" class="notice notice--unsafe">
       <strong>{{ messages.result.logFailedTitle }}</strong>
-      {{ messages.result.logFailedBody(logFailure.path, logFailure.error) }}
+      {{ messages.errors.logWrite(logFailure.path) }}
     </p>
     <p v-if="skippedTrashMoves > 0 && resultSummary.trashed === 0" class="notice">
       {{ messages.result.noTrashNotice }}

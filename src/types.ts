@@ -342,6 +342,21 @@ export interface ScanOptions {
 }
 
 /**
+ * The scan failure the Tauri command returns, as a code plus its own facts.
+ *
+ * The code is the stable part the UI switches on; `detail` is diagnostic text
+ * for the operation log and is never rendered as the primary message.
+ */
+export type ScanFailure =
+  | { code: "empty" }
+  | { code: "not_found"; path: string }
+  | { code: "not_a_git_repository"; path: string; detail: string }
+  | { code: "git_unavailable"; detail: string }
+  | { code: "git_missing" }
+  | { code: "task_failed"; detail: string }
+  | { code: "unknown"; detail: string };
+
+/**
  * What one execution run produced.
  *
  * Mirrors `ExecutionOutcome` in crates/worktree-core/src/cleanup.rs. `log_error`

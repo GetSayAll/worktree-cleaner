@@ -150,9 +150,10 @@ export const en = {
   // why the detail column follows the language instead of staying English.
   //
   // `{before}` and `{after}` are the two sides of a field that moved, `{reason}`
-  // is a reason code that the reason table below also knows, and `{error}` is
-  // whatever Git or the system said. `{field}` is looked up in `fields` and
-  // removed before this runs.
+  // is a reason code that the reason table below also knows. A raw Git or OS
+  // error stays in the record's arguments for the log; it is not shown in the
+  // reader's sentence. `{field}` is looked up in `fields` and removed before
+  // this runs.
   detail: {
     yes: "yes",
     no: "no",
@@ -167,9 +168,11 @@ export const en = {
         removed: "Removed",
         remnants:
           "Removed, but the directory is still on disk.",
-        remove_failed: "Could not remove: {error}",
+        remove_failed:
+          "Could not remove this worktree. It may have uncommitted or untracked files, or be in use.",
         pruned: "Leftover records cleaned up",
-        prune_failed: "Could not clean up records: {error}"
+        prune_failed:
+          "Could not clean up this worktree's Git records. Try again later."
       },
       artifact: {
         not_in_scan: "No longer present; nothing was executed.",
@@ -180,7 +183,8 @@ export const en = {
         vanished: "this directory is no longer on disk, so there was nothing to delete",
         unmeasurable: "Size could not be measured; not deleted.",
         trashed: "moved to the {{trash}}",
-        trash_failed: "could not move to the {{trash}}: {error}"
+        trash_failed:
+          "The directory could not be moved to the {{trash}}. It may be in use, or the account may lack permission."
       },
       prunable: {
         metadata_only:
@@ -217,7 +221,7 @@ export const en = {
       scan: {
         started: "Started a scan",
         finished: "Scan finished: {worktrees} worktrees, {artifacts} artifact directories",
-        failed: "The scan did not finish: {error}",
+        failed: "The scan did not finish. The operation log has the technical detail.",
         cancelled: "Cancelled the scan after {elapsed}"
       },
       project: {
@@ -307,17 +311,37 @@ export const en = {
       }
     }
   },
+  errors: {
+    picker: "The folder picker could not open. Type or paste the project path instead.",
+    historyRead: "The local operation log could not be read. Check the log file's permissions.",
+    openTrash: "The {{trash}} could not be opened. Open it manually.",
+    openLogDirectory: "The log directory could not be opened. Check that the path still exists.",
+    clearLog: "The log could not be cleared. Check the file's permissions.",
+    execute: "The cleanup did not finish. Try again; if it still fails, read the operation log.",
+    logWrite: (path: string) =>
+      `The cleanup ran, but the operation log at ${path} could not be written, so the audit trail is incomplete. Check disk space and the log directory's permissions.`,
+    scan: {
+      empty: "Choose a project folder first.",
+      notFound: (path: string) =>
+        `This folder could not be found: ${path}. Check the path and try again.`,
+      notRepository: (path: string) =>
+        `${path} is not a Git repository, and it is not inside one. Choose the project folder that contains .git, or run git init first.`,
+      gitUnavailable:
+        "Git information could not be read. Check that the folder is accessible. The operation log has the technical detail.",
+      gitMissing:
+        "Git is not installed, or this app cannot find it. Install Git or add it to PATH, then try again.",
+      unknown:
+        "The scan did not finish. Try again; the operation log has the technical detail."
+    }
+  },
   welcome: {
     lede: "Scan a repository, list every worktree and build artifact, and explain what can be deleted and what must stay.",
     pathPlaceholder: "Absolute path, like {{path}}",
     chooseFolder: "Choose folder",
     chooseFolderTitle: "Open the system folder picker",
-    chooseFolderUnavailable:
-      "Type the path instead.",
-    pickerFailed: (message: string) => `The folder picker could not open: ${message}`,
+    chooseFolderUnavailable: "Type the path instead.",
     startScan: "Start scan",
     dropHint: "Or drop a project folder here.",
-    scanFailed: (message: string) => `The scan did not run: ${message}`,
     promises: {
       readOnlyTitle: "Read-only scan",
       readOnlyBody:
@@ -804,8 +828,6 @@ export const en = {
       `${n} ${n === 1 ? "worktree was" : "worktrees were"} permanently deleted. ${n === 1 ? "Its branch remains; its working directory and untracked files do not." : "Their branches remain; their working directories and untracked files do not."}`,
     openLog: "Open log",
     logFailedTitle: "The operation log could not be written",
-    logFailedBody: (path: string, error: string) =>
-      `The work finished, but the log at ${path} could not be written: ${error}`,
     stats: {
       spaceFreed: "Space freed",
       spaceFreedSub: "includes {{trash}} moves and worktrees",
@@ -847,7 +869,6 @@ export const en = {
     filterWorktreeRemove: "Remove Worktree",
     filterTrashMove: "Move to {{trash}}",
     empty: "No records",
-    readFailed: (message: string) => `The log could not be read: ${message}`,
     reason: {
       confirmed: "Executed after user confirmation",
       rebuildable: "Rebuildable artifact",
