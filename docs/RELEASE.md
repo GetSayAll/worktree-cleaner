@@ -296,6 +296,11 @@ release, and each one has caught something.
       required. D16 remains open in `docs/DEV_CONTRACT.md` §7 until that record
       exists.
 - [ ] The app scans a real repository.
+- [ ] A repository under a path with a space and a non-ASCII character scans.
+- [ ] A repository on OneDrive or another synced folder scans; a file held by a
+      build tool or antivirus produces a stated `cannot_verify`, not a crash.
+- [ ] A repository path longer than 260 characters is handled, or the app reports
+      the path as unusable instead of failing silently.
 
 ### 4.3 The update path
 
