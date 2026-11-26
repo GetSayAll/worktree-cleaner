@@ -7,11 +7,11 @@
 //! changing that model: the user chooses a root, sees the repositories below it,
 //! and then scans one through the ordinary project path.
 //!
-//! Discovery is read-only and deliberately shallow. It skips generated trees
-//! (`.worktrees`, dependency stores, build output) and hidden directories, and it
-//! never follows a symlink. A repository found at one level is reported once and
-//! is not descended into, so nested worktrees are not mistaken for separate
-//! projects.
+//! Discovery is read-only and deliberately shallow. It skips generated trees,
+//! dependency checkouts, directories tagged with `CACHEDIR.TAG` and hidden
+//! directories, and it never follows a symlink. A repository found at one level
+//! is reported once and is not descended into, so nested worktrees are not
+//! mistaken for separate projects.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -54,6 +54,9 @@ fn skip_directory(name: &str) -> bool {
                 | "Carthage"
                 | "DerivedData"
                 | "build-cache"
+                | "checkouts"
+                | "SourcePackages"
+                | "ci-temp"
                 | "Library"
                 | "Applications"
                 | "Downloads"
@@ -61,6 +64,17 @@ fn skip_directory(name: &str) -> bool {
                 | "Music"
                 | "Pictures"
         )
+}
+
+/// A directory that declares itself a cache through the CACHEDIR.TAG convention.
+///
+/// SwiftPM writes this tag at the root of a build directory. A dependency
+/// checkout below that root is a disposable copy of a third-party package, not a
+/// local development repository, and each build can contain another copy of the
+/// same package. The tag lets discovery stop at the build root without matching
+/// a tool-specific directory name.
+fn is_tagged_cache(path: &Path) -> bool {
+    path.join("CACHEDIR.TAG").is_file()
 }
 
 fn is_repository_root(path: &Path) -> bool {
@@ -287,6 +301,9 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
                 if file_type.is_symlink() || !file_type.is_dir() {
                     continue;
                 }
+                if is_tagged_cache(&path) {
+                    continue;
+                }
                 if is_repository_root(&path) {
                     repositories.push(repository(&path, &mut warnings));
                     if repositories.len() >= MAX_REPOSITORIES {
@@ -396,6 +413,13 @@ mod tests {
         make_repo(&root.path().join("nested").join("two"));
         make_repo(&root.path().join("two").join(".worktrees").join("duplicate"));
         make_repo(&root.path().join("two").join("node_modules").join("ignored"));
+        make_repo(&root.path().join("checkouts").join("Sparkle"));
+        make_repo(&root.path().join("SourcePackages").join("Sparkle"));
+        make_repo(&root.path().join("ci-temp").join("input-test"));
+        make_repo(&root.path().join("build-cache").join("Sparkle"));
+        let tagged = root.path().join("tagged-build");
+        make_repo(&tagged.join("checkouts").join("Sparkle"));
+        std::fs::write(tagged.join("CACHEDIR.TAG"), "Signature: cache\n").expect("cache tag");
 
         let snapshot = discover_workspace(root.path().to_str().expect("path")).expect("discover");
         let paths: Vec<&str> = snapshot
@@ -405,14 +429,20 @@ mod tests {
             .collect();
         assert!(paths.iter().any(|path| path.ends_with("/one")));
         assert!(paths.iter().any(|path| path.ends_with("/nested/two")));
-        assert!(
-            !paths.iter().any(|path| path.contains("/.worktrees/")),
-            "a worktree is not a separate workspace repository"
-        );
-        assert!(
-            !paths.iter().any(|path| path.contains("/node_modules/")),
-            "dependency trees are not searched for repositories"
-        );
+        for ignored in [
+            "/.worktrees/",
+            "/node_modules/",
+            "/checkouts/",
+            "/SourcePackages/",
+            "/ci-temp/",
+            "/build-cache/",
+            "/tagged-build/",
+        ] {
+            assert!(
+                !paths.iter().any(|path| path.contains(ignored)),
+                "{ignored} is generated, not a local repository: {paths:?}"
+            );
+        }
     }
 
     #[cfg(unix)]

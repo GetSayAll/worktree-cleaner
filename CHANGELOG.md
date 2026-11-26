@@ -10,6 +10,10 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A repository is listed once, even when several of its linked worktrees sit
   below the selected root.** The shared `git worktree list` is folded into one
   repository row, so its worktree count is no longer repeated for every member.
+- **Dependency checkouts no longer appear as local repositories.** Workspace
+  discovery stops at `CACHEDIR.TAG` build roots and skips `checkouts`,
+  `SourcePackages` and temporary CI trees, so SwiftPM's per-build copies of
+  Sparkle or Sentry are not offered as projects to scan.
 
 ### Changed
 
