@@ -149,16 +149,9 @@ async function openSystemTrash() {
           <button class="btn" :disabled="buildCacheScanning || executing" @click="chooseFolder">
             {{ messages.buildCaches.chooseFolder }}
           </button>
-          <button
-            class="btn btn--primary"
-            data-action="scan-build-caches"
-            :disabled="buildCacheScanning || executing || !buildCacheRoot.trim()"
-            @click="scan"
-          >
-            {{ buildCacheScanning ? messages.buildCaches.scanning : messages.buildCaches.scan }}
-          </button>
         </div>
         <p v-if="!buildCacheRoot.trim()" class="field__hint">{{ messages.buildCaches.emptyRoot }}</p>
+        <p v-else-if="buildCacheScanning" class="field__hint">{{ messages.buildCaches.scanning }}</p>
       </div>
     </div>
 

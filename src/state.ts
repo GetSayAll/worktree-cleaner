@@ -555,6 +555,11 @@ function finishWorkspace(workspace: WorkspaceSnapshot) {
     repositories: workspace.repositories.length
   });
   view.value = "workspace";
+  // This is part of the same scan the reader started, not a second action they
+  // have to discover. It runs in the background while the repository list is
+  // shown, and the build-cache page opens on the finished result.
+  buildCacheRoot.value = workspace.root;
+  void startBuildCacheScan();
 }
 
 function finishScan(result: ProjectSnapshot, sample = false) {
@@ -572,6 +577,10 @@ function finishScan(result: ProjectSnapshot, sample = false) {
   });
   applyDefaultSelection();
   view.value = "overview";
+  if (!buildCacheSnapshot.value && !buildCacheScanning.value) {
+    buildCacheRoot.value = result.root;
+    void startBuildCacheScan();
+  }
 }
 
 export function cancelScan() {
