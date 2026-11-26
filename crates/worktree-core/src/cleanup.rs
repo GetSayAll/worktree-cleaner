@@ -565,7 +565,7 @@ where
 /// when it is refused. The `NSFileManager` call reaches the same Trash
 /// (recoverable, "Put Back" subject to a macOS bug the crate documents) without
 /// asking for anything beyond what the app already has.
-fn move_to_trash(path: &str) -> Result<(), trash::Error> {
+pub(crate) fn move_to_trash(path: &str) -> Result<(), trash::Error> {
     #[allow(unused_mut)]
     let mut context = trash::TrashContext::default();
     #[cfg(target_os = "macos")]

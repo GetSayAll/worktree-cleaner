@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { executeErrorMessage, executing, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
+import RevealPathButton from "../components/RevealPathButton.vue";
 import { detailText, formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
 import { openTrash, isDesktop } from "../platform";
@@ -44,6 +45,24 @@ const okCount = computed(() => lastResult.value.filter((item) => item.result ===
 const skippedTrashMoves = computed(
   () => lastResult.value.filter((item) => item.action === "trash-move" && item.result === "skipped").length
 );
+
+const measuredResults = computed(() => lastResult.value.filter((item) => item.size_bytes !== null));
+const bySize = (a: { size_bytes: number | null }, b: { size_bytes: number | null }) =>
+  (b.size_bytes ?? 0) - (a.size_bytes ?? 0);
+const topRemaining = computed(() =>
+  measuredResults.value
+    .filter((item) => item.result !== "ok")
+    .sort(bySize)
+    .slice(0, 3)
+);
+const topHandled = computed(() =>
+  measuredResults.value
+    .filter((item) => item.result === "ok")
+    .sort(bySize)
+    .slice(0, 3)
+);
+const topItems = computed(() => (topRemaining.value.length > 0 ? topRemaining.value : topHandled.value));
+const showingRemaining = computed(() => topRemaining.value.length > 0);
 
 /**
  * The failure of a system action this page offers.
@@ -118,8 +137,9 @@ const logFailure = computed(() => {
           {{
             messages.result.successSummary(
               resultSummary.removed,
+              formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 }),
               resultSummary.trashed,
-              formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 })
+              formatBytes(resultSummary.trash_bytes, { approximate: resultSummary.trash_unknown > 0 })
             )
           }}
         </p>
@@ -127,24 +147,53 @@ const logFailure = computed(() => {
           {{
             messages.result.partialSummary(
               resultSummary.removed,
-              resultSummary.trashed,
               formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 }),
+              resultSummary.trashed,
+              formatBytes(resultSummary.trash_bytes, { approximate: resultSummary.trash_unknown > 0 }),
               resultSummary.failed
             )
           }}
         </p>
+        <p
+          v-if="resultSummary.reclaimable > 0 || resultSummary.reclaimable_unknown > 0"
+          class="result-hero__total faint tiny"
+        >
+          {{
+            messages.result.totalAfterEmptying(
+              formatBytes(resultSummary.reclaimable, {
+                approximate: resultSummary.reclaimable_unknown > 0
+              })
+            )
+          }}
+        </p>
+        <div v-if="topItems.length > 0" class="result-hero__top">
+          <div class="result-hero__top-title">
+            {{ showingRemaining ? messages.result.topRemaining : messages.result.topHandled }}
+          </div>
+          <ul class="result-hero__top-list">
+            <li v-for="item in topItems" :key="`${item.target}-${item.action}`">
+              <span class="result-hero__top-path mono">{{ displayPath(item.target, root) }}</span>
+              <span class="result-hero__top-size numeric">{{ formatBytes(item.size_bytes) }}</span>
+              <span class="outcome" :class="`outcome--${item.result}`">{{ outcomeLabel(item.result) }}</span>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
 
     <div class="stat-grid stat-grid--4">
       <StatCard
-        :label="messages.result.stats.spaceFreed"
+        :label="messages.result.stats.freedNow"
         tone="accent"
         :value="formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 })"
-        :sub="resultSummary.freed_unknown > 0 ? messages.result.stats.spaceFreedSubUnknown(resultSummary.freed_unknown) : messages.result.stats.spaceFreedSub"
+        :sub="resultSummary.freed_unknown > 0 ? messages.result.stats.freedNowSubUnknown(resultSummary.freed_unknown) : messages.result.stats.freedNowSub"
       />
-      <StatCard :label="messages.result.stats.succeeded" tone="safe" value-tone :value="String(okCount)" :sub="messages.result.stats.succeededSub(resultSummary.trashed)" />
-      <StatCard :label="messages.result.stats.movedToTrash" :value="String(resultSummary.trashed)" :sub="messages.result.stats.movedToTrashSub" />
+      <StatCard
+        :label="messages.result.stats.inTrash"
+        :value="formatBytes(resultSummary.trash_bytes, { approximate: resultSummary.trash_unknown > 0 })"
+        :sub="resultSummary.trash_unknown > 0 ? messages.result.stats.inTrashSubUnknown(resultSummary.trash_unknown) : messages.result.stats.inTrashSub(resultSummary.trashed)"
+      />
+      <StatCard :label="messages.result.stats.handled" tone="safe" value-tone :value="String(okCount)" :sub="messages.result.stats.handledSub(resultSummary.removed, resultSummary.trashed)" />
       <StatCard
         :label="messages.result.stats.skippedFailed"
         :value="String(resultSummary.failed)"
@@ -174,7 +223,12 @@ const logFailure = computed(() => {
               :style="{ animationDelay: `${Math.min(index, 24) * 45}ms` }"
             >
               <td class="nowrap tiny cell-action">{{ actionLabel(item.action) }}</td>
-              <td class="mono cell-target">{{ displayPath(item.target, root) }}</td>
+              <td class="cell-target">
+                <div class="row-wrap">
+                  <span class="mono">{{ displayPath(item.target, root) }}</span>
+                  <RevealPathButton v-if="item.result !== 'ok' && item.action !== 'prune'" :path="item.target" compact />
+                </div>
+              </td>
               <td class="tiny faint cell-detail">{{ detailText(item.detail_code, item.detail_args, item.detail) }}</td>
               <td class="cell-outcome cell-outcome-cell">
                 <span class="outcome" :class="`outcome--${item.result}`">{{ outcomeLabel(item.result) }}</span>

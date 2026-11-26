@@ -75,6 +75,14 @@ pub const ARTIFACT_KINDS: &[ArtifactKind] = &[
         generic_name: false,
     },
     ArtifactKind {
+        name: ".build",
+        kind: ".build",
+        ecosystem: "swift",
+        rebuild_markers: &["Package.swift"],
+        rebuild_how: "regenerated with swift build or Xcode",
+        generic_name: false,
+    },
+    ArtifactKind {
         name: "dist",
         kind: "dist",
         ecosystem: "node",
@@ -933,7 +941,7 @@ pub(crate) enum CredentialScan {
 /// Bounded by a ceiling (a last-resort guard for a pathological tree) and by a
 /// deadline, which is what the caller really controls: `per_dir_timeout` is the
 /// budget the user set for one directory.
-fn credential_in_within(dir: &Path, limit: usize, budget: Duration) -> CredentialScan {
+pub(crate) fn credential_in_within(dir: &Path, limit: usize, budget: Duration) -> CredentialScan {
     credential_walk(dir, limit, budget, false)
 }
 
@@ -1637,6 +1645,7 @@ mod tests {
             Some("node")
         );
         assert_eq!(lookup_kind("target").map(|s| s.ecosystem), Some("rust"));
+        assert_eq!(lookup_kind(".build").map(|s| s.ecosystem), Some("swift"));
         assert!(lookup_kind("src").is_none());
         assert!(lookup_kind("Node_Modules").is_none());
     }
@@ -1925,6 +1934,84 @@ mod tests {
         let marker = ["Apps", "Web", "package.json"].join(std::path::MAIN_SEPARATOR_STR);
         assert!(record.safety.reasons.iter().any(|reason| {
             reason.code == ReasonCode::AfRebuildable && reason.evidence.contains(&marker)
+        }));
+    }
+
+    #[test]
+    fn a_swift_build_directory_with_a_manifest_is_rebuildable() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let artifact = root.join(".build");
+        std::fs::create_dir_all(&artifact).expect("create artifact");
+        std::fs::write(root.join("Package.swift"), "").expect("write manifest");
+        let runner = runner_with(vec![
+            (
+                vec![
+                    "ls-files".into(),
+                    "--".into(),
+                    artifact.display().to_string(),
+                ],
+                out(""),
+            ),
+            (
+                vec![
+                    "check-ignore".into(),
+                    "-v".into(),
+                    "--".into(),
+                    artifact.display().to_string(),
+                ],
+                not_ignored(),
+            ),
+        ]);
+        let (record, _warnings) = check_artifact(
+            &runner,
+            &root,
+            &artifact,
+            lookup_kind(".build").expect("kind"),
+            &opts(),
+        );
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        assert!(record.safety.reasons.iter().any(|reason| {
+            reason.code == ReasonCode::AfRebuildable && reason.evidence.contains("Package.swift")
+        }));
+    }
+
+    #[test]
+    fn a_swift_build_directory_without_a_manifest_needs_review() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let artifact = root.join(".build");
+        std::fs::create_dir_all(&artifact).expect("create artifact");
+        std::fs::write(artifact.join("blob"), b"x").expect("write file");
+        let runner = runner_with(vec![
+            (
+                vec![
+                    "ls-files".into(),
+                    "--".into(),
+                    artifact.display().to_string(),
+                ],
+                out(""),
+            ),
+            (
+                vec![
+                    "check-ignore".into(),
+                    "-v".into(),
+                    "--".into(),
+                    artifact.display().to_string(),
+                ],
+                not_ignored(),
+            ),
+        ]);
+        let (record, _warnings) = check_artifact(
+            &runner,
+            &root,
+            &artifact,
+            lookup_kind(".build").expect("kind"),
+            &opts(),
+        );
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert!(record.safety.reasons.iter().any(|reason| {
+            reason.code == ReasonCode::AfCannotVerify && reason.evidence.contains("Package.swift")
         }));
     }
 

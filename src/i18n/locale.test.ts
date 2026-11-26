@@ -175,10 +175,14 @@ describe("platform wording", () => {
     expect(resolvedTable("zh-CN", "macos").common.action.trashMove).toBe("移入废纸篓");
     expect(resolvedTable("zh-CN", "windows").common.action.trashMove).toBe("移入回收站");
 
+    expect(resolvedTable("en", "macos").common.reveal).toContain("Finder");
+    expect(resolvedTable("en", "windows").common.reveal).toContain("File Explorer");
+    expect(resolvedTable("zh-CN", "macos").common.reveal).toContain("Finder");
+
     // And through a message that takes an argument, which is where the first
     // implementation of the substitution missed.
-    expect(resolvedTable("en", "windows").result.stats.succeededSub(2)).toContain("Recycle Bin");
-    expect(resolvedTable("en", "windows").result.stats.succeededSub(2)).not.toContain("Trash");
+    expect(resolvedTable("en", "windows").result.totalAfterEmptying("1 B")).toContain("Recycle Bin");
+    expect(resolvedTable("en", "windows").result.totalAfterEmptying("1 B")).not.toContain("Trash");
   });
 
   it("uses a path example that belongs on this machine", () => {

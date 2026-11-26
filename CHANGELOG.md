@@ -19,6 +19,28 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a difference is `wt.unmerged` at Review. The patch-id answer and its
   `wt.absorbed_content_changed` companion are retained only so older audit logs
   still render.
+- **Trash bytes are not called freed.** The result page now separates worktree
+  bytes that are already free from artifact bytes waiting in the Trash, and names
+  the total only after the Trash is emptied.
+
+### Added
+
+- **SwiftPM build directories are visible.** `.build` is now a recognised artifact
+  with `Package.swift` as its rebuild proof, so a Swift worktree no longer hides
+  its build cache from the cleanup plan.
+- **Workspace discovery.** A folder that is not a Git repository can list the
+  repositories below it without scanning or deleting them; choosing one starts
+  the ordinary one-repository audit.
+- **A separate system-cache inventory.** Known cache roots can be reviewed and
+  moved to the Trash through their own plan. Unknown cache owners stay at Review,
+  and Docker data, CI state and Application Support are deliberately outside the
+  surface.
+- **The result page names the largest items.** Skipped or failed rows are ranked
+  first, so the reader knows what to inspect; otherwise the largest handled items
+  are shown. Review and unsafe rows, and skipped result rows, can be revealed in
+  Finder or File Explorer.
+- **Unknown agent labels explain themselves.** The worktree list says when neither
+  the path nor the branch carries an agent marker, without guessing.
 
 ## [0.2.1] — 2026-11-21
 

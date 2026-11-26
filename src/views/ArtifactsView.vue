@@ -15,6 +15,7 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
+import RevealPathButton from "../components/RevealPathButton.vue";
 import { compareByActionability, compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, shortenPath } from "../format";
 import { messages } from "../i18n";
 
@@ -183,6 +184,10 @@ function sizeText(item: ArtifactRecord): string {
               <div class="item-row__reasons">
                 <ReasonList :reasons="item.safety.reasons" />
               </div>
+              <RevealPathButton
+                v-if="item.safety.status !== 'Safe'"
+                :path="item.path"
+              />
             </div>
           </div>
           <div class="item-row__figures">

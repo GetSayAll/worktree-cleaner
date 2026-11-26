@@ -49,7 +49,7 @@ Fixed left-side navigation + top project bar.
 
 ```
 Top bar: project path · scan time · three-level counts · [Rescan]
-Sidebar: Overview / Worktree / Build artifacts / Disk hygiene / Cleanup plan / History / Settings
+Sidebar: Project / Repositories / Overview / Worktree / Build artifacts / System caches / Disk hygiene / Cleanup plan / History / Settings
 ```
 
 Before a scan, only "Welcome" in the sidebar is available; data pages appear only after the scan completes.
@@ -70,6 +70,12 @@ Before a scan, only "Welcome" in the sidebar is available; data pages appear onl
 - Degradation notice area: worktrees whose check times out or can't be read due to permissions are listed here, with a note that the entry will be judged "unknown".
 - Timeout strategy for long-running stages: a per-directory probe timeout plus an overall budget for the whole scan; when the budget is exhausted, stop and truthfully report "not fully scanned", without silently filling in the gaps.
 
+### 2.1 Repositories (workspace discovery)
+
+A developer root such as `~/Develop/Src` is often not itself a Git repository. When the selected folder is not a repository, the app lists the Git repositories below it instead of failing with "not a Git repository". Discovery is read-only, shallow, and does not follow symlinks or generated trees (`node_modules`, `target`, `.build`, `.worktrees`, `DerivedData`, …).
+
+This is a launcher, not a batch-cleanup mode. Selecting a repository starts the ordinary one-repository scan, so every worktree verdict remains anchored to that repository's default branch. The page shows the path, a worktree count, and a "Scan repository" action; it never selects or deletes anything itself.
+
 ### 3. Overview
 
 - Three large cards: safe to clean (count + releasable space), needs confirmation (count), must not be deleted (count).
@@ -89,6 +95,7 @@ Expanded detail panel:
 - Whether merged into the default branch (the default branch name is displayed and can be changed).
 - stash count (a **repository** fact, shown for information and never a reason — `refs/stash` is shared by every worktree and worktree removal does not touch it), untracked file count.
 - The inferred owning agent (identify `codex` / `claude` / `cursor` / `aider` / `workbuddy` by path features; when the path has no marker, use the branch name as a fallback; show "unknown" only when neither has a marker). The path is the stronger signal; the branch is a naming convention. This label is informational and never changes a safety verdict.
+- Review and Unsafe worktree and artifact rows offer "Show in Finder" / "Show in File Explorer"; opening a location never deletes anything and is available before the decision.
 - **Reason list**: one line per reason; green is positive evidence (merged / clean), amber and red are risk items, each followed by its evidence text.
 
 Top: search box + filter (All / Safe / Review / Unsafe / Locked / Unmerged).
@@ -102,6 +109,16 @@ Bottom floating action bar: `N selected · X to free` → "View cleanup plan".
 - Sorting: by size (default) / by last activity.
 - Size threshold slider: by default, show only directories larger than 10 MB (small directories are noisy).
 - Relationship to worktrees: if the worktree containing an artifact has already been checked for deletion, that artifact row shows "deleted together with the worktree (not recoverable)" and its independent checkbox is automatically cleared, to avoid double-counting size.
+
+### 5.1 System caches
+
+A separate, opt-in page for the caches that do not belong to one repository. It is deliberately not part of `ProjectSnapshot`: a project cleanup must never act on a cache just because both appeared in one scan.
+
+- The inventory covers known cache roots only: on macOS, the user's `~/Library/Caches` children (including unknown owners as `Review`), `~/.cache`, Xcode DerivedData and iOS DeviceSupport, and the standard npm / pnpm / Cargo / SwiftPM / Playwright / Homebrew caches. On Windows it uses `%LOCALAPPDATA%` equivalents for the same package-manager caches; Xcode roots do not exist there.
+- A known cache is `Safe` with positive evidence naming the cache kind. A directory under a cache root whose owner is not in the table is `Review` with `af.unknown_cache`; it is never selected automatically. Credentials, a nested repository, an escaping symlink or a whitelist hit make it `Unsafe`.
+- Recent activity is `Review`, not `Safe`. The page tells the reader to close the owning application before selecting a cache.
+- The selected cache directories form their own plan object and are moved through the system Trash. The cache executor re-checks path, size and verdict before each move; it does not use the worktree/artifact executor and cannot remove a worktree.
+- The page does not read Docker's data directory, CI runner state, Application Support, Downloads or arbitrary `~/Library` content. Those are not cache records and have no safe generic deletion rule.
 
 ### 6. Cleanup plan (confirmation page — the most important page in the product)
 
@@ -132,15 +149,16 @@ Before execution, walk through each item; if one fails, show the blocking reason
 
 **High-risk confirmation**
 
-- When `--force` appears, or the number of independently deleted items reaches a threshold (default 5), or the space released in a single run exceeds a threshold (default 10 GB), the user must manually check "I have confirmed the contents listed above". Artifacts that disappear together with a worktree do not count towards the item threshold.
+- When `--force` appears, or the number of independently deleted items reaches a threshold (default 5), or the estimated reclaimable space in a single run exceeds a threshold (default 10 GB), the user must manually check "I have confirmed the contents listed above". Artifacts that disappear together with a worktree do not count towards the item threshold.
 - Optional strong protection (a setting, off by default): the user must type the project directory name into the input field to enable "Execute".
 
 **Export**: export the plan as plain text / JSON, for prior manual review or script-based auditing.
 
 ### 7. Execution result
 
-- Per-item results: success / skipped / failed, each with its reason.
-- Summary: space released, number of artifact directories moved to the Trash, number of worktrees permanently removed, and the prune result. **Space released counts only items whose result was `Ok`, and only their measured bytes**: an artifact that left together with its worktree was not a separate move, a skipped or failed item freed nothing, and an item whose size was never measurable is counted as unknown rather than as `0 B`. The volume's free space is not read before and after, so nothing here claims to be exact.
+- Per-item results: success / skipped / failed, each with its reason. A skipped or failed row offers "Show in Finder" so the reader can inspect what remains.
+- Summary: **worktree bytes freed immediately**, **artifact bytes waiting in the Trash**, the total after emptying the Trash, the number of artifact directories moved, the number of worktrees permanently removed, and the prune result. **Only measured `Ok` bytes count**: an artifact that left together with its worktree was not a separate move, and a skipped or failed item freed nothing. A size that was never measurable is counted as unknown rather than as `0 B`. Moving a directory to the Trash does not free disk space until the Trash is emptied; the result page must say which bytes are recoverable and which are already free. The volume's free space is not read before and after, so nothing here claims to be exact.
+- The summary names the largest remaining items when there are skipped or failed rows (otherwise the largest handled items), so the reader knows what to inspect first.
 - Failed items: provide copyable reason text and the corresponding command, for manual handling.
 - Action buttons: "Open Trash", "View log", "Rescan".
 
@@ -249,6 +267,31 @@ pub struct ProjectSnapshot {
     pub hygiene: HygieneReport,        // see Section 5.4; never an input to a deletion decision (D24)
     pub warnings: Vec<String>,         // scan degradation notes
 }
+
+/// A repository found below a developer root. Discovery scans no worktrees and
+/// makes no deletion decision.
+pub struct WorkspaceRepository {
+    pub path: String,
+    pub name: String,
+    pub worktree_count: Option<u32>,   // None = Git could not answer
+}
+
+pub struct WorkspaceSnapshot {
+    pub schema_version: u32,           // WORKSPACE_SCHEMA_VERSION
+    pub root: String,
+    pub scanned_at: String,
+    pub repositories: Vec<WorkspaceRepository>,
+    pub warnings: Vec<String>,
+}
+
+/// A cache record reuses ArtifactRecord so the safety badge, reasons and size
+/// formatting are shared; worktree_path is None and the Git fields are null.
+pub struct CacheSnapshot {
+    pub schema_version: u32,           // CACHE_SCHEMA_VERSION
+    pub scanned_at: String,
+    pub records: Vec<ArtifactRecord>,
+    pub warnings: Vec<String>,
+}
 ```
 
 `is_prunable` must be distinguished from "the directory exists": `is_prunable` means the Git metadata exists but the working directory is gone.
@@ -336,6 +379,7 @@ Decision table:
 | `af.empty` | the directory contains no files **and the size measurement completed** — an unmeasurable directory also reports a file count of zero, and "could not measure" is not "empty" | Safe (positive) | `it contains no files` |
 | `af.git_ignored` | the directory as a whole is ignored by gitignore | Safe (positive) | `ignored by .gitignore` |
 | `af.rebuildable` | matches a known rebuildable artifact type, with a build manifest at or above the directory and inside the project | Safe (positive) | `can be rebuilt via npm install / cargo build` |
+| `af.unknown_cache` | a directory under a known system-cache root whose owner is not in the cache table | Review | `cache owner not recognised; confirm its owner before removing it` |
 
 The necessary and sufficient condition for **Safe**: matches a rebuildable type, is gitignore-ignored or untracked, has no tracked files, no nested repository, no credential files, is not an out-of-bounds symlink, had no writes within the recent activity period, and the checks completed fully. Rebuildability is proven by a manifest at or above the artifact and inside the project: a package manifest in a monorepo subdirectory counts, while a manifest above the project root does not.
 
@@ -475,10 +519,10 @@ Item 6 also guards against accidents such as "a variable being empty during conc
 - **No permanent deletion of artifact directories**, and no switch to bypass the Trash. Worktrees are permanently removed through Git's worktree API; that is the only permanent path, and the UI must say so before execution.
 - **Never delete the main working tree**, even if it looks clean.
 - **Never execute cleanup automatically**; scanning and cleanup are always two explicit steps.
-- **No cleaning of system caches, `~/Library`, the Downloads directory, or installers** — that's another product.
+- **No cleaning of general `~/Library` content, Application Support, the Downloads directory, or installers.** The separate System caches page is limited to the known cache roots in §5.1; unknown cache owners are `Review` and never selected automatically.
 - **No modifying repository contents**: apart from the worktree removal / prune API, no write to the repository is executed; no automatic `git branch -d`, no automatic push.
 - **No judging "whether this branch is still needed"**: report only verifiable facts (unmerged, the branch's upstream state, how many days idle) and leave the conclusion to the user.
-- No multi-project batch cleanup; one project at a time.
+- No multi-project batch cleanup; the workspace page discovers repositories and opens one at a time. Worktrees are still removed only through Git's worktree API.
 
 ---
 
@@ -521,9 +565,11 @@ src/
   views/
     WelcomeView.vue          welcome / project selection
     ScanningView.vue         scan progress and degradation notices
+    WorkspaceView.vue        repository discovery for a non-repository developer root
     OverviewView.vue         overview
     WorktreesView.vue        worktree list and expanded detail
     ArtifactsView.vue        build artifacts (grouped by worktree, size threshold, sorting)
+    CacheView.vue            separate system-cache inventory, cache plan and result
     HygieneView.vue          disk hygiene: rule status, findings by rule, accepted exceptions, the wiring that prevents a recurrence
     CleanupPlanView.vue      cleanup plan and confirmation (Channel A / Channel B / preconditions / export)
     ResultView.vue           execution result

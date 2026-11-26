@@ -47,7 +47,12 @@ const TABLES: Record<Locale, Messages> = { en, "zh-CN": zhCN };
  * `messages` is a plain string table by the time any component sees it.
  */
 function tokensFor(locale: Locale, os: HostOs): Record<string, string> {
-  return { trash: TABLES[locale].platform.trash[os], path: TABLES[locale].platform.pathExample[os], version: APP_VERSION };
+  return {
+    trash: TABLES[locale].platform.trash[os],
+    fileManager: TABLES[locale].platform.fileManager[os],
+    path: TABLES[locale].platform.pathExample[os],
+    version: APP_VERSION
+  };
 }
 
 /** Every `{{token}}` in `value`, replaced. A string with no token is returned as it is. */

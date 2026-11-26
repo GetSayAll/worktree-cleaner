@@ -4,6 +4,7 @@ import type {
   CleanupPlan,
   ExecutionOutcome,
   HistoryEntry,
+  CacheSnapshot,
   ProjectSnapshot,
   Reason,
   ResultEntry,
@@ -11,6 +12,7 @@ import type {
   ScanOptions,
   Settings,
   TrashMoveItem,
+  WorkspaceSnapshot,
   WorktreeRecord,
   WorktreeRemovalItem
 } from "./types";
@@ -25,14 +27,19 @@ import {
   onExecutionProgress,
   readActivity,
   readHistory,
-  scanProject
+  scanCaches,
+  scanProject,
+  scanWorkspace,
+  executeCachePlan
 } from "./platform";
-import { mockActivity, mockHistory, mockSnapshot, scanTrace } from "./mock/snapshot";
+import { mockActivity, mockCacheSnapshot, mockHistory, mockSnapshot, mockWorkspaceSnapshot, scanTrace } from "./mock/snapshot";
 import type { ActivityAction, ActivityEvent, DetailArg } from "./types";
 
 export type ViewKey =
   | "welcome"
   | "scanning"
+  | "workspace"
+  | "caches"
   | "overview"
   | "worktrees"
   | "artifacts"
@@ -82,6 +89,13 @@ export interface RecentProject {
 export const view = ref<ViewKey>("welcome");
 export const projectPath = ref("");
 export const snapshot = ref<ProjectSnapshot | null>(null);
+/** Repositories found below a directory that is not itself a Git repository. */
+export const workspaceSnapshot = ref<WorkspaceSnapshot | null>(null);
+/** The cache inventory is a separate surface from the project snapshot. */
+export const cacheSnapshot = ref<CacheSnapshot | null>(null);
+export const selectedCaches = ref<string[]>([]);
+export const cacheScanning = ref(false);
+export const cacheError = ref(false);
 export const settings = reactive<Settings>({ ...defaultSettings });
 export const selectedWorktrees = ref<string[]>([]);
 export const selectedArtifacts = ref<string[]>([]);
@@ -96,7 +110,32 @@ export const history = ref<HistoryEntry[]>([]);
 export const activity = ref<ActivityEvent[]>([]);
 export const historyError = ref(false);
 export const lastResult = ref<ResultEntry[]>([]);
-export const resultSummary = ref({ freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 0 });
+export const resultSummary = ref({
+  freed: 0,
+  freed_unknown: 0,
+  trash_bytes: 0,
+  trash_unknown: 0,
+  reclaimable: 0,
+  reclaimable_unknown: 0,
+  trashed: 0,
+  removed: 0,
+  failed: 0
+});
+/** Cache cleanup is a separate surface; its result must not replace a project run. */
+export const cacheLastResult = ref<ResultEntry[]>([]);
+export const cacheResultSummary = ref({
+  freed: 0,
+  freed_unknown: 0,
+  trash_bytes: 0,
+  trash_unknown: 0,
+  reclaimable: 0,
+  reclaimable_unknown: 0,
+  trashed: 0,
+  removed: 0,
+  failed: 0
+});
+export const cacheAcknowledged = ref(false);
+export const cacheSample = ref(false);
 export const acknowledged = ref(false);
 export const confirmText = ref("");
 
@@ -390,6 +429,7 @@ export async function startScan(path: string) {
   scanFailure.value = null;
   executeError.value = null;
   logError.value = null;
+  workspaceSnapshot.value = null;
   view.value = "scanning";
   clearTimers();
   startClock();
@@ -403,7 +443,27 @@ export async function startScan(path: string) {
   startStageTimer();
 
   try {
-    const result = await scanProject(target, scanKnobs());
+    // A developer root is often not a repository itself. Discovery is cheap and
+    // read-only; it either confirms this is one repository, offers the nested
+    // repositories, or produces an honest empty answer.
+    const workspace = await scanWorkspace(target);
+    if (scanState.cancelled) return;
+    if (workspace.repositories.length === 0) {
+      scanState.running = false;
+      clearTimers();
+      scanFailure.value = { code: "no_repositories", path: target };
+      record("scan.failed", target, { error: "no_repositories" });
+      view.value = "welcome";
+      return;
+    }
+    if (workspace.repositories.length > 1) {
+      finishWorkspace(workspace);
+      return;
+    }
+
+    const repository = workspace.repositories[0];
+    projectPath.value = repository.path;
+    const result = await scanProject(repository.path, scanKnobs());
     if (scanState.cancelled) return;
     finishScan(result);
   } catch (error) {
@@ -434,11 +494,33 @@ function runPreviewScan() {
   }, 520);
 }
 
+/**
+ * Shows the repositories discovered below a workspace root.
+ *
+ * Discovery does not start a project scan: each row is a way into the existing
+ * one-repository flow, which keeps every worktree verdict anchored to that
+ * repository's default branch.
+ */
+function finishWorkspace(workspace: WorkspaceSnapshot) {
+  clearTimers();
+  scanState.running = false;
+  scanState.stageIndex = SCAN_STAGES.length - 1;
+  workspaceSnapshot.value = workspace;
+  snapshot.value = null;
+  isDemoData.value = false;
+  rememberProject(workspace.root);
+  record("workspace.discovered", workspace.root, {
+    repositories: workspace.repositories.length
+  });
+  view.value = "workspace";
+}
+
 function finishScan(result: ProjectSnapshot, sample = false) {
   clearTimers();
   scanState.running = false;
   scanState.stageIndex = SCAN_STAGES.length - 1;
   snapshot.value = result;
+  workspaceSnapshot.value = null;
   isDemoData.value = sample;
   rememberProject(projectPath.value);
   record("scan.finished", projectPath.value, {
@@ -463,6 +545,7 @@ export function resetToWelcome() {
   clearTimers();
   scanState.running = false;
   snapshot.value = null;
+  workspaceSnapshot.value = null;
   projectPath.value = "";
   selectedWorktrees.value = [];
   selectedArtifacts.value = [];
@@ -518,13 +601,18 @@ export function recordPlanExport(itemCount: number): void {
 export function goTo(next: ViewKey) {
   if (executing.value) return;
   if (next === "scanning") return;
+  if (next === "workspace" && !isDesktop() && workspaceSnapshot.value === null) {
+    workspaceSnapshot.value = mockWorkspaceSnapshot;
+    projectPath.value = mockWorkspaceSnapshot.root;
+  }
   if (next === "history") void refreshHistory();
   if (next === "plan") recordPlanGenerated();
   view.value = next;
 }
 
 export function canOpen(key: ViewKey): boolean {
-  if (key === "welcome" || key === "settings") return true;
+  if (key === "welcome" || key === "settings" || key === "caches") return true;
+  if (key === "workspace") return workspaceSnapshot.value !== null || !isDesktop();
   if (key === "result") return lastResult.value.length > 0;
   return snapshot.value !== null;
 }
@@ -808,6 +896,205 @@ function buildPlan(): CleanupPlan {
   };
 }
 
+export const cacheSelectedSummary = computed(() => {
+  const records = (cacheSnapshot.value?.records ?? []).filter((record) =>
+    selectedCaches.value.includes(record.path)
+  );
+  return {
+    count: records.length,
+    bytes: records.reduce((sum, record) => sum + (record.size_bytes ?? 0), 0),
+    unknown: records.filter((record) => record.size_bytes === null).length
+  };
+});
+
+/** The selected cache directories as the ordinary plan object. */
+export const cachePlan = computed<CleanupPlan>(() => {
+  const empty: CleanupPlan = {
+    worktree_removals: [],
+    trash_moves: [],
+    excluded_unsafe: 0,
+    total_bytes: 0,
+    total_bytes_unknown: 0,
+    blockers: [],
+    ack_reasons: []
+  };
+  const records = cacheSnapshot.value?.records ?? [];
+  if (records.length === 0) return empty;
+
+  const blocked = new Set(
+    records
+      .filter((record) => selectedCaches.value.includes(record.path))
+      .filter((record) => settings.whitelist_paths.some((rule) => pathMatchesRule(record.path, rule)))
+      .map((record) => record.path)
+  );
+  const selected = records.filter(
+    (record) => selectedCaches.value.includes(record.path) && !blocked.has(record.path)
+  );
+  const moves: TrashMoveItem[] = selected.map((record) => ({
+    kind: "artifact",
+    path: record.path,
+    artifact_kind: record.kind,
+    size_bytes: record.size_bytes,
+    file_count: record.file_count,
+    bundled_with_worktree: null
+  }));
+  const total_bytes = moves.reduce((sum, move) => sum + (move.size_bytes ?? 0), 0);
+  const total_bytes_unknown = moves.filter((move) => move.size_bytes === null).length;
+  const ack_reasons: string[] = [];
+  if (moves.length >= ACK_COUNT_THRESHOLD) {
+    ack_reasons.push(messages.plan.ack.count(moves.length));
+  }
+  if (total_bytes_unknown > 0) {
+    ack_reasons.push(messages.plan.ack.unmeasurable(total_bytes_unknown));
+  }
+  if (total_bytes > ACK_SIZE_THRESHOLD_BYTES) {
+    ack_reasons.push(messages.plan.ack.size(formatBytes(ACK_SIZE_THRESHOLD_BYTES)));
+  }
+  return {
+    worktree_removals: [],
+    trash_moves: moves,
+    excluded_unsafe: records.filter((record) => record.safety.status === "Unsafe").length,
+    total_bytes,
+    total_bytes_unknown,
+    blockers: [...blocked].map((path) => messages.plan.blocker(path)),
+    ack_reasons
+  };
+});
+
+/** Selects every known-safe cache, leaving an unknown owner for the reader. */
+export function applyCacheDefaultSelection() {
+  const minBytes = settings.min_artifact_mb * 1024 * 1024;
+  selectedCaches.value = (cacheSnapshot.value?.records ?? [])
+    .filter((record) => record.safety.status === "Safe")
+    .filter((record) => record.size_bytes === null || record.size_bytes >= minBytes)
+    .map((record) => record.path);
+  cacheAcknowledged.value = false;
+}
+
+export function toggleCache(path: string) {
+  const record = cacheSnapshot.value?.records.find((item) => item.path === path);
+  if (!record || record.safety.status === "Unsafe") return;
+  selectedCaches.value = selectedCaches.value.includes(path)
+    ? selectedCaches.value.filter((item) => item !== path)
+    : [...selectedCaches.value, path];
+  cacheAcknowledged.value = false;
+}
+
+export function toggleGroupCaches(paths: string[], select: boolean) {
+  const allowed = new Set(
+    paths.filter((path) => {
+      const record = cacheSnapshot.value?.records.find((item) => item.path === path);
+      return record && record.safety.status !== "Unsafe";
+    })
+  );
+  const next = new Set(selectedCaches.value);
+  for (const path of allowed) {
+    if (select) next.add(path);
+    else next.delete(path);
+  }
+  selectedCaches.value = [...next];
+  cacheAcknowledged.value = false;
+}
+
+/** Inventories the known system-cache roots. It never deletes anything. */
+export async function startCacheScan() {
+  if (cacheScanning.value || executing.value || scanState.running) return;
+  cacheScanning.value = true;
+  cacheError.value = false;
+  cacheLastResult.value = [];
+  cacheResultSummary.value = {
+    freed: 0,
+    freed_unknown: 0,
+    trash_bytes: 0,
+    trash_unknown: 0,
+    reclaimable: 0,
+    reclaimable_unknown: 0,
+    trashed: 0,
+    removed: 0,
+    failed: 0
+  };
+  cacheAcknowledged.value = false;
+  if (!isDesktop()) {
+    cacheSnapshot.value = mockCacheSnapshot;
+    cacheSample.value = true;
+    applyCacheDefaultSelection();
+    cacheScanning.value = false;
+    return;
+  }
+  record("scan.started", "System caches");
+  try {
+    const result = await scanCaches({
+      per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+      recent_activity_days: settings.active_days,
+      whitelist: settings.whitelist_paths
+    });
+    cacheSnapshot.value = result;
+    cacheSample.value = false;
+    applyCacheDefaultSelection();
+    record("scan.finished", "System caches", {
+      worktrees: 0,
+      artifacts: result.records.length,
+      sample: false
+    });
+  } catch {
+    cacheError.value = true;
+    record("scan.failed", "System caches", { error: "cache_scan_failed" });
+  } finally {
+    cacheScanning.value = false;
+  }
+}
+
+/** Runs the selected cache moves after their own re-check. */
+export async function executeCacheCleanup() {
+  const plan = cachePlan.value;
+  const current = cacheSnapshot.value;
+  if (!current || (plan.trash_moves.length === 0 && plan.blockers.length === 0)) return;
+  if (!isDesktop()) {
+    executeError.value = "desktop-only";
+    return;
+  }
+  if (plan.ack_reasons.length > 0 && !cacheAcknowledged.value) return;
+
+  executing.value = true;
+  executeError.value = null;
+  logError.value = null;
+  record("cleanup.confirmed", "System caches", {
+    worktrees: 0,
+    artifacts: plan.trash_moves.length,
+    forced: 0,
+    typed_name: false
+  });
+  try {
+    const outcome = await executeCachePlan(plan, current, {
+      recent_activity_days: settings.active_days,
+      untracked_as_unsafe: false,
+      whitelist: settings.whitelist_paths,
+      per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+      git_timeout_ms: GIT_TIMEOUT_MS,
+      log_path: await logPath()
+    });
+    const removed = new Set(
+      outcome.entries
+        .filter((entry) => entry.result === "ok" && entry.action === "trash-move")
+        .map((entry) => entry.target)
+    );
+    cacheSnapshot.value = {
+      ...current,
+      records: current.records.filter((record) => !removed.has(record.path))
+    };
+    selectedCaches.value = [];
+    cacheLastResult.value = outcome.entries;
+    cacheResultSummary.value = summarise(outcome.entries, plan);
+    logError.value = outcome.log_error;
+    cacheAcknowledged.value = false;
+    await refreshHistory();
+  } catch {
+    executeError.value = "failed";
+  } finally {
+    executing.value = false;
+  }
+}
+
 /**
  * Runs the confirmed plan.
  *
@@ -953,11 +1240,13 @@ async function applyOutcome(outcome: ExecutionOutcome, plan: CleanupPlan) {
 }
 
 /**
- * Counts a run for the four cards.
+ * Counts a run for the result summary.
  *
- * Only actions that really removed something contribute bytes: a `prune` entry
- * cleans metadata and frees nothing, and a skipped one removed nothing at all. A
- * `null` size counts as unmeasurable rather than as zero (section 3).
+ * A worktree removal frees bytes now. An independently trashed artifact moves
+ * bytes to the Trash: they are recoverable, and are not added to `freed` until
+ * the Trash is emptied. A `prune` entry cleans metadata and frees nothing, and a
+ * skipped one removed nothing at all. A `null` size counts as unmeasurable rather
+ * than as zero (section 3).
  *
  * An artifact that left together with its worktree is not a separate move. The
  * executor reports it as 0 bytes, which is indistinguishable from a genuinely empty
@@ -971,6 +1260,8 @@ function summarise(entries: ResultEntry[], plan: CleanupPlan) {
   );
   let freed = 0;
   let freedUnknown = 0;
+  let trashBytes = 0;
+  let trashUnknown = 0;
   let trashed = 0;
   let removed = 0;
   let failed = 0;
@@ -983,18 +1274,32 @@ function summarise(entries: ResultEntry[], plan: CleanupPlan) {
     switch (entry.action) {
       case "worktree-remove":
         removed += 1;
+        if (entry.size_bytes === null) freedUnknown += 1;
+        else freed += entry.size_bytes;
         break;
       case "trash-move":
-        if (!bundled.has(entry.target)) trashed += 1;
+        if (!bundled.has(entry.target)) {
+          trashed += 1;
+          if (entry.size_bytes === null) trashUnknown += 1;
+          else trashBytes += entry.size_bytes;
+        }
         break;
       case "prune":
-        continue;
+        break;
     }
-    if (entry.size_bytes === null) freedUnknown += 1;
-    else freed += entry.size_bytes;
   }
 
-  return { freed, freed_unknown: freedUnknown, trashed, removed, failed };
+  return {
+    freed,
+    freed_unknown: freedUnknown,
+    trash_bytes: trashBytes,
+    trash_unknown: trashUnknown,
+    reclaimable: freed + trashBytes,
+    reclaimable_unknown: freedUnknown + trashUnknown,
+    trashed,
+    removed,
+    failed
+  };
 }
 
 /**

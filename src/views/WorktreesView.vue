@@ -13,6 +13,7 @@ import {
 } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
+import RevealPathButton from "../components/RevealPathButton.vue";
 import { basename, compareByActionability, compareSizeNullsFirst, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
@@ -192,6 +193,7 @@ function stateText(item: WorktreeRecord): string {
                 <span class="item-row__name">{{ item.branch || messages.common.detachedHead }}</span>
                 <span v-if="item.is_main" class="chip chip--protected" :title="messages.worktrees.mainWorkspaceHint(defaultBranchRef)">{{ messages.worktrees.mainWorkspaceBadge }}</span>
                 <span v-if="item.agent" class="chip">{{ item.agent }}</span>
+                <span v-else-if="!item.is_main" class="chip" :title="messages.common.unknownAgentHint">{{ messages.common.unknownAgent }}</span>
               </div>
               <div class="item-row__meta">
                 <span class="item-row__where" :title="item.path">{{ item.is_main ? basename(item.path) : displayPath(item.path, root) }}</span>
@@ -210,6 +212,10 @@ function stateText(item: WorktreeRecord): string {
                 <button class="btn btn--ghost" @click="toggleExpanded(item.path)">
                   {{ isExpanded(item.path) ? messages.worktrees.collapse : messages.worktrees.details }}
                 </button>
+                <RevealPathButton
+                  v-if="item.safety.status !== 'Safe' || !item.agent"
+                  :path="item.path"
+                />
               </div>
             </div>
             <div class="item-row__figures">

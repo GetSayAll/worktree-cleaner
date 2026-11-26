@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SNAPSHOT_SCHEMA_VERSION } from "./types";
+import { CACHE_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION, WORKSPACE_SCHEMA_VERSION } from "./types";
 import { hygieneRuleKey } from "./format";
 import { en } from "./i18n/en";
 import { zhCN } from "./i18n/zh-CN";
@@ -52,6 +52,23 @@ describe("source tree rules", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("agrees with the Rust core on the workspace and cache schema versions", () => {
+    const lib = readFileSync(
+      fileURLToPath(new URL("../crates/worktree-core/src/lib.rs", import.meta.url)),
+      "utf8"
+    );
+    const cache = readFileSync(
+      fileURLToPath(new URL("../crates/worktree-core/src/cache.rs", import.meta.url)),
+      "utf8"
+    );
+    const workspaceVersion = lib.match(/pub const WORKSPACE_SCHEMA_VERSION: u32 = (\d+);/);
+    const cacheVersion = cache.match(/pub const CACHE_SCHEMA_VERSION: u32 = (\d+);/);
+    expect(workspaceVersion, "WORKSPACE_SCHEMA_VERSION not found").not.toBeNull();
+    expect(cacheVersion, "CACHE_SCHEMA_VERSION not found").not.toBeNull();
+    expect(Number(workspaceVersion?.[1])).toBe(WORKSPACE_SCHEMA_VERSION);
+    expect(Number(cacheVersion?.[1])).toBe(CACHE_SCHEMA_VERSION);
+  });
+
   it("agrees with the Rust core on the snapshot schema version", () => {
     // The constant is defined twice on purpose — Rust owns the format, and
     // TypeScript owns the browser preview's sample snapshot — and a consumer that
@@ -99,11 +116,15 @@ describe("the Rust-to-TypeScript field contract", () => {
     "lib.rs": readFileSync(join(coreDir, "lib.rs"), "utf8"),
     "cleanup.rs": readFileSync(join(coreDir, "cleanup.rs"), "utf8"),
     "reason.rs": readFileSync(join(coreDir, "reason.rs"), "utf8"),
-    "hygiene.rs": readFileSync(join(coreDir, "hygiene.rs"), "utf8")
+    "hygiene.rs": readFileSync(join(coreDir, "hygiene.rs"), "utf8"),
+    "cache.rs": readFileSync(join(coreDir, "cache.rs"), "utf8")
   };
 
   const structs: Array<[string, keyof typeof core]> = [
     ["ProjectSnapshot", "lib.rs"],
+    ["WorkspaceRepository", "lib.rs"],
+    ["WorkspaceSnapshot", "lib.rs"],
+    ["CacheSnapshot", "cache.rs"],
     ["WorktreeRecord", "lib.rs"],
     ["ArtifactRecord", "lib.rs"],
     ["CleanupPlan", "lib.rs"],
@@ -198,7 +219,7 @@ describe("the Rust-to-TypeScript field contract", () => {
     // front end types it as, and what the copy table is read by.
     const lib = readFileSync(join(coreDir, "lib.rs"), "utf8");
     const rustActions = [
-      ...lib.matchAll(/#\[serde\(rename = "((?:scan|project|plan|settings|cleanup|trash)\.[a-z]+)"\)\]/g)
+      ...lib.matchAll(/#\[serde\(rename = "((?:scan|workspace|project|plan|settings|cleanup|trash)\.[a-z]+)"\)\]/g)
     ].map((match) => match[1]);
 
     const block = types.match(/export type ActivityAction =([\s\S]*?);/);

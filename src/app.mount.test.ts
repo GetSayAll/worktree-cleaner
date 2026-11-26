@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { createApp, nextTick } from "vue";
 import App from "./App.vue";
-import { mockSnapshot } from "./mock/snapshot";
+import { mockCacheSnapshot, mockSnapshot } from "./mock/snapshot";
 import * as state from "./state";
 
 // The other tests exercise modules in isolation; this one mounts the real app.
@@ -201,7 +201,7 @@ describe("the app shell", () => {
         size_bytes: 1
       }
     ];
-    state.resultSummary.value = { freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 2 };
+    state.resultSummary.value = { freed: 0, freed_unknown: 0, trash_bytes: 0, trash_unknown: 0, reclaimable: 0, reclaimable_unknown: 0, trashed: 0, removed: 0, failed: 2 };
     state.view.value = "result";
     await nextTick();
 
@@ -210,13 +210,71 @@ describe("the app shell", () => {
     expect(hero?.classList.contains("result-hero--partial")).toBe(true);
     expect(hero?.textContent).toContain("Cleanup finished with skipped items");
     expect(hero?.textContent).toContain("2");
+    expect(hero?.textContent).toContain("Largest items not deleted");
     expect(host.querySelector(".result-hero--success")).toBeNull();
 
     state.lastResult.value = [];
-    state.resultSummary.value = { freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 0 };
+    state.resultSummary.value = { freed: 0, freed_unknown: 0, trash_bytes: 0, trash_unknown: 0, reclaimable: 0, reclaimable_unknown: 0, trashed: 0, removed: 0, failed: 0 };
     state.projectPath.value = "";
     state.view.value = "welcome";
     state.snapshot.value = null;
+    app.unmount();
+    host.remove();
+  });
+
+  it("shows discovered repositories as a launcher, not a batch cleanup", async () => {
+    const { app, host } = mountApp();
+    state.workspaceSnapshot.value = {
+      schema_version: 1,
+      root: "/Users/andy/Develop/Src/AISrc",
+      scanned_at: new Date().toISOString(),
+      repositories: [
+        {
+          path: "/Users/andy/Develop/Src/AISrc/sayall-private-platform",
+          name: "sayall-private-platform",
+          worktree_count: 37
+        },
+        {
+          path: "/Users/andy/Develop/Src/AISrc/open-voice-bridge",
+          name: "open-voice-bridge",
+          worktree_count: 15
+        }
+      ],
+      warnings: []
+    };
+    state.view.value = "workspace";
+    await nextTick();
+
+    expect(host.textContent).toContain("Repositories");
+    expect(host.textContent).toContain("sayall-private-platform");
+    expect(host.textContent).toContain("37 worktrees");
+    expect(host.querySelectorAll(".item-row").length).toBe(2);
+
+    state.view.value = "welcome";
+    state.workspaceSnapshot.value = null;
+    app.unmount();
+    host.remove();
+  });
+
+  it("keeps the cache inventory separate from the project result", async () => {
+    const { app, host } = mountApp();
+    state.cacheSnapshot.value = mockCacheSnapshot;
+    state.applyCacheDefaultSelection();
+    state.view.value = "caches";
+    await nextTick();
+
+    expect(host.textContent).toContain("System caches");
+    expect(host.querySelectorAll(".item-row").length).toBe(2);
+    const known = mockCacheSnapshot.records.find((record) => record.safety.status === "Safe");
+    const review = mockCacheSnapshot.records.find((record) => record.safety.status === "Review");
+    expect(known).toBeDefined();
+    expect(review).toBeDefined();
+    expect(state.selectedCaches.value).toContain(known!.path);
+    expect(state.selectedCaches.value).not.toContain(review!.path);
+
+    state.view.value = "welcome";
+    state.cacheSnapshot.value = null;
+    state.selectedCaches.value = [];
     app.unmount();
     host.remove();
   });
@@ -236,7 +294,7 @@ describe("the app shell", () => {
         size_bytes: 1
       }
     ];
-    state.resultSummary.value = { freed: 1, freed_unknown: 0, trashed: 1, removed: 0, failed: 0 };
+    state.resultSummary.value = { freed: 0, freed_unknown: 0, trash_bytes: 1, trash_unknown: 0, reclaimable: 1, reclaimable_unknown: 0, trashed: 1, removed: 0, failed: 0 };
     state.view.value = "result";
     await nextTick();
 
@@ -244,10 +302,13 @@ describe("the app shell", () => {
     expect(hero, "the successful outcome summary is missing").not.toBeNull();
     expect(hero?.classList.contains("result-hero--success")).toBe(true);
     expect(hero?.textContent).toContain("Cleanup complete");
+    expect(hero?.textContent).toContain("Largest items handled");
+    expect(host.textContent).toContain("Freed now");
+    expect(host.textContent).toContain("In Trash");
     expect(host.querySelector(".result-hero--partial")).toBeNull();
 
     state.lastResult.value = [];
-    state.resultSummary.value = { freed: 0, freed_unknown: 0, trashed: 0, removed: 0, failed: 0 };
+    state.resultSummary.value = { freed: 0, freed_unknown: 0, trash_bytes: 0, trash_unknown: 0, reclaimable: 0, reclaimable_unknown: 0, trashed: 0, removed: 0, failed: 0 };
     state.projectPath.value = "";
     state.view.value = "welcome";
     state.snapshot.value = null;

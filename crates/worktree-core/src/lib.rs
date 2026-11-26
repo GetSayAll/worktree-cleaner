@@ -6,6 +6,7 @@
 //! a separate place and can only be driven by a plan object (development contract §2).
 
 pub mod artifact;
+pub mod cache;
 pub mod cleanup;
 pub mod git;
 pub mod git2_runner;
@@ -14,6 +15,7 @@ pub mod log;
 pub mod path;
 pub mod reason;
 pub mod timefmt;
+pub mod workspace;
 pub mod worktree;
 
 pub use git::{GitError, GitOutput, GitRunner, ProcessGitRunner, DEFAULT_GIT_TIMEOUT};
@@ -24,6 +26,7 @@ pub use hygiene::{
 };
 pub use path::{validate_path_for_deletion, DeletionContext, PathRejection, ValidatedPath};
 pub use reason::{Reason, ReasonCode, SafetyAssessment, SafetyStatus};
+pub use workspace::discover_workspace;
 pub use worktree::{
     check_worktree, detect_default_branch, infer_agent, parse_status, parse_worktree_list,
     WorktreeCheckOptions, WorktreeEntry,
@@ -51,6 +54,10 @@ use crate::timefmt::format_rfc3339;
 /// A version 2 consumer must reject the snapshot rather than quietly show a
 /// repository with no compliance report at all.
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
+
+/// Contract version of a workspace discovery result. It is a separate payload
+/// from [`ProjectSnapshot`] and can grow independently.
+pub const WORKSPACE_SCHEMA_VERSION: u32 = 1;
 
 /// Why a scan could not be produced.
 ///
@@ -324,6 +331,8 @@ pub enum ActivityAction {
     ScanFailed,
     #[serde(rename = "scan.cancelled")]
     ScanCancelled,
+    #[serde(rename = "workspace.discovered")]
+    WorkspaceDiscovered,
     #[serde(rename = "project.switched")]
     ProjectSwitched,
     #[serde(rename = "plan.generated")]
@@ -346,6 +355,7 @@ impl ActivityAction {
             Self::ScanFinished => "scan.finished",
             Self::ScanFailed => "scan.failed",
             Self::ScanCancelled => "scan.cancelled",
+            Self::WorkspaceDiscovered => "workspace.discovered",
             Self::ProjectSwitched => "project.switched",
             Self::PlanGenerated => "plan.generated",
             Self::PlanExported => "plan.exported",
@@ -481,6 +491,34 @@ pub struct ArtifactRecord {
     pub is_symlink: bool,
     pub symlink_target: Option<String>,
     pub safety: SafetyAssessment,
+}
+
+/// One Git repository found below a selected workspace directory.
+///
+/// Discovery is deliberately cheap: it does not scan worktrees or artifacts.
+/// Selecting one repository starts the ordinary [`scan_project`] path, so a
+/// workspace is a way to find the repositories, not a second cleanup model.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceRepository {
+    pub path: String,
+    pub name: String,
+    /// Number of entries in `git worktree list`, or `None` when Git could not
+    /// answer. The main worktree is included, as Git reports it.
+    pub worktree_count: Option<u32>,
+}
+
+/// The result of scanning a directory for Git repositories.
+///
+/// This is read-only and never feeds a deletion decision. It exists because a
+/// developer root such as `~/Develop/Src` is not itself a repository, while the
+/// repositories below it are the units the cleanup model can safely handle.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceSnapshot {
+    pub schema_version: u32,
+    pub root: String,
+    pub scanned_at: String,
+    pub repositories: Vec<WorkspaceRepository>,
+    pub warnings: Vec<String>,
 }
 
 /// The complete result of one scan, also the payload of `snapshot.json`.

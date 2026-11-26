@@ -54,8 +54,8 @@ data, not UI chrome, and stay English. See D23 and section 3.
 
 ## 1. Immutable design decisions
 
-Numbered D1–D24. Each one is a hard constraint; violating it is an implementation
-bug. D17–D24 are form-factor and repository-wide constraints.
+Numbered D1–D28. Each one is a hard constraint; violating it is an implementation
+bug. D17–D28 are form-factor and repository-wide constraints.
 
 | ID | Decision | Why | How to verify |
 |---|---|---|---|
@@ -63,7 +63,7 @@ bug. D17–D24 are form-factor and repository-wide constraints.
 | D2 | The level of a record is decided by the **most severe** entry in `reasons`. No independent scoring | Every level must trace back to concrete evidence | Unit test: the presence of any Unsafe reason forces the whole record to Unsafe |
 | D3 | Failures downgrade: a timeout, a permission error, or a non-zero command exit produces `Review`, **never `Safe`** | Without evidence you cannot call something safe | Inject a timeout and assert the level is Review and carries `cannot_verify` |
 | D4 | The main worktree is never deletable, even when clean | Deleting the main worktree deletes the repository | Assert the main worktree carries `wt.main` and is Unsafe |
-| D5 | Artifact directories are removed only through the system Trash. **No permanent delete of artifact directories, no bypass switch.** Worktree directories are governed by D6 and are permanently removed through Git's worktree API (gix) | Artifact directories inside a user's workspace must be recoverable; worktrees must keep Git metadata consistent, and removing their working directory with Git is permanent | On macOS, a deleted artifact directory can be found in the Trash and put back; the plan and result state that worktree removal is permanent and does not use the Trash |
+| D5 | Artifact directories — and the separate system-cache directories governed by D27 — are removed only through the system Trash. **No permanent delete of artifact directories, no bypass switch.** Worktree directories are governed by D6 and are permanently removed through Git's worktree API (gix) | Artifact directories inside a user's workspace must be recoverable; worktrees must keep Git metadata consistent, and removing their working directory with Git is permanent | On macOS, a deleted artifact directory can be found in the Trash and put back; the plan and result state that worktree removal is permanent and does not use the Trash |
 | D6 | Worktrees are removed only through Git's worktree API: gix's recursive `remove_worktree` performs the removal, and the metadata is pruned afterwards. Raw `rm -rf` / `remove_dir_all` on a worktree directory is forbidden. This removal is permanent: the working directory and any untracked files are deleted, and the branch ref remains | Git metadata must stay consistent, and the reader must not mistake worktree removal for a recoverable Trash move | `git worktree list` shows no leftovers after removal; no raw-delete call exists in the code paths; the confirmation and result copy name the permanence |
 | D7 | An artifact directory name is only a candidate hint. The verdict must rest on: whether Git tracks it, whether it holds authored content, its activity, and whether it is a symlink escaping the project | "It is called build, so delete it" destroys source code | Counter-example test: a `build/` directory containing tracked files must be Unsafe |
 | D8 | An artifact directory must never be treated as a project root and walked into | Treating `node_modules` as a project root deletes package-internal `dist/`, leaving a tree that looks installed but is corrupt and needs a network restore | Counter-example test: a `node_modules` containing `package.json` must not be recognised as a project root |
@@ -71,7 +71,7 @@ bug. D17–D24 are form-factor and repository-wide constraints.
 | D10 | Before deletion, the path must pass the eight checks **in order**, and verification may only tighten — a resolved path never grants permission the literal path lacked. Protection is decided on a case-folded comparison key, so a protected location is refused in **any** spelling of it (macOS ignores case, and `realpath` does not correct it), and on Windows a component Win32 would read as a different name is refused outright | Guards against symlink escape, spelling tricks, and empty-variable collapse | The whole fuzz corpus is rejected — including the case variants and both canonical spellings of every symlinked protected location; the ancestor-symlink case is rejected; and the precedence of the checks is pinned by a test that applies two rules at once and asserts which one is reported |
 | D11 | Between plan generation and execution, the target identity (path + size + mtime) and its activity are re-checked | Guards against "safe when planned, changed when executed" | Modify the target after planning and assert the item is skipped |
 | D12 | Default selection: `Safe` is selected, `Review` is not, `Unsafe` checkboxes are disabled. A `Review` item runs only when the reader explicitly selects it, and only while the re-check still returns `Review` with unchanged decision fields; `Unsafe` never runs | Defaults must be conservative, and "needs confirmation" must remain actionable instead of turning every explicitly confirmed item into a silent skip | Both the UI and the execution layer have tests for the default, the explicit Review path, and the refusal of `Unsafe` |
-| D13 | High-risk confirmation: 5 or more items, or any `--force`, or more than 10 GB freed in one run requires an explicit manual acknowledgement | Large actions need a human pause | The plan object exposes `ack_reasons`; the execute button stays disabled until acknowledged |
+| D13 | High-risk confirmation: 5 or more items, or any `--force`, or more than 10 GB estimated reclaimable in one run requires an explicit manual acknowledgement | Large actions need a human pause | The plan object exposes `ack_reasons`; the execute button stays disabled until acknowledged |
 | D14 | Execution is serial. A failure on one item does not affect the others. No concurrent deletion | Failures must stay attributable; no confusing partial success | Single-failure test: the remaining items still complete |
 | D15 | The log is written locally only, never sent anywhere, and records time / action / target / reason / result / size | After-the-fact traceability is the basis for trust | Assert on log contents; no network call exists anywhere in the code |
 | D16 | macOS and Windows are verified **separately** on real machines | Trash and Recycle Bin are two different mechanisms; verifying one does not verify the other | One verification record per platform |
@@ -85,6 +85,8 @@ bug. D17–D24 are form-factor and repository-wide constraints.
 | D24 | **The disk-hygiene audit is advisory and never an input to a deletion decision.** It is read-only (D1), it reports `Unknown` — never "met" — for every rule it cannot observe from inside one repository, and no part of the cleanup path may read it. A rule's level is the worst finding it has; `Ok` means a check ran and found nothing. The rule set is the one in `docs/DISK_HYGIENE.md`, and its ids, its situations and its copy are pinned to that document by test | A cleanup verdict and a policy report answer different questions. Letting one move the other would either block a removal for a reason the user cannot act on in that step, or read a policy breach as permission to delete. And a rule reported as met when nothing was checked is D3's failure mode wearing a different hat | `cleanup.rs` builds a plan from worktree and artifact records only; a plan built alongside a report full of violations is unchanged. A test asserts the audit's rule ids equal the policy document's table, and that only the rules the document itself marks unobservable are reported `Unknown` |
 | D25 | **The desktop build updates itself, and that check is the only request the app ever makes.** The feed is the project's own release page; every artifact is signed with the updater's private key, and the public key ships inside the app, so an artifact that does not verify is refused rather than installed. The check runs once per launch, silently: a failure leaves the app working and says nothing until the Settings page is opened. Nothing is uploaded — no telemetry, no usage data, no machine identification — and the browser preview never checks, because it cannot install anything | An app that deletes directories has to be updatable without the reader going to fetch a download by hand, and it has to be able to say that what it downloads is the build this project published. A check that phones home is a different promise than the one this tool makes about the user's files | The app starts with an update on the feed and offers it, naming the version; the same feed with a corrupted signature is refused; the app makes no other request, which the interface says on the update row |
 | D26 | **The initial scan and the execution re-check apply the same rules, and their verdicts must agree on at least 90% of records.** A larger difference is a defect in the initial scan: the scanner is corrected, not the user blocked or asked to resolve it. `Review` → `Review` is agreement; only a changed verdict counts. The comparison is over the records both passes judge, not over a hand-picked plan | The first answer has to be trustworthy. A re-check that keeps overturning the scan means the scan was not answering the same question, and a runtime gate would only hide that defect while making the user pay for it | A recorded comparison over a real project re-checks every record and reports the mismatch; the SwiftPM manifest regression that produced `af.cannot_verify` on every `.build/out` is covered by scanner tests, and the real-project measurement is 0 mismatches in 261 records (173 artifacts + 88 worktrees) |
+| D27 | **System caches are a separate opt-in surface.** Only the known cache roots in product plan §5.1 are inventoried; a known owner is `Safe`, an unrecognised owner is `af.unknown_cache` at `Review`, and a credential, nested repository, escaping symlink or whitelist hit is `Unsafe`. Cache records never enter `ProjectSnapshot` or the project plan. A selected cache moves only through the system Trash after the cache executor re-checks its path, size and verdict. Docker data, CI runner state, Application Support, Downloads and arbitrary `~/Library` content are not cache records. | A cache has no Git history and cannot borrow the worktree/artifact verdict; mixing it into a project plan would make one page's decision act on another surface. The known-root boundary is the only verifiable owner evidence available without guessing. | `cleanup.rs` never reads `CacheSnapshot`; a cache plan has no worktree channel. A known cache is `Safe`, an unknown one `Review`, and a credential inside a cache is `Unsafe` in tests. |
+| D28 | **Workspace discovery is a read-only launcher, not a batch cleanup.** A selected folder that is not a repository may be searched for Git repository roots. Discovery skips hidden and generated directories, never follows symlinks, and does not scan or delete. Selecting a repository starts the ordinary one-repository scan, with its own default-branch decisions. | The existing model anchors every worktree verdict to one repository. Discovering repositories removes the "not a Git repository" dead end without inventing a second, cross-repository decision model. | A workspace fixture reports nested repositories once and ignores `.worktrees` and `node_modules`; the workspace payload is separate from `ProjectSnapshot`; a repository row leads to `scan_project`, not to a workspace-wide plan. |
 
 ---
 
@@ -111,7 +113,9 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   execution module.
 - `worktree-core` performs **read-only scanning only**. Execution lives in a
   separate module and is driven exclusively by a plan object; scanning must never
-  delete anything as a side effect.
+  delete anything as a side effect. `workspace.rs` discovers repository roots and
+  `cache.rs` inventories system caches; neither is part of the project snapshot.
+  The cache executor is separate from `cleanup.rs` and has no worktree channel.
 - All Git calls are collected in a `git` submodule of `worktree-core`, and the
   internal `.git` file format is never parsed (use command output such as
   `git worktree list --porcelain`).
@@ -124,8 +128,9 @@ Form C: Tauri desktop shell ── IPC ──────────┤
 
 ## 3. Naming and contract rules
 
-- Reason codes use the `wt.*` / `af.*` form (worktree / artifact). They are
-  **additive only**: a semantic change requires a new code, and retired codes are
+- Reason codes use the `wt.*` / `af.*` form (worktree / artifact). `af.unknown_cache`
+  is the one additional code used by the separate cache inventory; it does not
+  change any `af.*` meaning. They are **additive only**: a semantic change requires a new code, and retired codes are
   marked deprecated but never reused.
 - Hygiene findings use a **separate** identifier family — `L1`–`L7`, `T1`–`T5`,
   `B1`, `B1.1`, `B2`–`B5`, `Q1`–`Q3`, `X1` — and the two families must not be
@@ -141,6 +146,10 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   and `hygieneRuleKey` in `src/format.ts` is the only place the two spellings are
   mapped. The wire format keeps the dot: that is what the policy document calls the
   rule, and the front end must not invent a different name for it.
+- `WorkspaceSnapshot` and `CacheSnapshot` have their own schema constants
+  (`WORKSPACE_SCHEMA_VERSION`, `CACHE_SCHEMA_VERSION`) and are not read as
+  `ProjectSnapshot`. A system-cache record reuses `ArtifactRecord` with
+  `worktree_path: None` and null Git fields; it never appears in a project plan.
 - `src/types.ts` matches the Rust structs field for field. A change on either side
   must be mirrored on the other side within the same commit, and
   `src/architecture.test.ts` now enforces it mechanically: it reads the field names
@@ -206,6 +215,9 @@ Form C: Tauri desktop shell ── IPC ──────────┤
   **any path that passes verification must be absolute, free of NUL bytes, and free
   of `..` path components.**
 - The following counter-examples are mandatory; none may be skipped:
+  - a `.build` directory with a `Package.swift` is rebuildable, while one without a manifest is `Review`;
+  - a workspace discovery fixture finds nested repositories once and skips `.worktrees`, `node_modules`, symlinks and generated directories;
+  - a known cache is `Safe`, an unknown cache owner is `Review` with `af.unknown_cache`, and a credential inside a cache is `Unsafe`;
   - a `build/` directory containing Git-tracked files;
   - `node_modules` mistaken for a project root;
   - a path that collapses into its parent because a variable was empty;
@@ -392,7 +404,7 @@ and the optional Tauri desktop shell (Form C).
 
 ### Current coverage status
 
-Last updated 2026-11-05. "Met" means a passing automated check exists and would
+Last updated 2026-11-26. "Met" means a passing automated check exists and would
 fail if the behaviour regressed. "Blocked" means the criterion belongs to a
 deliverable that does not exist yet. Three rows are marked **renegotiated**: the
 criterion as written cannot hold in the design that shipped, and the replacement
@@ -430,6 +442,9 @@ guarantee is named next to it.
 | P5 | daemon and browser-UI criteria | Blocked — P5 not started |
 | P6 | wrap-up criteria | Partly met — settings persist on the device, the history page reads the real log, the language picker ships, and the prototype wording is gone. Plan export copies JSON to the clipboard rather than writing a file. Appearance has `pnpm test:theme` and the page grid `pnpm test:layout`, both in a real browser (decision 5) |
 | P6 | 5 · the desktop build updates itself (D25) | Partly met — the updater is wired to the release feed with signature verification, the check runs once per launch and is silent on failure, and the state machine is covered by `src/update.test.ts`; the browser preview refuses to pretend it can. The end-to-end half — an install from a real published release, and a feed whose signature does not verify — waits for the first release and is on the checklist in `docs/RELEASE.md` |
+| P7 | 1 · SwiftPM `.build` is a recognised artifact with `Package.swift` evidence | Met — `ARTIFACT_KINDS` includes `.build`; the rebuild-marker test and the lookup contract cover it, and a missing manifest leaves it `Review` rather than `Safe` |
+| P7 | 2 · a non-repository root discovers repositories without scanning or deleting | Met — `discover_workspace` has nested/generated-tree/symlink fixtures; the workspace page is a launcher and the project scan remains one repository at a time (D28) |
+| P7 | 3 · system caches are a separate Trash-only surface | Met — known cache roots are inventoried, unknown owners are `af.unknown_cache` at `Review`, credentials are `Unsafe`, and the cache executor re-checks before moving through the system Trash (D27) |
 
 The rule for every row: a criterion counts as met only when a test in the
 repository fails if the behaviour regresses.
@@ -444,7 +459,7 @@ naming, log wording, style details, and how unit tests are organised.
 **Documentation change required first** (with the justification stated in the commit
 message):
 
-- any of D1–D24 in section 1;
+- any of D1–D28 in section 1;
 - any field addition, removal, or type change in `src/types.ts` or the Rust structs
   (including `schema_version`);
 - reason-code semantics (adding a code belongs here, and requires updating the

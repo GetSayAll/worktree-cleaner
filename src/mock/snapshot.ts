@@ -8,11 +8,13 @@ import type {
   HygieneReport,
   HygieneRule,
   HygieneRuleStatus,
+  CacheSnapshot,
   ProjectSnapshot,
+  WorkspaceSnapshot,
   Reason,
   WorktreeRecord
 } from "../types";
-import { assess, SNAPSHOT_SCHEMA_VERSION } from "../types";
+import { assess, CACHE_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION } from "../types";
 
 const DAY = 86400_000;
 
@@ -192,6 +194,85 @@ const mockHygieneFindings: HygieneFinding[] = [
 const mockHygiene: HygieneReport = {
   rules: hygieneRules(mockHygieneFindings),
   findings: mockHygieneFindings,
+  warnings: []
+};
+
+/**
+ * Sample cache records for the browser preview. They are intentionally small;
+ * the real scanner reads the cache roots on the machine.
+ */
+/**
+ * Sample workspace discovery for the browser preview. Selecting a repository
+ * still opens the ordinary sample scan; this page never becomes a batch cleanup.
+ */
+export const mockWorkspaceSnapshot: WorkspaceSnapshot = {
+  schema_version: 1,
+  root: "/Users/andy/Develop/Src/AISrc",
+  scanned_at: new Date().toISOString(),
+  repositories: [
+    {
+      path: "/Users/andy/Develop/Src/AISrc/sayall-private-platform",
+      name: "sayall-private-platform",
+      worktree_count: 37
+    },
+    {
+      path: "/Users/andy/Develop/Src/AISrc/open-voice-bridge",
+      name: "open-voice-bridge",
+      worktree_count: 15
+    }
+  ],
+  warnings: []
+};
+
+export const mockCacheSnapshot: CacheSnapshot = {
+  schema_version: CACHE_SCHEMA_VERSION,
+  scanned_at: new Date().toISOString(),
+  records: [
+    {
+      path: "/Users/andy/Library/Caches/ms-playwright",
+      kind: "cache",
+      ecosystem: "system",
+      project_root: "/Users/andy/Library/Caches",
+      worktree_path: null,
+      size_bytes: 1_100_000_000,
+      file_count: 0,
+      last_updated_at: daysAgo(10),
+      git_ignored: null,
+      git_tracked: null,
+      is_symlink: false,
+      symlink_target: null,
+      safety: assess([
+        {
+          code: "af.rebuildable",
+          severity: "Safe",
+          text: "regenerable cache directory",
+          evidence: "known cache kind playwright; it can be rebuilt by its owning tool"
+        }
+      ])
+    },
+    {
+      path: "/Users/andy/Library/Caches/test-build",
+      kind: "cache",
+      ecosystem: "system",
+      project_root: "/Users/andy/Library/Caches",
+      worktree_path: null,
+      size_bytes: 16_100_000_000,
+      file_count: 0,
+      last_updated_at: daysAgo(30),
+      git_ignored: null,
+      git_tracked: null,
+      is_symlink: false,
+      symlink_target: null,
+      safety: assess([
+        {
+          code: "af.unknown_cache",
+          severity: "Review",
+          text: "cache owner is not recognised",
+          evidence: "test-build is under a known cache root but has no entry in the cache table"
+        }
+      ])
+    }
+  ],
   warnings: []
 };
 

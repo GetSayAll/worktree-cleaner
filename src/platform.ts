@@ -28,9 +28,11 @@ import type {
   DetailArg,
   ExecutionOutcome,
   HistoryEntry,
+  CacheSnapshot,
   ProjectSnapshot,
   ResultEntry,
-  ScanOptions
+  ScanOptions,
+  WorkspaceSnapshot
 } from "./types";
 
 /** Whether a Tauri backend is reachable at all. */
@@ -92,6 +94,26 @@ export async function scanProject(
   return invoke<ProjectSnapshot>("scan_project", { path, options });
 }
 
+/** Finds Git repositories below a selected developer root. */
+export async function scanWorkspace(path: string): Promise<WorkspaceSnapshot> {
+  return invoke<WorkspaceSnapshot>("scan_workspace", { path });
+}
+
+/** Runs the read-only system-cache inventory. */
+export async function scanCaches(options: {
+  per_dir_timeout_ms: number;
+  recent_activity_days: number;
+  whitelist: string[];
+}): Promise<CacheSnapshot> {
+  return invoke<CacheSnapshot>("scan_caches", {
+    request: {
+      per_dir_timeout_ms: options.per_dir_timeout_ms,
+      recent_activity_days: options.recent_activity_days,
+      whitelist: options.whitelist
+    }
+  });
+}
+
 /** The executor's knobs, as the settings page holds them. */
 export interface ExecuteKnobs {
   recent_activity_days: number;
@@ -118,6 +140,17 @@ export async function executePlan(
   options: ExecuteKnobs
 ): Promise<ExecutionOutcome> {
   return invoke<ExecutionOutcome>("execute_plan", {
+    request: { plan, snapshot, ...options }
+  });
+}
+
+/** Runs the separate system-cache plan. It never touches a project snapshot. */
+export async function executeCachePlan(
+  plan: CleanupPlan,
+  snapshot: CacheSnapshot,
+  options: ExecuteKnobs
+): Promise<ExecutionOutcome> {
+  return invoke<ExecutionOutcome>("execute_cache_plan", {
     request: { plan, snapshot, ...options }
   });
 }

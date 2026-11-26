@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import {
   artifacts,
+  cacheSnapshot,
   canOpen,
   counts,
   executing,
@@ -13,10 +14,12 @@ import {
   resetToWelcome,
   scanState,
   selectedSummary,
+  settings,
   snapshot,
   startScan,
   view,
   worktrees,
+  workspaceSnapshot,
   type ViewKey
 } from "./state";
 import { homePath } from "./format";
@@ -26,9 +29,11 @@ import { updateState } from "./update";
 import brandLogo from "./assets/brand.svg";
 import WelcomeView from "./views/WelcomeView.vue";
 import ScanningView from "./views/ScanningView.vue";
+import WorkspaceView from "./views/WorkspaceView.vue";
 import OverviewView from "./views/OverviewView.vue";
 import WorktreesView from "./views/WorktreesView.vue";
 import ArtifactsView from "./views/ArtifactsView.vue";
+import CacheView from "./views/CacheView.vue";
 import HygieneView from "./views/HygieneView.vue";
 import CleanupPlanView from "./views/CleanupPlanView.vue";
 import ResultView from "./views/ResultView.vue";
@@ -38,9 +43,11 @@ import SettingsView from "./views/SettingsView.vue";
 const VIEWS = {
   welcome: WelcomeView,
   scanning: ScanningView,
+  workspace: WorkspaceView,
   overview: OverviewView,
   worktrees: WorktreesView,
   artifacts: ArtifactsView,
+  caches: CacheView,
   hygiene: HygieneView,
   plan: CleanupPlanView,
   result: ResultView,
@@ -54,9 +61,11 @@ const currentView = computed(() => VIEWS[view.value]);
 // text has to be looked up during rendering rather than captured here.
 const NAV: Array<{ key: ViewKey; label: keyof Messages["nav"] }> = [
   { key: "welcome", label: "project" },
+  { key: "workspace", label: "workspace" },
   { key: "overview", label: "overview" },
   { key: "worktrees", label: "worktrees" },
   { key: "artifacts", label: "artifacts" },
+  { key: "caches", label: "caches" },
   { key: "hygiene", label: "hygiene" },
   { key: "plan", label: "plan" },
   { key: "result", label: "result" },
@@ -76,10 +85,22 @@ const desktop = isDesktop();
 
 function navCount(key: ViewKey): string {
   switch (key) {
+    case "workspace":
+      return `${workspaceSnapshot.value?.repositories.length ?? ""}`;
     case "worktrees":
       return `${worktrees.value.length}`;
     case "artifacts":
       return `${artifacts.value.length}`;
+    case "caches": {
+      const minBytes = settings.min_artifact_mb * 1024 * 1024;
+      const visible = (cacheSnapshot.value?.records ?? []).filter(
+        (record) =>
+          record.size_bytes === null ||
+          record.size_bytes >= minBytes ||
+          record.safety.status === "Unsafe"
+      ).length;
+      return visible > 0 ? `${visible}` : "";
+    }
     case "hygiene": {
       // What is broken, not what was checked: a page whose badge counted 22
       // compliant rules would say nothing a reader needs.
@@ -150,7 +171,11 @@ function rescan() {
              `projectPath` is set before the scan starts, and a bar that says "no
              project selected" while the app is visibly scanning that project
              reads as a bug. The counts and the actions wait for the result. -->
-        <template v-if="projectPath">
+        <template v-if="view === 'caches'">
+          <span class="topbar__path">{{ messages.caches.title }}</span>
+          <span class="faint tiny">{{ messages.caches.inventoryHint }}</span>
+        </template>
+        <template v-else-if="projectPath">
           <span class="topbar__path" :title="projectPath">{{ homePath(projectPath) }}</span>
           <span v-if="scanState.running" class="faint tiny">{{ messages.scan.scanning }}</span>
           <span v-if="isDemoData" class="badge badge--accent">{{ messages.app.sampleData }}</span>

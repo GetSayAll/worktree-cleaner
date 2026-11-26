@@ -233,6 +233,8 @@ export function scanFailureText(failure: ScanFailure): string {
       return messages.errors.scan.empty;
     case "not_found":
       return messages.errors.scan.notFound(failure.path);
+    case "no_repositories":
+      return messages.errors.noRepositories(failure.path);
     case "not_a_git_repository":
       return messages.errors.scan.notRepository(failure.path);
     case "git_unavailable":

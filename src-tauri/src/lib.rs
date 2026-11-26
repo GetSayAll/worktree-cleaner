@@ -20,13 +20,17 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
+use worktree_core::cache::{
+    execute_cache_plan as core_execute_cache, scan_system_caches, CacheScanOptions, CacheSnapshot,
+};
 use worktree_core::cleanup::{
     execute_plan_with_progress as core_execute, ExecuteOptions, ExecutionOutcome,
 };
 use worktree_core::log;
+use worktree_core::workspace::discover_workspace as core_discover_workspace;
 use worktree_core::{
     scan_project as core_scan, ActivityAction, ActivityEvent, CleanupPlan, DetailArg, HistoryEntry,
-    ProjectSnapshot, ScanError, ScanOptions,
+    ProjectSnapshot, ScanError, ScanOptions, WorkspaceSnapshot,
 };
 
 /// A scan failure with a stable code for the interface and diagnostic text that
@@ -69,6 +73,87 @@ async fn scan_project(path: String, options: ScanOptions) -> Result<ProjectSnaps
     .map_err(|error| ScanFailure::TaskFailed {
         detail: error.to_string(),
     })?
+}
+
+/// Finds the Git repositories below a developer root.
+///
+/// Discovery is read-only and deliberately does not scan the repositories it
+/// finds: a scan remains one repository at a time, so every worktree verdict is
+/// still anchored to that repository's default branch.
+#[tauri::command]
+async fn scan_workspace(path: String) -> Result<WorkspaceSnapshot, ScanFailure> {
+    let requested = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        core_discover_workspace(&path).map_err(|error| ScanFailure::from_core(error, &requested))
+    })
+    .await
+    .map_err(|error| ScanFailure::TaskFailed {
+        detail: error.to_string(),
+    })?
+}
+
+/// Inventories the known system-cache roots.
+///
+/// This is separate from a project scan: cache directories have no Git history,
+/// and the result is its own payload so a project plan cannot accidentally act
+/// on a cache record.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct CacheScanRequest {
+    per_dir_timeout_ms: u64,
+    recent_activity_days: u32,
+    whitelist: Vec<String>,
+}
+
+#[tauri::command]
+async fn scan_caches(request: CacheScanRequest) -> Result<CacheSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let options = CacheScanOptions {
+            per_dir_timeout: Duration::from_millis(request.per_dir_timeout_ms.max(1)),
+            recent_activity_days: request.recent_activity_days,
+            whitelist: request
+                .whitelist
+                .iter()
+                .map(|rule| worktree_core::path::expand_tilde(rule))
+                .collect(),
+            now: std::time::SystemTime::now(),
+        };
+        scan_system_caches(&options)
+    })
+    .await
+    .map_err(|error| format!("the cache scan did not finish: {error}"))
+}
+
+/// Everything the cache executor needs, in one request.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct CacheExecuteRequest {
+    plan: CleanupPlan,
+    snapshot: CacheSnapshot,
+    recent_activity_days: u32,
+    whitelist: Vec<String>,
+    per_dir_timeout_ms: u64,
+    log_path: Option<String>,
+}
+
+/// Runs a confirmed cache plan. Every move is re-checked before it touches the
+/// filesystem, and the move itself goes through the system Trash.
+#[tauri::command]
+async fn execute_cache_plan(request: CacheExecuteRequest) -> Result<ExecutionOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let options = ExecuteOptions {
+            recent_activity_days: request.recent_activity_days,
+            untracked_as_unsafe: false,
+            whitelist: request.whitelist,
+            per_dir_timeout: Duration::from_millis(request.per_dir_timeout_ms.max(1)),
+            git_timeout: Duration::from_secs(10),
+            now: std::time::SystemTime::now(),
+            log_path: request.log_path.map(PathBuf::from),
+        };
+        core_execute_cache(&request.plan, &request.snapshot, &options)
+    })
+    .await
+    .map_err(|error| format!("the cache execution task did not finish: {error}"))
 }
 
 /// Everything the executor needs, in one request.
@@ -282,7 +367,10 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             scan_project,
+            scan_workspace,
+            scan_caches,
             execute_plan,
+            execute_cache_plan,
             log_path,
             read_history,
             clear_log,

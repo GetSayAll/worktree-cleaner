@@ -124,12 +124,17 @@ pub enum ReasonCode {
     AfGitIgnored,
     #[serde(rename = "af.rebuildable")]
     AfRebuildable,
+    /// A directory under a known cache root whose owner is not in the cache table.
+    /// `Review`: the contents are cache-shaped, but no check can prove they are
+    /// regenerable, so the reader must decide.
+    #[serde(rename = "af.unknown_cache")]
+    AfUnknownCache,
 }
 
 impl ReasonCode {
     /// All reason codes. Used by the contract-drift test (the serialised value must
     /// match [`Self::as_str`]).
-    pub const ALL: [ReasonCode; 31] = [
+    pub const ALL: [ReasonCode; 32] = [
         ReasonCode::WtMain,
         ReasonCode::WtLocked,
         ReasonCode::WtDirty,
@@ -161,6 +166,7 @@ impl ReasonCode {
         ReasonCode::AfEmpty,
         ReasonCode::AfGitIgnored,
         ReasonCode::AfRebuildable,
+        ReasonCode::AfUnknownCache,
     ];
 
     /// External string form, which must match `serde`'s serialised value.
@@ -197,6 +203,7 @@ impl ReasonCode {
             ReasonCode::AfEmpty => "af.empty",
             ReasonCode::AfGitIgnored => "af.git_ignored",
             ReasonCode::AfRebuildable => "af.rebuildable",
+            ReasonCode::AfUnknownCache => "af.unknown_cache",
         }
     }
 }
@@ -427,7 +434,7 @@ mod tests {
                 "reason code must carry a wt. / af. prefix: {s}"
             );
         }
-        assert_eq!(ReasonCode::ALL.len(), 31);
+        assert_eq!(ReasonCode::ALL.len(), 32);
     }
 
     #[test]

@@ -20,6 +20,7 @@ export const en = {
   // system: the generic noun rather than a guess.
   platform: {
     trash: { macos: "Trash", windows: "Recycle Bin", other: "system trash" },
+    fileManager: { macos: "Finder", windows: "File Explorer", other: "file manager" },
     pathExample: { macos: "/Users/you/repo", windows: "C:\\Users\\you\\repo", other: "/path/to/your-repo" },
   },
   app: {
@@ -47,6 +48,8 @@ export const en = {
   nav: {
     project: "Project",
     scan: "Scan",
+    workspace: "Repositories",
+    caches: "System caches",
     overview: "Overview",
     worktrees: "Worktree",
     artifacts: "Build artifacts",
@@ -144,7 +147,8 @@ export const en = {
       cannot_verify: "could not complete the check",
       empty: "the directory is empty",
       git_ignored: "ignored by .gitignore",
-      rebuildable: "regenerable directory"
+      rebuildable: "regenerable directory",
+      unknown_cache: "cache owner is not recognised"
     }
   },
   // What one executed action did, keyed by DetailCode (src/types.ts). The core
@@ -226,6 +230,9 @@ export const en = {
         failed: "The scan did not finish. The operation log has the technical detail.",
         cancelled: "Cancelled the scan after {elapsed}"
       },
+      workspace: {
+        discovered: "Found {repositories} repositories in this folder"
+      },
       project: {
         switched: "Switched to this project from {from}"
       },
@@ -259,6 +266,12 @@ export const en = {
     detachedHead: "(detached HEAD)",
     defaultBranch: "default branch",
     unsafeTooltip: "Must not delete items cannot be selected",
+    unknownAgent: "unknown agent",
+    unknownAgentHint:
+      "No agent marker appears in the path or branch. The label is informational and does not affect deletion safety.",
+    reveal: "Show in {{fileManager}}",
+    revealShort: "↗",
+    revealHint: "Show this item in {{fileManager}}",
     mainWorktree: (name: string) => `${name} (main worktree)`,
     rescan: "Rescan",
     copied: "Copied",
@@ -314,11 +327,14 @@ export const en = {
     }
   },
   errors: {
+    noRepositories: (path: string) =>
+      `No Git repositories were found under ${path}. Choose a repository, or a folder that contains one.`,
     picker: "The folder picker could not open. Type or paste the project path instead.",
     historyRead: "The local operation log could not be read. Check the log file's permissions.",
     openTrash: "The {{trash}} could not be opened. Open it manually.",
     openLogDirectory: "The log directory could not be opened. Check that the path still exists.",
     clearLog: "The log could not be cleared. Check the file's permissions.",
+    reveal: "The item could not be shown. It may have moved or been deleted.",
     execute: "The cleanup did not finish. Try again; if it still fails, read the operation log.",
     logWrite: (path: string) =>
       `The cleanup ran, but the operation log at ${path} could not be written, so the audit trail is incomplete. Check disk space and the log directory's permissions.`,
@@ -333,6 +349,73 @@ export const en = {
       unknown:
         "The scan did not finish. Try again; the operation log has the technical detail."
     }
+  },
+  workspace: {
+    title: "Repositories",
+    lede:
+      "This folder contains several Git repositories. Each one is scanned and cleaned on its own, so every worktree verdict stays anchored to its repository's default branch.",
+    chooseAnother: "Choose another folder",
+    repositoriesTitle: (count: number) => `Repositories (${count})`,
+    oneAtATime: "One repository at a time",
+    worktrees: (count: number | null) =>
+      count === null
+        ? "worktree count unknown"
+        : count === 1
+          ? "1 worktree"
+          : `${count} worktrees`,
+    scan: "Scan repository",
+    rowEvidence: "Read-only discovery; scan this repository to evaluate its worktrees",
+    empty: "No Git repositories were found under this folder."
+  },
+  caches: {
+    title: "System caches",
+    lede:
+      "A separate, read-only inventory of known cache roots. Only directories you select are moved to the {{trash}}; no source tree is touched.",
+    rulesSummary:
+      "Known cache directories are Safe. An unrecognised cache owner is Review and is never selected automatically.",
+    scanning: "Scanning caches…",
+    rescan: "Rescan caches",
+    scanFailed:
+      "The cache inventory did not finish. Try again; the operation log has the technical detail.",
+    stats: {
+      directories: "Cache directories",
+      directoriesSub: "Read-only inventory",
+      bytes: "Measured cache size",
+      bytesSub: "Across every listed cache",
+      bytesUnknown: (count: number) =>
+        count === 1 ? "1 directory could not be measured" : `${count} directories could not be measured`,
+      selected: "Selected",
+      selectedSub: (bytes: string) => `${bytes} to the {{trash}}`
+    },
+    inventoryTitle: "Known cache roots",
+    inventoryHint: "Showing caches above the artifact size threshold; unknown owners need an explicit choice",
+    selectAllKnown: "Select every known-safe cache",
+    unknownOwner: "owner unknown",
+    files: "files",
+    empty: "No cache directories at or above the size threshold were found.",
+    planTitle: "Cache cleanup plan",
+    planHint: "Every selected path is re-checked before it moves",
+    planLede:
+      "These directories go to the {{trash}}. Closing the owning app first avoids moving files it is still writing.",
+    noSelection: "Select a cache directory to build a plan.",
+    planTotal: (bytes: string) => `Selected size: ${bytes}`,
+    ackConfirm:
+      "I reviewed the selected cache directories. I understand they will move to the {{trash}} and can be restored.",
+    execute: "Move selected to {{trash}}",
+    running: "Moving…",
+    resultTitle: "Cache result",
+    openTrash: "Open {{trash}}",
+    resultSummary: (moved: number, bytes: string, failed: number) =>
+      `Moved ${moved} cache directories to the {{trash}} (${bytes}); ${failed} selected items were not moved.`,
+    columns: {
+      directory: "Directory",
+      detail: "Detail",
+      result: "Result",
+      size: "Size"
+    },
+    history: "View history",
+    footer: "Unknown cache owners stay Review even when their size is large.",
+    backToProject: "Back to project"
   },
   welcome: {
     lede: "Scan a repository, list every worktree and build artifact, and explain what can be deleted and what must stay.",
@@ -737,7 +820,7 @@ export const en = {
       // follows the active language.
       count: (n: number) =>
         `This run will process ${n} ${n === 1 ? "item" : "items"}.`,
-      size: (limit: string) => `A single run frees more than ${limit}`,
+      size: (limit: string) => `A single run can reclaim more than ${limit}`,
       // With unmeasurable items in the plan the total is a lower bound, so the
       // size threshold above cannot be evaluated: this reason gates the run on
       // its own instead of guessing.
@@ -814,11 +897,21 @@ export const en = {
   result: {
     title: "Result",
     successTitle: "Cleanup complete",
-    successSummary: (worktrees: number, artifacts: number, size: string) =>
-      `Removed ${worktrees} worktrees, moved ${artifacts} artifact directories to the {{trash}}, and freed ${size}`,
+    successSummary: (worktrees: number, freed: string, artifacts: number, trash: string) =>
+      `Removed ${worktrees} worktrees and freed ${freed} now. Moved ${artifacts} artifact directories to the {{trash}}; ${trash} is freed after it is emptied.`,
     partialTitle: "Cleanup finished with skipped items",
-    partialSummary: (worktrees: number, artifacts: number, size: string, failed: number) =>
-      `Removed ${worktrees} worktrees, moved ${artifacts} artifact directories to the {{trash}}, and freed ${size}; ${failed} selected items were not deleted; the table below says why`,
+    partialSummary: (
+      worktrees: number,
+      freed: string,
+      artifacts: number,
+      trash: string,
+      failed: number
+    ) =>
+      `Removed ${worktrees} worktrees and freed ${freed} now. Moved ${artifacts} artifact directories to the {{trash}}; ${trash} is freed after it is emptied. ${failed} selected items were not deleted; the table below says why.`,
+    totalAfterEmptying: (size: string) =>
+      `Total after emptying the {{trash}}: ${size}`,
+    topRemaining: "Largest items not deleted",
+    topHandled: "Largest items handled",
     openTrash: "Open {{trash}}",
     trashNotice:
       "Build artifacts can be restored from the {{trash}}; worktrees cannot.",
@@ -829,20 +922,18 @@ export const en = {
     openLog: "Open log",
     logFailedTitle: "The operation log could not be written",
     stats: {
-      spaceFreed: "Space freed",
-      spaceFreedSub: "includes {{trash}} moves and worktrees",
-      // Items that could never be measured contribute nothing to `freed`; saying
-      // "at least" keeps the number honest instead of reporting a false total.
-      spaceFreedSubUnknown: (n: number) =>
-        `At least the measured sizes · ${n} items had no measurable size`,
-      // A count that mixes worktrees and directories cannot be checked against the
-      // Trash: worktree removal deletes in place and never goes through it.
-      // Saying so here is what stops "4 succeeded, 1 in the Trash" looking wrong.
-      succeeded: "Handled",
-      succeededSub: (trashed: number) =>
-        `${trashed} went to the {{trash}}; worktrees do not.`,
-      movedToTrash: "Went to {{trash}}",
-      movedToTrashSub: "recoverable from {{trash}}",
+      freedNow: "Freed now",
+      freedNowSub: "worktrees permanently removed",
+      freedNowSubUnknown: (n: number) =>
+        `At least the measured sizes · ${n} worktrees had no measurable size`,
+      inTrash: "In {{trash}}",
+      inTrashSub: (n: number) =>
+        n === 1 ? "1 artifact directory; freed after emptying" : `${n} artifact directories; freed after emptying`,
+      inTrashSubUnknown: (n: number) =>
+        `At least the measured sizes · ${n} artifact directories had no measurable size`,
+      handled: "Handled",
+      handledSub: (worktrees: number, artifacts: number) =>
+        `${worktrees} worktrees and ${artifacts} artifact directories`,
       skippedFailed: "Not deleted",
       skippedFailedSub: "nothing was removed; the table below says why"
     },

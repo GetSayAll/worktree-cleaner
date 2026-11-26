@@ -16,6 +16,7 @@ export const zhCN = {
   // `other` 是第三方系统上的浏览器预览：用通用说法，不猜。
   platform: {
     trash: { macos: "废纸篓", windows: "回收站", other: "系统回收站" },
+    fileManager: { macos: "Finder", windows: "文件资源管理器", other: "文件管理器" },
     pathExample: { macos: "/Users/you/repo", windows: "C:\\Users\\you\\repo", other: "/path/to/your-repo" },
   },
   app: {
@@ -40,6 +41,8 @@ export const zhCN = {
   nav: {
     project: "项目",
     scan: "扫描",
+    workspace: "仓库列表",
+    caches: "系统缓存",
     overview: "总览",
     worktrees: "工作树",
     artifacts: "构建产物",
@@ -126,7 +129,8 @@ export const zhCN = {
       cannot_verify: "无法完成检查",
       empty: "该目录为空",
       git_ignored: "已被 .gitignore 忽略",
-      rebuildable: "可重新生成的目录"
+      rebuildable: "可重新生成的目录",
+      unknown_cache: "缓存所属应用未知"
     }
   },
   // 一次执行动作的结果，按 DetailCode（`src/types.ts`）索引。核心决定「发生了什么」
@@ -197,6 +201,9 @@ export const zhCN = {
         failed: "扫描没有完成。技术详情见操作日志。",
         cancelled: "扫描在 {elapsed} 后被取消"
       },
+      workspace: {
+        discovered: "在这个文件夹中找到了 {repositories} 个仓库"
+      },
       project: {
         switched: "从 {from} 切换到这个项目"
       },
@@ -228,6 +235,12 @@ export const zhCN = {
     detachedHead: "（游离 HEAD）",
     defaultBranch: "默认分支",
     unsafeTooltip: "禁止删除的条目无法勾选",
+    unknownAgent: "未知代理",
+    unknownAgentHint:
+      "路径和分支里都没有代理标记。这个标签只用于说明，不影响删除安全判断。",
+    reveal: "在{{fileManager}}中显示",
+    revealShort: "↗",
+    revealHint: "在{{fileManager}}中显示这个项目",
     mainWorktree: (name: string) => `${name}（主工作树）`,
     rescan: "重新扫描",
     copied: "已复制",
@@ -284,11 +297,14 @@ export const zhCN = {
     }
   },
   errors: {
+    noRepositories: (path: string) =>
+      `${path} 下面没有找到 Git 仓库。请选择一个仓库，或选择包含仓库的文件夹。`,
     picker: "无法打开文件夹选择器。请手动输入或粘贴项目路径。",
     historyRead: "无法读取本地操作日志。请检查日志文件的权限。",
     openTrash: "无法打开{{trash}}。请手动打开。",
     openLogDirectory: "无法打开日志目录。请检查路径是否仍然存在。",
     clearLog: "无法清空日志。请检查文件权限。",
+    reveal: "无法显示这个项目。它可能已被移动或删除。",
     execute: "清理没有执行完成。请重试；如果仍然失败，请查看操作日志。",
     logWrite: (path: string) =>
       `清理已经执行，但操作日志 ${path} 写入失败，审计记录不完整。请检查磁盘空间和日志目录权限。`,
@@ -301,6 +317,65 @@ export const zhCN = {
         "无法读取这个文件夹的 Git 信息。请确认文件夹可访问。技术详情见操作日志。",
       unknown: "扫描没有完成。请重试；技术详情见操作日志。"
     }
+  },
+  workspace: {
+    title: "仓库列表",
+    lede:
+      "这个文件夹里包含多个 Git 仓库。每个仓库单独扫描、单独清理，所有工作树判定仍然以它自己的默认分支为准。",
+    chooseAnother: "选择其他文件夹",
+    repositoriesTitle: (count: number) => `仓库（${count}）`,
+    oneAtATime: "一次处理一个仓库",
+    worktrees: (count: number | null) =>
+      count === null ? "工作树数量未知" : count === 1 ? "1 个工作树" : `${count} 个工作树`,
+    scan: "扫描这个仓库",
+    rowEvidence: "只读发现；扫描这个仓库后才会评估它的工作树",
+    empty: "这个文件夹下面没有找到 Git 仓库。"
+  },
+  caches: {
+    title: "系统缓存",
+    lede:
+      "这是一个独立的只读缓存清单，只列出已知缓存根目录。只有你明确选中的目录才会移入{{trash}}；不会改动源码目录。",
+    rulesSummary:
+      "已知缓存目录为可安全删除；无法识别所属应用的缓存为需确认，且默认不勾选。",
+    scanning: "正在扫描缓存…",
+    rescan: "重新扫描缓存",
+    scanFailed: "缓存清单没有扫描完成。请重试；技术详情见操作日志。",
+    stats: {
+      directories: "缓存目录",
+      directoriesSub: "只读清单",
+      bytes: "缓存体积",
+      bytesSub: "所有已列出缓存的总和",
+      bytesUnknown: (count: number) => `${count} 个目录无法测量体积`,
+      selected: "已选择",
+      selectedSub: (bytes: string) => `将移入{{trash}}：${bytes}`
+    },
+    inventoryTitle: "已知缓存根目录",
+    inventoryHint: "只显示超过产物体积阈值的缓存；无法识别所属应用的缓存需要你明确确认",
+    selectAllKnown: "选中全部已知安全缓存",
+    unknownOwner: "所属应用未知",
+    files: "个文件",
+    empty: "没有找到达到体积阈值的缓存目录。",
+    planTitle: "缓存清理计划",
+    planHint: "每个选中路径都会在移动前重新检查",
+    planLede: "这些目录会移入{{trash}}；先关闭所属应用，避免移动它仍在写入的文件。",
+    noSelection: "选择一个缓存目录来生成计划。",
+    planTotal: (bytes: string) => `已选体积：${bytes}`,
+    ackConfirm: "我已核对选中的缓存目录；它们会移入{{trash}}，之后可以恢复。",
+    execute: "把选中项移入{{trash}}",
+    running: "正在移动…",
+    resultTitle: "缓存清理结果",
+    openTrash: "打开{{trash}}",
+    resultSummary: (moved: number, bytes: string, failed: number) =>
+      `已把 ${moved} 个缓存目录移入{{trash}}（${bytes}）；有 ${failed} 个选中项未移动。`,
+    columns: {
+      directory: "目录",
+      detail: "详情",
+      result: "结果",
+      size: "体积"
+    },
+    history: "查看历史记录",
+    footer: "无法识别所属应用的缓存即使体积很大，也保持为需确认。",
+    backToProject: "返回项目"
   },
   welcome: {
     lede: "扫描仓库，列出全部工作树和构建产物，并说明哪些能删、哪些不能删。",
@@ -682,7 +757,7 @@ export const zhCN = {
       // 的字符串，单位跟着当前语言走。
       count: (n: number) =>
         `本次将处理 ${n} 项。`,
-      size: (limit: string) => `单次释放超过 ${limit}`,
+      size: (limit: string) => `单次预计可释放超过 ${limit}`,
       // 计划里存在无法测量的条目时，合计只是下界，上面的体积阈值无法判定：
       // 这条理由独立拦一道，而不是猜。
       unmeasurable: (n: number) =>
@@ -754,11 +829,21 @@ export const zhCN = {
   result: {
     title: "执行结果",
     successTitle: "清理完成",
-    successSummary: (worktrees: number, artifacts: number, size: string) =>
-      `已移除 ${worktrees} 个工作树，将 ${artifacts} 个产物目录移入{{trash}}，释放 ${size}`,
+    successSummary: (worktrees: number, freed: string, artifacts: number, trash: string) =>
+      `已移除 ${worktrees} 个工作树，立即释放 ${freed}；将 ${artifacts} 个产物目录移入{{trash}}，清空后可再释放 ${trash}。`,
     partialTitle: "清理完成，但有跳过项",
-    partialSummary: (worktrees: number, artifacts: number, size: string, failed: number) =>
-      `已移除 ${worktrees} 个工作树，将 ${artifacts} 个产物目录移入{{trash}}，释放 ${size}；有 ${failed} 个已勾选条目未删除，原因见下表`,
+    partialSummary: (
+      worktrees: number,
+      freed: string,
+      artifacts: number,
+      trash: string,
+      failed: number
+    ) =>
+      `已移除 ${worktrees} 个工作树，立即释放 ${freed}；将 ${artifacts} 个产物目录移入{{trash}}，清空后可再释放 ${trash}。有 ${failed} 个已勾选条目未删除，原因见下表。`,
+    totalAfterEmptying: (size: string) =>
+      `清空{{trash}}后合计可释放 ${size}`,
+    topRemaining: "未删除的最大项",
+    topHandled: "已处理的最大项",
     openTrash: "打开{{trash}}",
     trashNotice:
       "构建产物可从{{trash}}恢复；工作树不能。",
@@ -769,20 +854,17 @@ export const zhCN = {
     openLog: "打开日志",
     logFailedTitle: "操作日志没能写入",
     stats: {
-      spaceFreed: "已释放空间",
-      spaceFreedSub: "包含{{trash}}移动与工作树移除",
-      // 从头就测不出体积的条目对 `freed` 没有贡献；用「至少」表述，比报一个
-      // 假合计诚实。
-      spaceFreedSubUnknown: (n: number) =>
-        `至少为已测得的体积 · ${n} 项无法测量体积`,
-      // 「成功」把两件事混在一起，而用户会拿它和回收站里的数量对：
-      // 工作树是 git 直接删的，根本不进回收站，于是 4 成功 / 回收站 1 看着像对不上。
-      // 现在说清成功数里有什么、什么才会进回收站。
-      succeeded: "已处理",
-      succeededSub: (trashed: number) =>
-        `其中 ${trashed} 项进入{{trash}}；工作树不进入{{trash}}。`,
-      movedToTrash: "进了{{trash}}",
-      movedToTrashSub: "可从{{trash}}恢复",
+      freedNow: "已立即释放",
+      freedNowSub: "工作树永久删除",
+      freedNowSubUnknown: (n: number) =>
+        `至少为已测得的体积 · ${n} 个工作树无法测量体积`,
+      inTrash: "在{{trash}}里",
+      inTrashSub: (n: number) => `${n} 个产物目录；清空后释放`,
+      inTrashSubUnknown: (n: number) =>
+        `至少为已测得的体积 · ${n} 个产物目录无法测量体积`,
+      handled: "已处理",
+      handledSub: (worktrees: number, artifacts: number) =>
+        `${worktrees} 个工作树、${artifacts} 个产物目录`,
       skippedFailed: "未删除",
       skippedFailedSub: "都没删，原因见下表"
     },

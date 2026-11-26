@@ -295,9 +295,11 @@ Met is `--safe` on `--safe-bg`; failed is `--unsafe` on `--unsafe-bg`; pending i
 | Page | Page icon | Composition |
 |---|---|---|
 | Welcome | large app mark | hero, command composer, three-part assurance sheet, recent projects inset list |
+| Repositories | folder tree | page head, discovery note, read-only repository list, one scan action per row |
 | Overview | grid | page head, four stat cards, banners, largest worktrees and artifacts cards, action bar |
 | Worktrees | branch | page head, hygiene banner, toolbar (status segments + search), grouped list with detail flyout, action bar |
 | Build artifacts | cube | page head, toolbar (sort + size slider + summary), collapsible group cards, action bar |
+| System caches | archive | page head, read-only inventory, three stat cards, known/unknown cache rows, inline cache plan and result |
 | Disk hygiene | shield | page head, page note, four stat cards, violation banner, rule group cards, setup card, scope card |
 | Cleanup plan | checklist | page head, four stat cards, gates, two channel cards, confirmation, action bar |
 | Result | check circle | page head with actions, four stat cards, result table, action bar |

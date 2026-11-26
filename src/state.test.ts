@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mockRoot, mockSnapshot } from "./mock/snapshot";
+import { mockCacheSnapshot, mockRoot, mockSnapshot } from "./mock/snapshot";
 import { assess } from "./types";
 import type { ExecutionOutcome, ResultEntry } from "./types";
 import { basename, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
@@ -40,6 +40,15 @@ async function freshStateWithExecutor(
     // that leaves it out fails at import rather than quietly falling back.
     hostOs: () => "macos" as const,
     scanProject: vi.fn(),
+    scanWorkspace: async () => ({
+      schema_version: 1,
+      root: "/tmp",
+      scanned_at: "",
+      repositories: [],
+      warnings: []
+    }),
+    scanCaches: vi.fn(),
+    executeCachePlan: vi.fn(),
     executePlan: async (plan: unknown) => {
       plans.push(plan);
       return outcome;
@@ -440,7 +449,9 @@ describe("an unmeasurable size travels as unknown", () => {
     expect(entry?.size_bytes).toBeNull();
     // "0 B freed" would be a measurement that never happened.
     expect(state.resultSummary.value.freed).toBe(0);
-    expect(state.resultSummary.value.freed_unknown).toBe(1);
+    expect(state.resultSummary.value.freed_unknown).toBe(0);
+    expect(state.resultSummary.value.trash_bytes).toBe(0);
+    expect(state.resultSummary.value.trash_unknown).toBe(1);
     // The history entry keeps the same value.
     expect(state.history.value[0]?.size_bytes).toBeNull();
   });
@@ -686,12 +697,13 @@ describe("group selection and blocked execution", () => {
     unmockPlatform();
 
     const summary = state.resultSummary.value;
-    // 100 from the one measured move: the skipped item's 200 was not freed.
-    expect(summary.freed).toBe(100);
+    // 100 is in the Trash, not freed yet; the skipped item's 200 was not removed.
+    expect(summary.freed).toBe(0);
+    expect(summary.trash_bytes).toBe(100);
     // Two things were moved to the Trash, one of them with an unknown size.
     expect(summary.trashed).toBe(2);
     expect(summary.failed).toBe(1);
-    expect(summary.freed_unknown).toBe(1);
+    expect(summary.trash_unknown).toBe(1);
   });
 
   it("refuses Unsafe and bundled items in a group toggle", async () => {
@@ -848,6 +860,19 @@ describe("scan failures", () => {
     vi.doMock("./platform", () => ({
       isDesktop: () => true,
       hostOs: () => "macos" as const,
+      scanWorkspace: async () => ({
+        schema_version: 1,
+        root: "/tmp/plain-folder",
+        scanned_at: "",
+        repositories: [
+          {
+            path: "/tmp/plain-folder",
+            name: "plain-folder",
+            worktree_count: null
+          }
+        ],
+        warnings: []
+      }),
       scanProject: async () => {
         throw failure;
       },
@@ -866,5 +891,121 @@ describe("scan failures", () => {
     expect(state.scanFailure.value).toEqual(failure);
     const failed = logActivity.mock.calls.find(([action]) => action === "scan.failed");
     expect(failed?.[2]).toEqual({ error: failure.detail });
+  });
+});
+
+describe("workspace discovery", () => {
+  it("opens the repository list instead of scanning a folder that is not a repository", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", {
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    });
+    const scanProject = vi.fn();
+    vi.doMock("./platform", () => ({
+      isDesktop: () => true,
+      hostOs: () => "macos" as const,
+      scanWorkspace: async () => ({
+        schema_version: 1,
+        root: "/Users/andy/Develop/Src/AISrc",
+        scanned_at: "",
+        repositories: [
+          { path: "/Users/andy/Develop/Src/AISrc/one", name: "one", worktree_count: 2 },
+          { path: "/Users/andy/Develop/Src/AISrc/two", name: "two", worktree_count: null }
+        ],
+        warnings: []
+      }),
+      scanProject,
+      scanCaches: vi.fn(),
+      executeCachePlan: vi.fn(),
+      executePlan: vi.fn(),
+      logPath: async () => null,
+      readHistory: async () => [],
+      readActivity: async () => [],
+      logActivity: vi.fn(async () => undefined),
+      onExecutionProgress: async () => null
+    }));
+    const state = await import("./state");
+    await state.startScan("/Users/andy/Develop/Src/AISrc");
+    unmockPlatform();
+    vi.unstubAllGlobals();
+
+    expect(state.view.value).toBe("workspace");
+    expect(state.workspaceSnapshot.value?.repositories).toHaveLength(2);
+    expect(scanProject).not.toHaveBeenCalled();
+  });
+});
+
+describe("system cache planning", () => {
+  it("selects known caches only and lets the reader opt into an unknown owner", async () => {
+    const state = await freshState();
+    state.cacheSnapshot.value = mockCacheSnapshot;
+    state.applyCacheDefaultSelection();
+
+    const known = mockCacheSnapshot.records.find((record) => record.safety.status === "Safe");
+    const review = mockCacheSnapshot.records.find((record) => record.safety.status === "Review");
+    expect(known, "sample needs a known cache").toBeDefined();
+    expect(review, "sample needs an unknown owner").toBeDefined();
+    expect(state.selectedCaches.value).toEqual([known!.path]);
+    expect(state.cachePlan.value.trash_moves.map((move) => move.path)).toEqual([known!.path]);
+
+    state.toggleCache(review!.path);
+    expect(state.selectedCaches.value).toContain(review!.path);
+    expect(state.cachePlan.value.trash_moves.map((move) => move.path)).toContain(review!.path);
+    expect(state.cachePlan.value.worktree_removals).toEqual([]);
+  });
+});
+
+describe("result accounting", () => {
+  it("keeps worktree bytes separate from bytes waiting in the Trash", async () => {
+    const { state } = await freshStateWithExecutor({
+      entries: [
+        {
+          action: "worktree-remove",
+          target: codex,
+          result: "ok",
+          detail_code: "worktree.removed",
+          detail_args: {},
+          detail: null,
+          size_bytes: 1000
+        },
+        {
+          action: "trash-move",
+          target: dist,
+          result: "ok",
+          detail_code: "artifact.trashed",
+          detail_args: {},
+          detail: null,
+          size_bytes: 400
+        },
+        {
+          action: "trash-move",
+          target: venv,
+          result: "ok",
+          detail_code: "artifact.trashed",
+          detail_args: {},
+          detail: null,
+          size_bytes: null
+        }
+      ],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.settings.whitelist_paths = [];
+    state.selectedWorktrees.value = [codex];
+    state.selectedArtifacts.value = [dist, venv];
+    await state.executeCleanup();
+    unmockPlatform();
+
+    const summary = state.resultSummary.value;
+    expect(summary.freed).toBe(1000);
+    expect(summary.freed_unknown).toBe(0);
+    expect(summary.trash_bytes).toBe(400);
+    expect(summary.trash_unknown).toBe(1);
+    expect(summary.reclaimable).toBe(1400);
+    expect(summary.reclaimable_unknown).toBe(1);
   });
 });

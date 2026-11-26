@@ -141,6 +141,7 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
             <div class="item-row__head">
               <span class="item-row__name" :title="item.path">{{ displayPath(item.path, root) }}</span>
               <span v-if="item.agent" class="chip">{{ item.agent }}</span>
+              <span v-else class="chip" :title="messages.common.unknownAgentHint">{{ messages.common.unknownAgent }}</span>
             </div>
             <div class="item-row__meta">
               <span>{{ item.branch || messages.common.detached }}</span>

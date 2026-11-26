@@ -34,7 +34,8 @@ export type ReasonCode =
   | "af.cannot_verify"
   | "af.empty"
   | "af.git_ignored"
-  | "af.rebuildable";
+  | "af.rebuildable"
+  | "af.unknown_cache";
 
 export interface Reason {
   code: ReasonCode;
@@ -95,6 +96,45 @@ export interface ArtifactRecord {
   symlink_target: string | null;
   safety: SafetyAssessment;
 }
+
+/**
+ * One Git repository found below a workspace root. Discovery is a launcher, not
+ * a cleanup model: selecting a repository starts the ordinary project scan.
+ */
+export interface WorkspaceRepository {
+  path: string;
+  name: string;
+  /** Number of worktrees Git reported, or `null` when it could not answer. */
+  worktree_count: number | null;
+}
+
+/** Mirrors `WorkspaceSnapshot` in crates/worktree-core/src/lib.rs. */
+export interface WorkspaceSnapshot {
+  schema_version: number;
+  root: string;
+  scanned_at: string;
+  repositories: WorkspaceRepository[];
+  warnings: string[];
+}
+
+/**
+ * The read-only system-cache inventory. It is deliberately separate from
+ * `ProjectSnapshot`: cache directories have no Git history, and a project plan
+ * must not act on them by accident.
+ */
+export interface CacheSnapshot {
+  schema_version: number;
+  scanned_at: string;
+  records: ArtifactRecord[];
+  warnings: string[];
+}
+
+/**
+ * The workspace contract is separate from the project snapshot, so it can grow
+ * on its own. The Rust core owns the format.
+ */
+export const WORKSPACE_SCHEMA_VERSION = 1;
+export const CACHE_SCHEMA_VERSION = 1;
 
 export interface ProjectSnapshot {
   schema_version: number;
@@ -287,6 +327,7 @@ export type ActivityAction =
   | "scan.finished"
   | "scan.failed"
   | "scan.cancelled"
+  | "workspace.discovered"
   | "project.switched"
   | "plan.generated"
   | "plan.exported"
@@ -349,6 +390,7 @@ export type ScanFailure =
   | { code: "empty" }
   | { code: "not_found"; path: string }
   | { code: "not_a_git_repository"; path: string; detail: string }
+  | { code: "no_repositories"; path: string }
   | { code: "git_unavailable"; detail: string }
   | { code: "task_failed"; detail: string }
   | { code: "unknown"; detail: string };
