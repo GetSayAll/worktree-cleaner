@@ -46,7 +46,7 @@ const SEND_TIMEOUT_MS = 15_000;
 
 /** The pages to walk, and which one decides the margins the others must match. */
 const REFERENCE_VIEW = "worktrees";
-const VIEWS = ["welcome", "workspace", "overview", "worktrees", "artifacts", "caches", "hygiene", "plan", "history", "settings"];
+const VIEWS = ["welcome", "workspace", "overview", "worktrees", "artifacts", "caches", "buildCaches", "hygiene", "plan", "history", "settings"];
 const LOCALES = ["zh-CN", "en"];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

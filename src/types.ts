@@ -130,11 +130,25 @@ export interface CacheSnapshot {
 }
 
 /**
+ * A read-only inventory of build roots marked by `CACHEDIR.TAG` below one
+ * folder the reader selected. It is separate from both the project snapshot and
+ * the known system-cache roots.
+ */
+export interface GeneratedCacheSnapshot {
+  schema_version: number;
+  root: string;
+  scanned_at: string;
+  records: ArtifactRecord[];
+  warnings: string[];
+}
+
+/**
  * The workspace contract is separate from the project snapshot, so it can grow
  * on its own. The Rust core owns the format.
  */
 export const WORKSPACE_SCHEMA_VERSION = 1;
 export const CACHE_SCHEMA_VERSION = 1;
+export const GENERATED_CACHE_SCHEMA_VERSION = 1;
 
 export interface ProjectSnapshot {
   schema_version: number;

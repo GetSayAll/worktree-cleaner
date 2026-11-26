@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { createApp, nextTick } from "vue";
 import App from "./App.vue";
-import { mockCacheSnapshot, mockSnapshot } from "./mock/snapshot";
+import { mockCacheSnapshot, mockGeneratedCacheSnapshot, mockSnapshot } from "./mock/snapshot";
 import * as state from "./state";
 
 // The other tests exercise modules in isolation; this one mounts the real app.
@@ -275,6 +275,25 @@ describe("the app shell", () => {
     state.view.value = "welcome";
     state.cacheSnapshot.value = null;
     state.selectedCaches.value = [];
+    app.unmount();
+    host.remove();
+  });
+
+  it("keeps the build-cache inventory separate from the project and system caches", async () => {
+    const { app, host } = mountApp();
+    state.buildCacheSnapshot.value = mockGeneratedCacheSnapshot;
+    state.selectedBuildCaches.value = [mockGeneratedCacheSnapshot.records[0].path];
+    state.view.value = "buildCaches";
+    await nextTick();
+
+    expect(host.textContent).toContain("Build caches");
+    expect(host.querySelectorAll(".item-row").length).toBe(2);
+    expect(host.textContent).toContain("host-build");
+    expect(host.textContent).toContain("4.00 GB");
+
+    state.view.value = "welcome";
+    state.buildCacheSnapshot.value = null;
+    state.selectedBuildCaches.value = [];
     app.unmount();
     host.remove();
   });

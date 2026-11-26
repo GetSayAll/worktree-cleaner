@@ -44,10 +44,11 @@ type NavKey = Exclude<ViewKey, "scanning">;
  * Kept as keys rather than captured strings: the language can change while the
  * app is running, so the label has to be read at render time.
  */
-const NAV_LABELS: Record<NavKey, "project" | "workspace" | "caches" | "overview" | "worktrees" | "artifacts" | "hygiene" | "plan" | "result" | "history" | "settings"> = {
+const NAV_LABELS: Record<NavKey, "project" | "workspace" | "caches" | "buildCaches" | "overview" | "worktrees" | "artifacts" | "hygiene" | "plan" | "result" | "history" | "settings"> = {
   welcome: "project",
   workspace: "workspace",
   caches: "caches",
+  buildCaches: "buildCaches",
   overview: "overview",
   worktrees: "worktrees",
   artifacts: "artifacts",

@@ -9,12 +9,18 @@ import type {
   HygieneRule,
   HygieneRuleStatus,
   CacheSnapshot,
+  GeneratedCacheSnapshot,
   ProjectSnapshot,
   WorkspaceSnapshot,
   Reason,
   WorktreeRecord
 } from "../types";
-import { assess, CACHE_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION } from "../types";
+import {
+  assess,
+  CACHE_SCHEMA_VERSION,
+  GENERATED_CACHE_SCHEMA_VERSION,
+  SNAPSHOT_SCHEMA_VERSION
+} from "../types";
 
 const DAY = 86400_000;
 
@@ -269,6 +275,63 @@ export const mockCacheSnapshot: CacheSnapshot = {
           severity: "Review",
           text: "cache owner is not recognised",
           evidence: "test-build is under a known cache root but has no entry in the cache table"
+        }
+      ])
+    }
+  ],
+  warnings: []
+};
+
+/**
+ * Sample CACHEDIR.TAG build roots for the browser preview. These are not
+ * repositories and not system caches; the paths mirror a design-artifacts batch.
+ */
+export const mockGeneratedCacheSnapshot: GeneratedCacheSnapshot = {
+  schema_version: GENERATED_CACHE_SCHEMA_VERSION,
+  root: "/Users/andy/Develop/Src/AISrc/design-artifacts",
+  scanned_at: new Date().toISOString(),
+  records: [
+    {
+      path: "/Users/andy/Develop/Src/AISrc/design-artifacts/sayall-permission-rename-20261121/host-build",
+      kind: "build-cache",
+      ecosystem: "system",
+      project_root: "/Users/andy/Develop/Src/AISrc/design-artifacts/sayall-permission-rename-20261121",
+      worktree_path: null,
+      size_bytes: 917_000_000,
+      file_count: 12_400,
+      last_updated_at: daysAgo(20),
+      git_ignored: null,
+      git_tracked: null,
+      is_symlink: false,
+      symlink_target: null,
+      safety: assess([
+        {
+          code: "af.rebuildable",
+          severity: "Safe",
+          text: "regenerable cache directory",
+          evidence: "known cache host-build (build-cache); it can be rebuilt by its owning tool"
+        }
+      ])
+    },
+    {
+      path: "/Users/andy/Develop/Src/AISrc/design-artifacts/sayall-permission-rename-20261121/host-build-private",
+      kind: "build-cache",
+      ecosystem: "system",
+      project_root: "/Users/andy/Develop/Src/AISrc/design-artifacts/sayall-permission-rename-20261121",
+      worktree_path: null,
+      size_bytes: 4_300_000_000,
+      file_count: 61_000,
+      last_updated_at: daysAgo(20),
+      git_ignored: null,
+      git_tracked: null,
+      is_symlink: false,
+      symlink_target: null,
+      safety: assess([
+        {
+          code: "af.rebuildable",
+          severity: "Safe",
+          text: "regenerable cache directory",
+          evidence: "known cache host-build-private (build-cache); it can be rebuilt by its owning tool"
         }
       ])
     }

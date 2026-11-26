@@ -43,6 +43,7 @@ export const zhCN = {
     scan: "扫描",
     workspace: "仓库列表",
     caches: "系统缓存",
+    buildCaches: "构建缓存",
     overview: "总览",
     worktrees: "工作树",
     artifacts: "构建产物",
@@ -375,6 +376,55 @@ export const zhCN = {
     },
     history: "查看历史记录",
     footer: "无法识别所属应用的缓存即使体积很大，也保持为需确认。",
+    backToProject: "返回项目"
+  },
+  buildCaches: {
+    title: "构建缓存",
+    lede:
+      "扫描一个文件夹，找出带有 CACHEDIR.TAG 标记的构建根目录，例如 SwiftPM 为每次构建生成的目录。只有你明确选中的目录才会移入{{trash}}；不会启动仓库扫描。",
+    rulesSummary:
+      "带标记的构建根目录是可重建缓存。凭据、最近活动、符号链接和白名单仍会使它需要确认或被禁止删除。",
+    rootLabel: "要扫描的文件夹",
+    chooseFolder: "选择文件夹",
+    scan: "扫描构建缓存",
+    scanning: "正在扫描构建缓存…",
+    rescan: "重新扫描构建缓存",
+    scanFailed: "构建缓存清单没有扫描完成。请重试；技术详情见操作日志。",
+    emptyRoot: "请先选择一个文件夹。",
+    stats: {
+      caches: "构建缓存",
+      cachesSub: "带有 CACHEDIR.TAG 的目录",
+      bytes: "测得体积",
+      bytesSub: "所有已列出构建根目录的总和",
+      bytesUnknown: (count: number) => `${count} 个构建根目录无法测量体积`,
+      selected: "已选择",
+      selectedSub: (bytes: string) => `将移入{{trash}}：${bytes}`
+    },
+    inventoryTitle: "带标记的构建根目录",
+    inventoryHint: "只显示带有 CACHEDIR.TAG 的目录；仍受产物体积阈值限制",
+    selectAllSafe: "选中全部可安全清理的构建缓存",
+    files: "个文件",
+    empty: "这个文件夹下面没有找到带 CACHEDIR.TAG 的目录。",
+    planTitle: "构建缓存清理计划",
+    planHint: "每个选中路径都会在移动前重新检查",
+    planLede: "这些构建根目录会移入{{trash}}，之后可以恢复；请先关闭仍在使用它们的构建。",
+    noSelection: "选择一个构建根目录来生成计划。",
+    planTotal: (bytes: string) => `已选体积：${bytes}`,
+    ackConfirm: "我已核对选中的构建根目录；它们会移入{{trash}}，之后可以恢复。",
+    execute: "把选中项移入{{trash}}",
+    running: "正在移动…",
+    resultTitle: "构建缓存清理结果",
+    openTrash: "打开{{trash}}",
+    resultSummary: (moved: number, bytes: string, failed: number) =>
+      `已把 ${moved} 个构建根目录移入{{trash}}（${bytes}）；有 ${failed} 个选中项未移动。`,
+    columns: {
+      directory: "目录",
+      detail: "详情",
+      result: "结果",
+      size: "体积"
+    },
+    history: "查看历史记录",
+    footer: "只有带标记的构建根目录在范围内；未标记目录需要单独的理由才能清理。",
     backToProject: "返回项目"
   },
   welcome: {

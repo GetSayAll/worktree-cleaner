@@ -21,7 +21,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use worktree_core::cache::{
-    execute_cache_plan as core_execute_cache, scan_system_caches, CacheScanOptions, CacheSnapshot,
+    execute_cache_plan as core_execute_cache,
+    execute_generated_cache_plan as core_execute_generated_cache,
+    scan_generated_caches as core_scan_generated_caches, scan_system_caches, CacheScanOptions,
+    CacheSnapshot, GeneratedCacheSnapshot,
 };
 use worktree_core::cleanup::{
     execute_plan_with_progress as core_execute, ExecuteOptions, ExecutionOutcome,
@@ -124,6 +127,29 @@ async fn scan_caches(request: CacheScanRequest) -> Result<CacheSnapshot, String>
     .map_err(|error| format!("the cache scan did not finish: {error}"))
 }
 
+/// Inventories `CACHEDIR.TAG` build roots below a folder the user selected.
+#[tauri::command]
+async fn scan_generated_caches(
+    path: String,
+    request: CacheScanRequest,
+) -> Result<GeneratedCacheSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let options = CacheScanOptions {
+            per_dir_timeout: Duration::from_millis(request.per_dir_timeout_ms.max(1)),
+            recent_activity_days: request.recent_activity_days,
+            whitelist: request
+                .whitelist
+                .iter()
+                .map(|rule| worktree_core::path::expand_tilde(rule))
+                .collect(),
+            now: std::time::SystemTime::now(),
+        };
+        core_scan_generated_caches(std::path::Path::new(&path), &options)
+    })
+    .await
+    .map_err(|error| format!("the build-cache scan did not finish: {error}"))
+}
+
 /// Everything the cache executor needs, in one request.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -154,6 +180,40 @@ async fn execute_cache_plan(request: CacheExecuteRequest) -> Result<ExecutionOut
     })
     .await
     .map_err(|error| format!("the cache execution task did not finish: {error}"))
+}
+
+/// Everything the generated-build-cache executor needs, in one request.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct GeneratedCacheExecuteRequest {
+    plan: CleanupPlan,
+    snapshot: GeneratedCacheSnapshot,
+    recent_activity_days: u32,
+    whitelist: Vec<String>,
+    per_dir_timeout_ms: u64,
+    log_path: Option<String>,
+}
+
+/// Runs a confirmed build-cache plan. Every move is re-checked before it touches
+/// the filesystem, and the move itself goes through the system Trash.
+#[tauri::command]
+async fn execute_generated_cache_plan(
+    request: GeneratedCacheExecuteRequest,
+) -> Result<ExecutionOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let options = ExecuteOptions {
+            recent_activity_days: request.recent_activity_days,
+            untracked_as_unsafe: false,
+            whitelist: request.whitelist,
+            per_dir_timeout: Duration::from_millis(request.per_dir_timeout_ms.max(1)),
+            git_timeout: Duration::from_secs(10),
+            now: std::time::SystemTime::now(),
+            log_path: request.log_path.map(PathBuf::from),
+        };
+        core_execute_generated_cache(&request.plan, &request.snapshot, &options)
+    })
+    .await
+    .map_err(|error| format!("the build-cache execution task did not finish: {error}"))
 }
 
 /// Everything the executor needs, in one request.
@@ -369,8 +429,10 @@ pub fn run() {
             scan_project,
             scan_workspace,
             scan_caches,
+            scan_generated_caches,
             execute_plan,
             execute_cache_plan,
+            execute_generated_cache_plan,
             log_path,
             read_history,
             clear_log,

@@ -50,6 +50,7 @@ export const en = {
     scan: "Scan",
     workspace: "Repositories",
     caches: "System caches",
+    buildCaches: "Build caches",
     overview: "Overview",
     worktrees: "Worktree",
     artifacts: "Build artifacts",
@@ -415,6 +416,59 @@ export const en = {
     },
     history: "View history",
     footer: "Unknown cache owners stay Review even when their size is large.",
+    backToProject: "Back to project"
+  },
+  buildCaches: {
+    title: "Build caches",
+    lede:
+      "Scan a folder for build roots marked by CACHEDIR.TAG, such as SwiftPM's per-build directories. Only the directories you select are moved to the {{trash}}; no repository scan starts.",
+    rulesSummary:
+      "A tagged build root is a rebuildable cache. Credentials, recent activity, symlinks and whitelist matches still need review or block deletion.",
+    rootLabel: "Folder to scan",
+    chooseFolder: "Choose folder",
+    scan: "Scan for build caches",
+    scanning: "Scanning build caches…",
+    rescan: "Rescan build caches",
+    scanFailed:
+      "The build-cache inventory did not finish. Try again; the operation log has the technical detail.",
+    emptyRoot: "Choose a folder first.",
+    stats: {
+      caches: "Build caches",
+      cachesSub: "Directories carrying CACHEDIR.TAG",
+      bytes: "Measured size",
+      bytesSub: "Across every listed build root",
+      bytesUnknown: (count: number) =>
+        count === 1 ? "1 build root could not be measured" : `${count} build roots could not be measured`,
+      selected: "Selected",
+      selectedSub: (bytes: string) => `${bytes} to the {{trash}}`
+    },
+    inventoryTitle: "Tagged build roots",
+    inventoryHint: "Only directories carrying CACHEDIR.TAG are listed; the artifact size threshold applies",
+    selectAllSafe: "Select every safe build cache",
+    files: "files",
+    empty: "No directories carrying CACHEDIR.TAG were found below this folder.",
+    planTitle: "Build-cache cleanup plan",
+    planHint: "Every selected path is re-checked before it moves",
+    planLede:
+      "These build roots go to the {{trash}} and can be restored. Close any build still writing to them first.",
+    noSelection: "Select a build root to build a plan.",
+    planTotal: (bytes: string) => `Selected size: ${bytes}`,
+    ackConfirm:
+      "I reviewed the selected build roots. I understand they will move to the {{trash}} and can be restored.",
+    execute: "Move selected to {{trash}}",
+    running: "Moving…",
+    resultTitle: "Build-cache result",
+    openTrash: "Open {{trash}}",
+    resultSummary: (moved: number, bytes: string, failed: number) =>
+      `Moved ${moved} build roots to the {{trash}} (${bytes}); ${failed} selected items were not moved.`,
+    columns: {
+      directory: "Directory",
+      detail: "Detail",
+      result: "Result",
+      size: "Size"
+    },
+    history: "View history",
+    footer: "Only tagged build roots are in scope; an untagged directory needs its own reason to be removed.",
     backToProject: "Back to project"
   },
   welcome: {

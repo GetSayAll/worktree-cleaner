@@ -23,7 +23,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-use crate::artifact::{credential_in_within, measure_dir, CredentialScan};
+use crate::artifact::{credential_in_within, credential_in_worktree, measure_dir, CredentialScan};
 use crate::cleanup::{move_to_trash, ExecuteOptions, ExecutionOutcome};
 use crate::log;
 use crate::path::{is_in_system_trash, validate_path_for_deletion, whitelist_hit, DeletionContext};
@@ -70,6 +70,25 @@ pub struct CacheSnapshot {
     /// Cache directories are represented with the existing artifact record so the
     /// UI can reuse the safety badge, reason list and size formatting. They are
     /// never merged into a project snapshot.
+    pub records: Vec<ArtifactRecord>,
+    pub warnings: Vec<String>,
+}
+
+/// Contract version of a generated-build-cache inventory.
+pub const GENERATED_CACHE_SCHEMA_VERSION: u32 = 1;
+
+/// A read-only inventory of build directories marked by `CACHEDIR.TAG`.
+///
+/// This is separate from both `ProjectSnapshot` and `CacheSnapshot`: a build root
+/// found under an arbitrary folder is not a repository and not one of the known
+/// system-cache roots. The tag is the evidence that the directory is a
+/// disposable build cache.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GeneratedCacheSnapshot {
+    pub schema_version: u32,
+    /// The folder the user selected for this inventory.
+    pub root: String,
+    pub scanned_at: String,
     pub records: Vec<ArtifactRecord>,
     pub warnings: Vec<String>,
 }
@@ -270,6 +289,156 @@ pub fn scan_system_caches(options: &CacheScanOptions) -> CacheSnapshot {
     scan_sources(&sources, options)
 }
 
+/// One depth bound for the optional walk below a folder the user selected.
+///
+/// The generated cache is a build root, not a repository; it normally sits one
+/// or two levels below the folder the user picked. The bound keeps a mistaken
+/// selection of a home directory from walking forever.
+const GENERATED_MAX_DEPTH: usize = 6;
+const GENERATED_MAX_ENTRIES: usize = 200_000;
+
+fn is_tagged_build_cache(path: &Path) -> bool {
+    path.join("CACHEDIR.TAG").is_file()
+}
+
+/// Names that cannot contain a build cache worth walking into.
+///
+/// A tagged directory is checked before this list: if a build tool named its
+/// root `build`, the tag still makes it a candidate.
+fn skip_generated_walk(name: &str) -> bool {
+    name.starts_with('.')
+        || matches!(
+            name,
+            "node_modules"
+                | "target"
+                | "Pods"
+                | "Carthage"
+                | "DerivedData"
+                | "checkouts"
+                | "SourcePackages"
+                | "Library"
+                | "Applications"
+                | "Downloads"
+                | "Movies"
+                | "Music"
+                | "Pictures"
+        )
+}
+
+fn generated_source(path: &Path) -> CacheSource {
+    CacheSource {
+        path: path.to_path_buf(),
+        root: path
+            .parent()
+            .map_or_else(|| path.to_path_buf(), Path::to_path_buf),
+        kind: "build-cache",
+        known: true,
+    }
+}
+
+/// Finds directories carrying `CACHEDIR.TAG` below `root`.
+///
+/// The tagged directory is the candidate, not a child: the whole build root is
+/// what a build tool can recreate, and its dependency checkouts are already part
+/// of it. Walking stops at each tag, so one cache is not reported several times.
+fn collect_generated_sources(
+    root: &Path,
+    sources: &mut Vec<CacheSource>,
+    warnings: &mut Vec<String>,
+) {
+    if is_tagged_build_cache(root) {
+        sources.push(generated_source(root));
+        return;
+    }
+
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    let mut visited = 0usize;
+    while let Some((directory, depth)) = stack.pop() {
+        if is_in_system_trash(&directory) {
+            continue;
+        }
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                warnings.push(format!(
+                    "{} could not be read while looking for build caches: {error}",
+                    directory.display()
+                ));
+                continue;
+            }
+        };
+        for entry in entries.flatten() {
+            visited += 1;
+            if visited > GENERATED_MAX_ENTRIES {
+                warnings.push(format!(
+                    "the build-cache scan stopped after {GENERATED_MAX_ENTRIES} entries; some caches may be missing"
+                ));
+                return;
+            }
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() || !file_type.is_dir() {
+                continue;
+            }
+            if is_in_system_trash(&path) {
+                continue;
+            }
+            if is_tagged_build_cache(&path) {
+                sources.push(generated_source(&path));
+                continue;
+            }
+            if depth < GENERATED_MAX_DEPTH && !skip_generated_walk(&name) {
+                stack.push((path, depth + 1));
+            }
+        }
+    }
+}
+
+/// Inventories `CACHEDIR.TAG` build roots below one user-selected folder.
+///
+/// This is a separate surface from `scan_system_caches`: the root is chosen by
+/// the reader, the tag is the evidence, and the result still goes through the
+/// same cache record and Trash executor. It never scans a repository, and it
+/// never decides that an untagged directory is a cache.
+pub fn scan_generated_caches(root: &Path, options: &CacheScanOptions) -> GeneratedCacheSnapshot {
+    let root = crate::path::expand_tilde(&root.to_string_lossy());
+    let mut warnings = Vec::new();
+    let mut sources = Vec::new();
+    if root.is_dir() {
+        collect_generated_sources(&root, &mut sources, &mut warnings);
+    } else {
+        warnings.push(format!(
+            "the build-cache root does not exist or is not a directory: {}",
+            root.display()
+        ));
+    }
+
+    let CacheSnapshot {
+        records,
+        warnings: mut cache_warnings,
+        ..
+    } = scan_sources(&sources, options);
+    warnings.append(&mut cache_warnings);
+    if records.is_empty() && warnings.is_empty() {
+        warnings.push(format!(
+            "no directories carrying CACHEDIR.TAG were found below {}",
+            root.display()
+        ));
+    }
+
+    GeneratedCacheSnapshot {
+        schema_version: GENERATED_CACHE_SCHEMA_VERSION,
+        root: root.display().to_string(),
+        scanned_at: format_rfc3339(SystemTime::now()),
+        records,
+        warnings,
+    }
+}
+
 fn scan_sources(sources: &[CacheSource], options: &CacheScanOptions) -> CacheSnapshot {
     let mut records = Vec::new();
     let mut warnings = Vec::new();
@@ -385,11 +554,17 @@ fn check_cache(
     }
 
     if !is_symlink {
-        match credential_in_within(
-            path,
-            1_000_000,
-            options.per_dir_timeout.min(Duration::from_mins(1)) / 2,
-        ) {
+        let budget = options.per_dir_timeout.min(Duration::from_mins(1)) / 2;
+        let scan = if source.kind == "build-cache" {
+            // Dependency checkouts inside a tagged build root contain their own
+            // test fixtures, including publishable test keys. Those are part of
+            // the generated tree, not a secret this cleanup would lose; the walk
+            // still checks the build root's own files and outputs.
+            credential_in_worktree(path, budget)
+        } else {
+            credential_in_within(path, 1_000_000, budget)
+        };
+        match scan {
             CredentialScan::Complete(Some(name)) => reasons.push(Reason::blocking(
                 ReasonCode::AfCredentials,
                 "contains what looks like a credential file",
@@ -646,10 +821,15 @@ pub fn execute_cache_plan(
         }
 
         let mut notes = Vec::new();
+        let kind = if record.kind == "build-cache" {
+            "build-cache"
+        } else {
+            "cache"
+        };
         let source = CacheSource {
             path: PathBuf::from(&record.path),
             root: PathBuf::from(&record.project_root),
-            kind: "cache",
+            kind,
             known: record
                 .safety
                 .reasons
@@ -747,6 +927,25 @@ pub fn execute_cache_plan(
     }
 }
 
+/// Runs a generated-build-cache plan through the same Trash executor.
+///
+/// The executor only needs the records and the whitelist; the selected folder is
+/// an inventory fact, not a second deletion policy. Converting here keeps the
+/// project and system-cache contracts unchanged.
+pub fn execute_generated_cache_plan(
+    plan: &CleanupPlan,
+    snapshot: &GeneratedCacheSnapshot,
+    opts: &ExecuteOptions,
+) -> ExecutionOutcome {
+    let cache_snapshot = CacheSnapshot {
+        schema_version: CACHE_SCHEMA_VERSION,
+        scanned_at: snapshot.scanned_at.clone(),
+        records: snapshot.records.clone(),
+        warnings: snapshot.warnings.clone(),
+    };
+    execute_cache_plan(plan, &cache_snapshot, opts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -816,6 +1015,78 @@ mod tests {
             .reasons
             .iter()
             .any(|reason| reason.code == ReasonCode::AfUnknownCache));
+    }
+
+    #[test]
+    fn generated_scan_reports_tagged_build_roots_only() {
+        let root = temp();
+        let build = root.path().join("batch").join("host-build");
+        let plain = root.path().join("batch").join("plain-directory");
+        std::fs::create_dir_all(&build).expect("build root");
+        std::fs::create_dir_all(&plain).expect("plain directory");
+        std::fs::write(build.join("CACHEDIR.TAG"), b"Signature: cache\n").expect("cache tag");
+        std::fs::write(build.join("manifest.pif"), b"build state").expect("build output");
+        std::fs::write(plain.join("keep.txt"), b"not a cache").expect("plain file");
+        backdate_tree(&build, 10);
+        backdate_tree(&plain, 10);
+
+        let snapshot = scan_generated_caches(root.path(), &options());
+        assert_eq!(snapshot.records.len(), 1, "{:?}", snapshot.records);
+        let record = &snapshot.records[0];
+        assert_eq!(record.path, build.display().to_string());
+        assert_eq!(record.kind, "build-cache");
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        assert!(record
+            .safety
+            .reasons
+            .iter()
+            .any(|reason| reason.code == ReasonCode::AfRebuildable));
+        assert!(
+            snapshot
+                .records
+                .iter()
+                .all(|record| !record.path.contains("plain-directory")),
+            "an untagged directory is not a build cache"
+        );
+    }
+
+    #[test]
+    fn a_tagged_root_can_be_scanned_directly() {
+        let root = temp();
+        let build = root.path().join("host-build");
+        std::fs::create_dir_all(&build).expect("build root");
+        std::fs::write(build.join("CACHEDIR.TAG"), b"Signature: cache\n").expect("cache tag");
+        std::fs::write(build.join("manifest.pif"), b"build state").expect("build output");
+        backdate_tree(&build, 10);
+
+        let snapshot = scan_generated_caches(&build, &options());
+        assert_eq!(snapshot.root, build.display().to_string());
+        assert_eq!(snapshot.records.len(), 1);
+        assert_eq!(snapshot.records[0].path, build.display().to_string());
+    }
+
+    #[test]
+    fn generated_build_cache_does_not_treat_dependency_test_keys_as_secrets() {
+        let root = temp();
+        let build = root.path().join("host-build");
+        let fixture = build
+            .join("checkouts")
+            .join("Sparkle")
+            .join("Tests")
+            .join("Resources");
+        std::fs::create_dir_all(&fixture).expect("dependency fixture");
+        std::fs::write(build.join("CACHEDIR.TAG"), b"Signature: cache\n").expect("cache tag");
+        std::fs::write(fixture.join("test-pubkey.pem"), b"publishable test key").expect("test key");
+        backdate_tree(&build, 10);
+
+        let snapshot = scan_generated_caches(root.path(), &options());
+        assert_eq!(snapshot.records.len(), 1);
+        assert_eq!(snapshot.records[0].safety.status, SafetyStatus::Safe);
+        assert!(!snapshot.records[0]
+            .safety
+            .reasons
+            .iter()
+            .any(|reason| reason.code == ReasonCode::AfCredentials));
     }
 
     #[test]

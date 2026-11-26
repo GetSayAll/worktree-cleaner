@@ -2,7 +2,12 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CACHE_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION, WORKSPACE_SCHEMA_VERSION } from "./types";
+import {
+  CACHE_SCHEMA_VERSION,
+  GENERATED_CACHE_SCHEMA_VERSION,
+  SNAPSHOT_SCHEMA_VERSION,
+  WORKSPACE_SCHEMA_VERSION
+} from "./types";
 import { hygieneRuleKey } from "./format";
 import { en } from "./i18n/en";
 import { zhCN } from "./i18n/zh-CN";
@@ -63,10 +68,13 @@ describe("source tree rules", () => {
     );
     const workspaceVersion = lib.match(/pub const WORKSPACE_SCHEMA_VERSION: u32 = (\d+);/);
     const cacheVersion = cache.match(/pub const CACHE_SCHEMA_VERSION: u32 = (\d+);/);
+    const generatedVersion = cache.match(/pub const GENERATED_CACHE_SCHEMA_VERSION: u32 = (\d+);/);
     expect(workspaceVersion, "WORKSPACE_SCHEMA_VERSION not found").not.toBeNull();
     expect(cacheVersion, "CACHE_SCHEMA_VERSION not found").not.toBeNull();
+    expect(generatedVersion, "GENERATED_CACHE_SCHEMA_VERSION not found").not.toBeNull();
     expect(Number(workspaceVersion?.[1])).toBe(WORKSPACE_SCHEMA_VERSION);
     expect(Number(cacheVersion?.[1])).toBe(CACHE_SCHEMA_VERSION);
+    expect(Number(generatedVersion?.[1])).toBe(GENERATED_CACHE_SCHEMA_VERSION);
   });
 
   it("agrees with the Rust core on the snapshot schema version", () => {
@@ -125,6 +133,7 @@ describe("the Rust-to-TypeScript field contract", () => {
     ["WorkspaceRepository", "lib.rs"],
     ["WorkspaceSnapshot", "lib.rs"],
     ["CacheSnapshot", "cache.rs"],
+    ["GeneratedCacheSnapshot", "cache.rs"],
     ["WorktreeRecord", "lib.rs"],
     ["ArtifactRecord", "lib.rs"],
     ["CleanupPlan", "lib.rs"],

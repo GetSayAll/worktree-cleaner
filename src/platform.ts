@@ -29,6 +29,7 @@ import type {
   ExecutionOutcome,
   HistoryEntry,
   CacheSnapshot,
+  GeneratedCacheSnapshot,
   ProjectSnapshot,
   ResultEntry,
   ScanOptions,
@@ -114,6 +115,25 @@ export async function scanCaches(options: {
   });
 }
 
+/** Inventories `CACHEDIR.TAG` build roots below one selected folder. */
+export async function scanGeneratedCaches(
+  path: string,
+  options: {
+    per_dir_timeout_ms: number;
+    recent_activity_days: number;
+    whitelist: string[];
+  }
+): Promise<GeneratedCacheSnapshot> {
+  return invoke<GeneratedCacheSnapshot>("scan_generated_caches", {
+    path,
+    request: {
+      per_dir_timeout_ms: options.per_dir_timeout_ms,
+      recent_activity_days: options.recent_activity_days,
+      whitelist: options.whitelist
+    }
+  });
+}
+
 /** The executor's knobs, as the settings page holds them. */
 export interface ExecuteKnobs {
   recent_activity_days: number;
@@ -151,6 +171,17 @@ export async function executeCachePlan(
   options: ExecuteKnobs
 ): Promise<ExecutionOutcome> {
   return invoke<ExecutionOutcome>("execute_cache_plan", {
+    request: { plan, snapshot, ...options }
+  });
+}
+
+/** Runs the separate generated-build-cache plan. */
+export async function executeGeneratedCachePlan(
+  plan: CleanupPlan,
+  snapshot: GeneratedCacheSnapshot,
+  options: ExecuteKnobs
+): Promise<ExecutionOutcome> {
+  return invoke<ExecutionOutcome>("execute_generated_cache_plan", {
     request: { plan, snapshot, ...options }
   });
 }

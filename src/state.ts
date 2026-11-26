@@ -5,6 +5,7 @@ import type {
   ExecutionOutcome,
   HistoryEntry,
   CacheSnapshot,
+  GeneratedCacheSnapshot,
   ProjectSnapshot,
   Reason,
   ResultEntry,
@@ -28,11 +29,21 @@ import {
   readActivity,
   readHistory,
   scanCaches,
+  scanGeneratedCaches,
   scanProject,
   scanWorkspace,
-  executeCachePlan
+  executeCachePlan,
+  executeGeneratedCachePlan
 } from "./platform";
-import { mockActivity, mockCacheSnapshot, mockHistory, mockSnapshot, mockWorkspaceSnapshot, scanTrace } from "./mock/snapshot";
+import {
+  mockActivity,
+  mockCacheSnapshot,
+  mockGeneratedCacheSnapshot,
+  mockHistory,
+  mockSnapshot,
+  mockWorkspaceSnapshot,
+  scanTrace
+} from "./mock/snapshot";
 import type { ActivityAction, ActivityEvent, DetailArg } from "./types";
 
 export type ViewKey =
@@ -40,6 +51,7 @@ export type ViewKey =
   | "scanning"
   | "workspace"
   | "caches"
+  | "buildCaches"
   | "overview"
   | "worktrees"
   | "artifacts"
@@ -96,6 +108,27 @@ export const cacheSnapshot = ref<CacheSnapshot | null>(null);
 export const selectedCaches = ref<string[]>([]);
 export const cacheScanning = ref(false);
 export const cacheError = ref(false);
+
+/** Build caches are a third, folder-scoped surface: not a project and not a known system root. */
+export const buildCacheRoot = ref("");
+export const buildCacheSnapshot = ref<GeneratedCacheSnapshot | null>(null);
+export const selectedBuildCaches = ref<string[]>([]);
+export const buildCacheScanning = ref(false);
+export const buildCacheError = ref(false);
+export const buildCacheSample = ref(false);
+export const buildCacheAcknowledged = ref(false);
+export const buildCacheLastResult = ref<ResultEntry[]>([]);
+export const buildCacheResultSummary = ref({
+  freed: 0,
+  freed_unknown: 0,
+  trash_bytes: 0,
+  trash_unknown: 0,
+  reclaimable: 0,
+  reclaimable_unknown: 0,
+  trashed: 0,
+  removed: 0,
+  failed: 0
+});
 export const settings = reactive<Settings>({ ...defaultSettings });
 export const selectedWorktrees = ref<string[]>([]);
 export const selectedArtifacts = ref<string[]>([]);
@@ -605,13 +638,19 @@ export function goTo(next: ViewKey) {
     workspaceSnapshot.value = mockWorkspaceSnapshot;
     projectPath.value = mockWorkspaceSnapshot.root;
   }
+  if (next === "buildCaches" && !isDesktop() && buildCacheSnapshot.value === null) {
+    buildCacheSnapshot.value = mockGeneratedCacheSnapshot;
+    buildCacheRoot.value = mockGeneratedCacheSnapshot.root;
+    buildCacheSample.value = true;
+    applyBuildCacheDefaultSelection();
+  }
   if (next === "history") void refreshHistory();
   if (next === "plan") recordPlanGenerated();
   view.value = next;
 }
 
 export function canOpen(key: ViewKey): boolean {
-  if (key === "welcome" || key === "settings" || key === "caches") return true;
+  if (key === "welcome" || key === "settings" || key === "caches" || key === "buildCaches") return true;
   if (key === "workspace") return workspaceSnapshot.value !== null || !isDesktop();
   if (key === "result") return lastResult.value.length > 0;
   return snapshot.value !== null;
@@ -973,6 +1012,85 @@ export const cachePlan = computed<CleanupPlan>(() => {
   };
 });
 
+export const buildCacheSelectedSummary = computed(() => {
+  const records = (buildCacheSnapshot.value?.records ?? []).filter((record) =>
+    selectedBuildCaches.value.includes(record.path)
+  );
+  return {
+    count: records.length,
+    bytes: records.reduce((sum, record) => sum + (record.size_bytes ?? 0), 0),
+    unknown: records.filter((record) => record.size_bytes === null).length
+  };
+});
+
+/** The selected tagged build roots as the ordinary Trash plan object. */
+export const buildCachePlan = computed<CleanupPlan>(() => {
+  const empty: CleanupPlan = {
+    worktree_removals: [],
+    trash_moves: [],
+    excluded_unsafe: 0,
+    total_bytes: 0,
+    total_bytes_unknown: 0,
+    blockers: [],
+    ack_reasons: []
+  };
+  const records = buildCacheSnapshot.value?.records ?? [];
+  if (records.length === 0) return empty;
+
+  const blocked = new Set(
+    records
+      .filter((record) => selectedBuildCaches.value.includes(record.path))
+      .filter((record) => settings.whitelist_paths.some((rule) => pathMatchesRule(record.path, rule)))
+      .map((record) => record.path)
+  );
+  const selected = records.filter(
+    (record) => selectedBuildCaches.value.includes(record.path) && !blocked.has(record.path)
+  );
+  const moves: TrashMoveItem[] = selected
+    .map((record) => ({
+      kind: "artifact" as const,
+      path: record.path,
+      artifact_kind: record.kind,
+      size_bytes: record.size_bytes,
+      file_count: record.file_count,
+      bundled_with_worktree: null
+    }))
+    .sort(
+      (a, b) => compareSizeNullsLast(a.size_bytes, b.size_bytes) || a.path.localeCompare(b.path)
+    );
+  const total_bytes = moves.reduce((sum, move) => sum + (move.size_bytes ?? 0), 0);
+  const total_bytes_unknown = moves.filter((move) => move.size_bytes === null).length;
+  const ack_reasons: string[] = [];
+  if (moves.length >= ACK_COUNT_THRESHOLD) {
+    ack_reasons.push(messages.plan.ack.count(moves.length));
+  }
+  if (total_bytes_unknown > 0) {
+    ack_reasons.push(messages.plan.ack.unmeasurable(total_bytes_unknown));
+  }
+  if (total_bytes > ACK_SIZE_THRESHOLD_BYTES) {
+    ack_reasons.push(messages.plan.ack.size(formatBytes(ACK_SIZE_THRESHOLD_BYTES)));
+  }
+  return {
+    worktree_removals: [],
+    trash_moves: moves,
+    excluded_unsafe: records.filter((record) => record.safety.status === "Unsafe").length,
+    total_bytes,
+    total_bytes_unknown,
+    blockers: [...blocked].map((path) => messages.plan.blocker(path)),
+    ack_reasons
+  };
+});
+
+/** Selects every Safe build root above the artifact threshold. */
+export function applyBuildCacheDefaultSelection() {
+  const minBytes = settings.min_artifact_mb * 1024 * 1024;
+  selectedBuildCaches.value = (buildCacheSnapshot.value?.records ?? [])
+    .filter((record) => record.safety.status === "Safe")
+    .filter((record) => record.size_bytes === null || record.size_bytes >= minBytes)
+    .map((record) => record.path);
+  buildCacheAcknowledged.value = false;
+}
+
 /** Selects every known-safe cache, leaving an unknown owner for the reader. */
 export function applyCacheDefaultSelection() {
   const minBytes = settings.min_artifact_mb * 1024 * 1024;
@@ -1006,6 +1124,137 @@ export function toggleGroupCaches(paths: string[], select: boolean) {
   }
   selectedCaches.value = [...next];
   cacheAcknowledged.value = false;
+}
+
+export function toggleBuildCache(path: string) {
+  const record = buildCacheSnapshot.value?.records.find((item) => item.path === path);
+  if (!record || record.safety.status === "Unsafe") return;
+  selectedBuildCaches.value = selectedBuildCaches.value.includes(path)
+    ? selectedBuildCaches.value.filter((item) => item !== path)
+    : [...selectedBuildCaches.value, path];
+  buildCacheAcknowledged.value = false;
+}
+
+export function toggleGroupBuildCaches(paths: string[], select: boolean) {
+  const allowed = new Set(
+    paths.filter((path) => {
+      const record = buildCacheSnapshot.value?.records.find((item) => item.path === path);
+      return record && record.safety.status !== "Unsafe";
+    })
+  );
+  const next = new Set(selectedBuildCaches.value);
+  for (const path of allowed) {
+    if (select) next.add(path);
+    else next.delete(path);
+  }
+  selectedBuildCaches.value = [...next];
+  buildCacheAcknowledged.value = false;
+}
+
+/** Inventories tagged build roots below the chosen folder. It never deletes anything. */
+export async function startBuildCacheScan() {
+  if (buildCacheScanning.value || executing.value || scanState.running) return;
+  const root = buildCacheRoot.value.trim();
+  if (!root && isDesktop()) {
+    buildCacheError.value = false;
+    return;
+  }
+  buildCacheScanning.value = true;
+  buildCacheError.value = false;
+  buildCacheLastResult.value = [];
+  buildCacheResultSummary.value = {
+    freed: 0,
+    freed_unknown: 0,
+    trash_bytes: 0,
+    trash_unknown: 0,
+    reclaimable: 0,
+    reclaimable_unknown: 0,
+    trashed: 0,
+    removed: 0,
+    failed: 0
+  };
+  buildCacheAcknowledged.value = false;
+  if (!isDesktop()) {
+    buildCacheSnapshot.value = mockGeneratedCacheSnapshot;
+    buildCacheRoot.value = mockGeneratedCacheSnapshot.root;
+    buildCacheSample.value = true;
+    applyBuildCacheDefaultSelection();
+    buildCacheScanning.value = false;
+    return;
+  }
+  record("scan.started", root);
+  try {
+    const result = await scanGeneratedCaches(root, {
+      per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+      recent_activity_days: settings.active_days,
+      whitelist: settings.whitelist_paths
+    });
+    buildCacheSnapshot.value = result;
+    buildCacheRoot.value = result.root;
+    buildCacheSample.value = false;
+    applyBuildCacheDefaultSelection();
+    record("scan.finished", result.root, {
+      worktrees: 0,
+      artifacts: result.records.length,
+      sample: false
+    });
+  } catch {
+    buildCacheError.value = true;
+    record("scan.failed", root, { error: "build_cache_scan_failed" });
+  } finally {
+    buildCacheScanning.value = false;
+  }
+}
+
+/** Runs the selected build-root moves after their own re-check. */
+export async function executeBuildCacheCleanup() {
+  const plan = buildCachePlan.value;
+  const current = buildCacheSnapshot.value;
+  if (!current || (plan.trash_moves.length === 0 && plan.blockers.length === 0)) return;
+  if (!isDesktop()) {
+    executeError.value = "desktop-only";
+    return;
+  }
+  if (plan.ack_reasons.length > 0 && !buildCacheAcknowledged.value) return;
+
+  executing.value = true;
+  executeError.value = null;
+  logError.value = null;
+  record("cleanup.confirmed", current.root, {
+    worktrees: 0,
+    artifacts: plan.trash_moves.length,
+    forced: 0,
+    typed_name: false
+  });
+  try {
+    const outcome = await executeGeneratedCachePlan(plan, current, {
+      recent_activity_days: settings.active_days,
+      untracked_as_unsafe: false,
+      whitelist: settings.whitelist_paths,
+      per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+      git_timeout_ms: GIT_TIMEOUT_MS,
+      log_path: await logPath()
+    });
+    const removed = new Set(
+      outcome.entries
+        .filter((entry) => entry.result === "ok" && entry.action === "trash-move")
+        .map((entry) => entry.target)
+    );
+    buildCacheSnapshot.value = {
+      ...current,
+      records: current.records.filter((record) => !removed.has(record.path))
+    };
+    selectedBuildCaches.value = [];
+    buildCacheLastResult.value = outcome.entries;
+    buildCacheResultSummary.value = summarise(outcome.entries, plan);
+    logError.value = outcome.log_error;
+    buildCacheAcknowledged.value = false;
+    await refreshHistory();
+  } catch {
+    executeError.value = "failed";
+  } finally {
+    executing.value = false;
+  }
 }
 
 /** Inventories the known system-cache roots. It never deletes anything. */

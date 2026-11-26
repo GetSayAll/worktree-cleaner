@@ -49,7 +49,7 @@ Fixed left-side navigation + top project bar.
 
 ```
 Top bar: project path · scan time · three-level counts · [Rescan]
-Sidebar: Project / Repositories / Overview / Worktree / Build artifacts / System caches / Disk hygiene / Cleanup plan / History / Settings
+Sidebar: Project / Repositories / Overview / Worktree / Build artifacts / System caches / Build caches / Disk hygiene / Cleanup plan / History / Settings
 ```
 
 Before a scan, only "Welcome" in the sidebar is available; data pages appear only after the scan completes.
@@ -119,6 +119,15 @@ A separate, opt-in page for the caches that do not belong to one repository. It 
 - Recent activity is `Review`, not `Safe`. The page tells the reader to close the owning application before selecting a cache.
 - The selected cache directories form their own plan object, ordered by size descending, and are moved through the system Trash. The cache executor re-checks path, size and verdict before each move; it does not use the worktree/artifact executor and cannot remove a worktree.
 - The page does not read Docker's data directory, CI runner state, Application Support, Downloads or arbitrary `~/Library` content. Those are not cache records and have no safe generic deletion rule.
+
+### 5.2 Build caches
+
+A separate, opt-in page for generated build roots that are not inside a repository and are not one of the known system-cache roots. The reader selects a folder; discovery is read-only and walks only until it finds directories carrying `CACHEDIR.TAG`. The tag is the evidence: a build tool marked the directory as a cache, and the directory can be recreated. The scanner stops at a tagged root, so its dependency checkouts and build output are one record rather than several.
+
+- A tagged root is a known rebuildable cache. Credentials, recent activity, symlinks and a whitelist hit follow the system-cache rules: a credential or whitelist hit blocks deletion, a recent change needs review. The credential walk skips the reproducible dependency checkouts inside the root (for example SwiftPM's `checkouts`): a publishable test key shipped with Sparkle is part of the generated tree, while a credential in the build root's own files still blocks deletion.
+- A directory without `CACHEDIR.TAG` is not a generated cache and is never listed by this page.
+- The selected roots form their own plan object, ordered by size descending, and move through the system Trash. The executor re-checks path, size, safety level and whitelist before each move. It never reads a project plan or project snapshot.
+- Discovery and execution never read a project snapshot. The page is not a second cleanup model for repositories; it only handles the build roots the user selected.
 
 ### 6. Cleanup plan (confirmation page — the most important page in the product)
 

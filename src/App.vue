@@ -20,6 +20,7 @@ import {
   view,
   worktrees,
   workspaceSnapshot,
+  buildCacheSnapshot,
   type ViewKey
 } from "./state";
 import { homePath } from "./format";
@@ -34,6 +35,7 @@ import OverviewView from "./views/OverviewView.vue";
 import WorktreesView from "./views/WorktreesView.vue";
 import ArtifactsView from "./views/ArtifactsView.vue";
 import CacheView from "./views/CacheView.vue";
+import BuildCachesView from "./views/BuildCachesView.vue";
 import HygieneView from "./views/HygieneView.vue";
 import CleanupPlanView from "./views/CleanupPlanView.vue";
 import ResultView from "./views/ResultView.vue";
@@ -48,6 +50,7 @@ const VIEWS = {
   worktrees: WorktreesView,
   artifacts: ArtifactsView,
   caches: CacheView,
+  buildCaches: BuildCachesView,
   hygiene: HygieneView,
   plan: CleanupPlanView,
   result: ResultView,
@@ -66,6 +69,7 @@ const NAV: Array<{ key: ViewKey; label: keyof Messages["nav"] }> = [
   { key: "worktrees", label: "worktrees" },
   { key: "artifacts", label: "artifacts" },
   { key: "caches", label: "caches" },
+  { key: "buildCaches", label: "buildCaches" },
   { key: "hygiene", label: "hygiene" },
   { key: "plan", label: "plan" },
   { key: "result", label: "result" },
@@ -100,6 +104,10 @@ function navCount(key: ViewKey): string {
           record.safety.status === "Unsafe"
       ).length;
       return visible > 0 ? `${visible}` : "";
+    }
+    case "buildCaches": {
+      const count = buildCacheSnapshot.value?.records.length ?? 0;
+      return count > 0 ? `${count}` : "";
     }
     case "hygiene": {
       // What is broken, not what was checked: a page whose badge counted 22
