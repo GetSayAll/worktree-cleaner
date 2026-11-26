@@ -8,6 +8,7 @@ import {
   homePath,
   isUnder,
   normalizePathKey,
+  pathIdentityKey,
   pathMatchesRule,
   reasonText,
   scanFailureText
@@ -140,6 +141,23 @@ describe("isUnder", () => {
   it("compares Windows paths case-insensitively", () => {
     expect(isUnder("C:\\Users\\Andy\\Repo\\dist", "c:\\users\\andy\\repo")).toBe(true);
     expect(pathMatchesRule("C:\\Users\\Andy\\Repo\\dist", "c:\\users\\andy\\repo")).toBe(true);
+  });
+});
+
+describe("pathIdentityKey", () => {
+  it("treats both separators and a trailing separator as one path", () => {
+    const key = pathIdentityKey("C:\\Src\\repo", true);
+    expect(pathIdentityKey("C:/Src/repo/", true)).toBe(key);
+    expect(pathIdentityKey("C:\\Src\\repo\\", true)).toBe(key);
+  });
+
+  it("folds case only where the filesystem does", () => {
+    // Windows: the same directory. macOS: two spellings that may be two
+    // directories on a case-sensitive volume, so the caller decides.
+    expect(pathIdentityKey("C:\\Src\\Repo", true)).toBe(pathIdentityKey("c:/src/repo", true));
+    expect(pathIdentityKey("/Users/andy/Src/Repo", false)).not.toBe(
+      pathIdentityKey("/Users/andy/src/repo", false)
+    );
   });
 });
 

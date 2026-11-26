@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { createApp, nextTick } from "vue";
 import App from "./App.vue";
+import { messages } from "./i18n";
 import { mockCacheSnapshot, mockGeneratedCacheSnapshot, mockSnapshot } from "./mock/snapshot";
 import * as state from "./state";
 
@@ -347,7 +348,9 @@ describe("the app shell", () => {
     expect(hero?.textContent).toContain("Cleanup complete");
     expect(hero?.textContent).toContain("Largest items handled");
     expect(host.textContent).toContain("Freed now");
-    expect(host.textContent).toContain("In Trash");
+    // The word is the host's: "Trash" on macOS, "Recycle Bin" on Windows. The
+    // table holds the resolved one, so this assertion is true on both.
+    expect(host.textContent).toContain(messages.result.stats.inTrash);
     expect(host.querySelector(".result-hero--partial")).toBeNull();
 
     state.lastResult.value = [];

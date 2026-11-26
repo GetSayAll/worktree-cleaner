@@ -24,8 +24,9 @@
 //! safe recursive removal in-process, so the worktree-removal command is served by
 //! that crate rather than by a child process.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -91,7 +92,8 @@ impl GitRunner for Git2Runner {
 
 /// libgit2 reads its configuration from process-wide search paths. Set them once
 /// to an isolated directory that contains only the status-relevant core settings
-/// from the effective config.
+/// from the effective config, including the system config of a portable Git that
+/// libgit2 would not find on its own (see [`host_system_configs`]).
 ///
 /// The checkout already reflects line endings, case folding, file modes and
 /// symlinks. Ignoring those settings makes a clean Windows worktree look dirty
@@ -130,10 +132,56 @@ const STATUS_CONFIG_KEYS: [&str; 5] = [
 ];
 
 fn status_config_entries() -> Vec<(String, String)> {
-    match git2::Config::open_default() {
-        Ok(config) => status_config_entries_from(&config),
-        Err(_) => Vec::new(),
+    // Git's precedence, low to high: the installation's system config, then the
+    // user's global config. libgit2 finds a Git installed under the ProgramData
+    // or Program Files location by itself; a portable or user-scope install is
+    // not on that list, so its `etc/gitconfig` is read from the executable's own
+    // layout and laid down first.
+    let mut entries: BTreeMap<String, String> = BTreeMap::new();
+    for path in host_system_configs() {
+        if let Ok(config) = git2::Config::open(&path) {
+            entries.extend(status_config_entries_from(&config));
+        }
     }
+    if let Ok(config) = git2::Config::open_default() {
+        entries.extend(status_config_entries_from(&config));
+    }
+    entries.into_iter().collect()
+}
+
+/// The system config files of the Git installations on `PATH`.
+///
+/// Git for Windows resolves its system config from its own prefix
+/// (`<root>/etc/gitconfig`), and offers `<root>/cmd/git.exe` and
+/// `<root>/mingw64/bin/git.exe` depending on how it is invoked. libgit2's default
+/// search knows only the Program Files and ProgramData locations, so a portable
+/// copy — the Git another application ships for its own use, which is exactly the
+/// Git that checked the worktree out — disappears together with its
+/// `core.autocrlf`, and every CRLF file reads as modified. Reading the file the
+/// executable sits beside restores the setting without starting the program, and
+/// a machine without Git simply has no such file.
+fn host_system_configs() -> Vec<PathBuf> {
+    let executable = if cfg!(windows) { "git.exe" } else { "git" };
+    let Some(path) = std::env::var_os("PATH") else {
+        return Vec::new();
+    };
+    let mut configs: Vec<PathBuf> = Vec::new();
+    for directory in std::env::split_paths(&path) {
+        if !directory.join(executable).is_file() {
+            continue;
+        }
+        // Executables live in `<prefix>/cmd` (Windows) or `<prefix>/bin`, and in
+        // `<prefix>/mingw64/bin` (Windows); the config is at `<prefix>/etc`.
+        for prefix in [Path::new(".."), Path::new("../..")] {
+            let candidate = directory.join(prefix).join("etc").join("gitconfig");
+            if candidate.is_file() {
+                configs.push(candidate);
+            }
+        }
+    }
+    configs.sort();
+    configs.dedup();
+    configs
 }
 
 fn status_config_entries_from(config: &git2::Config) -> Vec<(String, String)> {

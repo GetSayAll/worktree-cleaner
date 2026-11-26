@@ -160,7 +160,7 @@ fn repository(path: &Path, warnings: &mut Vec<String>) -> DiscoveredRepository {
         .map_or(fallback, str::to_string);
     DiscoveredRepository {
         repository: WorkspaceRepository {
-            path: path.display().to_string(),
+            path: host_path(path),
             name,
             worktree_count,
         },
@@ -236,6 +236,25 @@ fn sort_repositories(repositories: &mut [WorkspaceRepository]) {
     );
 }
 
+/// The path as this host writes it.
+///
+/// Discovery starts from the string the user typed, and `read_dir` keeps that
+/// string as the prefix of every child it yields: a root typed `C:/Src` produced
+/// `C:/Src\repo`. Both are valid on Windows, but every other path in the window —
+/// and every path Git reports — uses the platform separator, so one line showed
+/// two. The snapshot is a display string and a scan path, so it is written the
+/// way the host writes paths.
+fn host_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        // A file name cannot contain `/` on Windows; every one of them is a
+        // separator here, including in a UNC prefix.
+        text.replace('/', "\\")
+    } else {
+        text.into_owned()
+    }
+}
+
 /// Finds the Git repository roots below `path`.
 ///
 /// If `path` is itself a repository, the result contains exactly that repository.
@@ -263,7 +282,7 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
         ));
         return Ok(WorkspaceSnapshot {
             schema_version: WORKSPACE_SCHEMA_VERSION,
-            root: root.display().to_string(),
+            root: host_path(&root),
             scanned_at: format_rfc3339(SystemTime::now()),
             repositories: Vec::new(),
             warnings,
@@ -340,7 +359,7 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
 
     Ok(WorkspaceSnapshot {
         schema_version: WORKSPACE_SCHEMA_VERSION,
-        root: root.display().to_string(),
+        root: host_path(&root),
         scanned_at: format_rfc3339(SystemTime::now()),
         repositories,
         warnings,
@@ -422,27 +441,59 @@ mod tests {
         std::fs::write(tagged.join("CACHEDIR.TAG"), "Signature: cache\n").expect("cache tag");
 
         let snapshot = discover_workspace(root.path().to_str().expect("path")).expect("discover");
-        let paths: Vec<String> = snapshot
+        // Paths carry the host's separator, so compare components rather than
+        // matching a `/`-shaped string: `C:\…\one` must satisfy this too.
+        let paths: Vec<&str> = snapshot
             .repositories
             .iter()
-            .map(|repo| repo.path.replace('\\', "/"))
+            .map(|repo| repo.path.as_str())
             .collect();
-        assert!(paths.iter().any(|path| path.ends_with("/one")));
-        assert!(paths.iter().any(|path| path.ends_with("/nested/two")));
+        let has_component = |name: &str| {
+            paths.iter().any(|path| {
+                Path::new(path)
+                    .components()
+                    .any(|part| part.as_os_str() == name)
+            })
+        };
+        assert!(paths.iter().any(|path| Path::new(path).ends_with("one")));
+        assert!(paths
+            .iter()
+            .any(|path| Path::new(path).ends_with("nested/two")));
         for ignored in [
-            "/.worktrees/",
-            "/node_modules/",
-            "/checkouts/",
-            "/SourcePackages/",
-            "/ci-temp/",
-            "/build-cache/",
-            "/tagged-build/",
+            ".worktrees",
+            "node_modules",
+            "checkouts",
+            "SourcePackages",
+            "ci-temp",
+            "build-cache",
+            "tagged-build",
         ] {
             assert!(
-                !paths.iter().any(|path| path.contains(ignored)),
+                !has_component(ignored),
                 "{ignored} is generated, not a local repository: {paths:?}"
             );
         }
+    }
+
+    /// A root typed with forward slashes used to yield mixed paths — `C:/Src\repo`
+    /// — because `read_dir` keeps the prefix it was given. The window then showed
+    /// two separator styles on one line, and the path travelled into the scan and
+    /// the recent-projects list in that shape.
+    #[cfg(windows)]
+    #[test]
+    fn a_root_typed_with_slashes_is_reported_with_backslashes() {
+        let root = temp_workspace();
+        make_repo(&root.path().join("one"));
+        let typed = root.path().to_string_lossy().replace('\\', "/");
+
+        let snapshot = discover_workspace(&typed).expect("discover");
+        assert_eq!(snapshot.root, root.path().display().to_string());
+        assert_eq!(snapshot.repositories.len(), 1);
+        assert!(
+            !snapshot.repositories[0].path.contains('/'),
+            "{} still carries a forward slash",
+            snapshot.repositories[0].path
+        );
     }
 
     #[cfg(unix)]
@@ -454,7 +505,9 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), root.path().join("linked"))
             .expect("create symlink");
         let snapshot = discover_workspace(root.path().to_str().expect("path")).expect("discover");
-        assert!(snapshot.repositories.is_empty());
+        // `assert_eq!` rather than `assert!(…is_empty())`: a failure prints the
+        // repositories that were found, which is what the reader needs to see.
+        assert_eq!(snapshot.repositories, Vec::<WorkspaceRepository>::new());
     }
 
     #[test]
@@ -476,7 +529,7 @@ mod tests {
         let root = temp_workspace();
         std::fs::create_dir(root.path().join("plain")).expect("plain dir");
         let snapshot = discover_workspace(root.path().to_str().expect("path")).expect("discover");
-        assert!(snapshot.repositories.is_empty());
+        assert_eq!(snapshot.repositories, Vec::<WorkspaceRepository>::new());
         assert!(snapshot
             .warnings
             .iter()
