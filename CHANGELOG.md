@@ -42,7 +42,7 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **Generated build caches can be inventoried and cleaned.** The ordinary scan also finds directories carrying `CACHEDIR.TAG`, such as
-  SwiftPM's per-build roots, and the page opens on that result; only selected
+  SwiftPM's per-build roots, and the progress page names that step; only selected
   roots move to the Trash after a re-check. The reader does not have to identify
   or type a cache path, or start a second scan. Selected build caches also appear
   as a separate channel on the project confirmation, so one confirmation covers

@@ -322,6 +322,9 @@ export const en = {
       artifacts: {
         label: "Find build artifacts",
       },
+      cache: {
+        label: "Find build caches",
+      },
       verify: {
         label: "Summarize",
       }

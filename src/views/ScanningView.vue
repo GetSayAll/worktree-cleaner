@@ -22,8 +22,8 @@ const stages = computed(() => SCAN_STAGES.map((key) => ({ key, ...messages.scan.
 // The desktop scan is one call that answers when it is finished, so the stages
 // do not report where the core has reached — they move to show that work is under
 // way, and they stop at the last one rather than cycling (see startStageTimer).
-// Without them the page showed four dead markers beside a running clock and read
-// as a hang.
+// Without them the page showed a list of dead markers beside a running clock and
+// read as a hang.
 //
 // The page does not explain the call model. It used to: a note said the core
 // answers in one call, so that the movement would not be taken for a real

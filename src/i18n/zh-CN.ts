@@ -292,6 +292,9 @@ export const zhCN = {
       artifacts: {
         label: "查找构建产物",
       },
+      cache: {
+        label: "查找构建缓存",
+      },
       verify: {
         label: "汇总",
       }

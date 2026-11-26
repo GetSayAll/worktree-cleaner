@@ -64,7 +64,7 @@ Before a scan, only "Welcome" in the sidebar is available; data pages appear onl
 
 ### 2. Scan progress
 
-- Stage list (checked off item by item): parse Git worktrees → check each worktree's status → scan build artifacts → summarize.
+- Stage list (checked off item by item): parse Git worktrees → check each worktree's status → scan build artifacts → find build caches → summarize.
 - Each stage shows the currently processed path in real time (single-line scrolling); no progress bar percentage (the number of directories is unknown in advance, and a fake progress bar lies).
 - Elapsed time; a "Cancel" button (after canceling, the already-completed portion is still viewable).
 - Degradation notice area: worktrees whose check times out or can't be read due to permissions are listed here, with a note that the entry will be judged "unknown".

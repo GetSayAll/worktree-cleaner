@@ -67,7 +67,7 @@ export type ViewKey =
  * Keys rather than copy: the language can change at any time, so the stage
  * labels are looked up while rendering (see ScanningView).
  */
-export const SCAN_STAGES = ["worktrees", "status", "artifacts", "verify"] as const;
+export const SCAN_STAGES = ["worktrees", "status", "artifacts", "cache", "verify"] as const;
 export type ScanStage = (typeof SCAN_STAGES)[number];
 
 /**
@@ -384,6 +384,22 @@ function startStageTimer() {
 }
 
 /**
+ * Holds the scan page on the build-cache step while that scan is working.
+ *
+ * The ordinary stage timer is a liveness cue, not a real progress report; the
+ * build-cache scan is a real awaited step after the repository scan, so the
+ * marker is set here instead of being allowed to run on to "Summarize" while it
+ * still runs.
+ */
+function enterBuildCacheStage() {
+  if (stageTimer !== null) {
+    window.clearInterval(stageTimer);
+    stageTimer = null;
+  }
+  scanState.stageIndex = SCAN_STAGES.length - 2;
+}
+
+/**
  * Budget for one Git command.
  *
  * Not a setting: a single hung `git` must not be able to stall a scan or an
@@ -498,6 +514,10 @@ export async function startScan(path: string) {
       return;
     }
     if (workspace.repositories.length > 1) {
+      buildCacheRoot.value = workspace.root;
+      enterBuildCacheStage();
+      await runBuildCacheScan(workspace.root);
+      if (scanState.cancelled) return;
       finishWorkspace(workspace);
       return;
     }
@@ -505,6 +525,10 @@ export async function startScan(path: string) {
     const repository = workspace.repositories[0];
     projectPath.value = repository.path;
     const result = await scanProject(repository.path, scanKnobs());
+    if (scanState.cancelled) return;
+    buildCacheRoot.value = workspace.root;
+    enterBuildCacheStage();
+    await runBuildCacheScan(workspace.root);
     if (scanState.cancelled) return;
     finishScan(result);
   } catch (error) {
@@ -555,11 +579,6 @@ function finishWorkspace(workspace: WorkspaceSnapshot) {
     repositories: workspace.repositories.length
   });
   view.value = "workspace";
-  // This is part of the same scan the reader started, not a second action they
-  // have to discover. It runs in the background while the repository list is
-  // shown, and the build-cache page opens on the finished result.
-  buildCacheRoot.value = workspace.root;
-  void startBuildCacheScan();
 }
 
 function finishScan(result: ProjectSnapshot, sample = false) {
@@ -577,9 +596,11 @@ function finishScan(result: ProjectSnapshot, sample = false) {
   });
   applyDefaultSelection();
   view.value = "overview";
-  if (!buildCacheSnapshot.value && !buildCacheScanning.value) {
-    buildCacheRoot.value = result.root;
-    void startBuildCacheScan();
+  if (sample && !buildCacheSnapshot.value) {
+    buildCacheSnapshot.value = mockGeneratedCacheSnapshot;
+    buildCacheRoot.value = mockGeneratedCacheSnapshot.root;
+    buildCacheSample.value = true;
+    applyBuildCacheDefaultSelection();
   }
 }
 
@@ -1169,14 +1190,15 @@ export function toggleGroupBuildCaches(paths: string[], select: boolean) {
   buildCacheAcknowledged.value = false;
 }
 
-/** Inventories tagged build roots below the chosen folder. It never deletes anything. */
-export async function startBuildCacheScan() {
-  if (buildCacheScanning.value || executing.value || scanState.running) return;
-  const root = buildCacheRoot.value.trim();
-  if (!root && isDesktop()) {
-    buildCacheError.value = false;
-    return;
-  }
+/**
+ * Inventories tagged build roots below one folder. It never deletes anything.
+ *
+ * This is the part shared by the normal scan and the page's optional refresh; it
+ * deliberately has no `scanState.running` guard so the scan that already owns
+ * the scanning page can await it. The exported entry point below is the guarded
+ * one.
+ */
+async function runBuildCacheScan(root: string) {
   buildCacheScanning.value = true;
   buildCacheError.value = false;
   buildCacheLastResult.value = [];
@@ -1222,6 +1244,17 @@ export async function startBuildCacheScan() {
   } finally {
     buildCacheScanning.value = false;
   }
+}
+
+/** Refreshes the build-cache inventory from the folder already selected. */
+export async function startBuildCacheScan() {
+  if (buildCacheScanning.value || executing.value || scanState.running) return;
+  const root = buildCacheRoot.value.trim();
+  if (!root && isDesktop()) {
+    buildCacheError.value = false;
+    return;
+  }
+  await runBuildCacheScan(root);
 }
 
 /** Runs the selected build-root moves after their own re-check. */
