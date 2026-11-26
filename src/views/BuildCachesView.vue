@@ -15,6 +15,7 @@ import {
   executeBuildCacheCleanup,
   executeErrorMessage,
   goTo,
+  lastWorkspaceRoot,
   logError,
   projectPath,
   recentProjects,
@@ -83,11 +84,12 @@ const canRun = computed(
 
 onMounted(() => {
   // The page does not ask the reader to know which folder holds a cache. It
-  // starts from the workspace or project the app already has open, and only falls
-  // back to the system folder picker when there is no such scope.
+  // starts from the folder that was scanned last, and only falls back to the
+  // system folder picker when there is no such history.
   if (!buildCacheRoot.value) {
     buildCacheRoot.value =
       workspaceSnapshot.value?.root ??
+      lastWorkspaceRoot.value ??
       projectPath.value ??
       recentProjects.value[0]?.path ??
       "";

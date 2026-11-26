@@ -42,10 +42,9 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **Generated build caches can be inventoried and cleaned.** The page starts
-  from the workspace or project already open, lists directories carrying
-  `CACHEDIR.TAG`, such as SwiftPM's per-build roots, and moves only selected
-  roots to the Trash after a re-check. The reader does not have to identify or
-  type a cache path.
+  from the folder scanned last, lists directories carrying `CACHEDIR.TAG`, such
+  as SwiftPM's per-build roots, and moves only selected roots to the Trash after
+  a re-check. The reader does not have to identify or type a cache path.
 - **SwiftPM build directories are visible.** `.build` is now a recognised artifact
   with `Package.swift` as its rebuild proof, so a Swift worktree no longer hides
   its build cache from the cleanup plan.

@@ -421,12 +421,12 @@ export const en = {
   buildCaches: {
     title: "Build caches",
     lede:
-      "Scan the workspace or project the app already has open for build roots marked by CACHEDIR.TAG, such as SwiftPM's per-build directories. You do not need to know which folder is a cache; only the roots you select are moved to the {{trash}}.",
+      "The app scans the folder you scanned last for build roots marked by CACHEDIR.TAG, such as SwiftPM's per-build directories. You do not need to know which folder is a cache; only the roots you select are moved to the {{trash}}.",
     rulesSummary:
       "A tagged build root is a rebuildable cache. Credentials, recent activity, symlinks and whitelist matches still need review or block deletion.",
-    scopeTitle: "Scan scope",
-    scopeHint: "The folder already open is used automatically; choose another folder only when the cache lives elsewhere.",
-    noScope: "No workspace is open yet.",
+    scopeTitle: "Last scanned folder",
+    scopeHint: "The app looks here automatically; choose another folder only when the cache lives elsewhere.",
+    noScope: "No folder has been scanned yet. Choose one to start.",
     chooseFolder: "Choose folder",
     scan: "Scan for build caches",
     scanning: "Scanning build caches…",

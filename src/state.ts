@@ -103,6 +103,14 @@ export const projectPath = ref("");
 export const snapshot = ref<ProjectSnapshot | null>(null);
 /** Repositories found below a directory that is not itself a Git repository. */
 export const workspaceSnapshot = ref<WorkspaceSnapshot | null>(null);
+/**
+ * The folder from the last repository discovery.
+ *
+ * `workspaceSnapshot` is cleared when one repository is opened for a project
+ * scan; this keeps the folder available to the build-cache page, which looks
+ * below the folder the reader scanned rather than inside one repository.
+ */
+export const lastWorkspaceRoot = ref("");
 /** The cache inventory is a separate surface from the project snapshot. */
 export const cacheSnapshot = ref<CacheSnapshot | null>(null);
 export const selectedCaches = ref<string[]>([]);
@@ -539,6 +547,7 @@ function finishWorkspace(workspace: WorkspaceSnapshot) {
   scanState.running = false;
   scanState.stageIndex = SCAN_STAGES.length - 1;
   workspaceSnapshot.value = workspace;
+  lastWorkspaceRoot.value = workspace.root;
   snapshot.value = null;
   isDemoData.value = false;
   rememberProject(workspace.root);
