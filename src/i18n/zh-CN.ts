@@ -842,6 +842,11 @@ export const zhCN = {
     prunableNote: "工作目录已不在；只清理残留记录，不碰文件。",
     cleanNote: "工作区是干净的，不会丢失任何未保存内容",
     channelB: "将产物目录移入{{trash}}",
+    channelC: "将构建缓存移入{{trash}}",
+    buildCacheHeader: (n: number, bytes: string) => `${n} 个缓存 · ${bytes}`,
+    buildCacheNote:
+      "这些带标记的构建根目录在仓库之外，可从{{trash}}恢复；要调整选择请到“构建缓存”页面。",
+    buildCacheScanning: "仍在查找构建缓存；扫描完成前不能执行清理。",
     trashHeader: (n: number, bytes: string) => `${n} 项 · ${bytes}`,
     columns: {
       directory: "目录",
@@ -855,16 +860,16 @@ export const zhCN = {
     confirmationTitle: "执行前确认",
     confirmationIntro: "本次清理需要你确认：",
     permanenceNote:
-      "工作树不能从{{trash}}恢复；构建产物可以。",
+      "工作树不能从{{trash}}恢复；构建产物和构建缓存可以。",
     ackConfirm: (n: number) =>
       n > 0
-        ? `我已看过上面的列表，包括 ${n} 个工作树中会被删除的未跟踪文件；我明白工作树删除是永久的。`
-        : "我已看过上面的列表；我明白工作树删除是永久的。",
+        ? `我已看过上面的列表，包括 ${n} 个工作树中会被删除的未跟踪文件，以及选中的构建缓存；我明白工作树删除是永久的。`
+        : "我已看过上面的列表，包括选中的构建缓存；我明白工作树删除是永久的。",
     confirmRequired: "必须确认",
     confirmed: "已勾选",
     confirmHint: "勾选后才能执行清理",
     confirmRules:
-      "工作树永久删除，分支保留；构建产物移入{{trash}}，可以恢复。",
+      "工作树永久删除，分支保留；构建产物和构建缓存移入{{trash}}，可以恢复。",
     typeNameBefore: "请输入项目目录名",
     typeNameAfter: "以继续",
     exportTitle: "计划",

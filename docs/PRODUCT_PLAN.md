@@ -127,6 +127,7 @@ A separate, opt-in page for generated build roots that are not inside a reposito
 - A tagged root is a known rebuildable cache. Credentials, recent activity, symlinks and a whitelist hit follow the system-cache rules: a credential or whitelist hit blocks deletion, a recent change needs review. The credential walk skips the reproducible dependency checkouts inside the root (for example SwiftPM's `checkouts`): a publishable test key shipped with Sparkle is part of the generated tree, while a credential in the build root's own files still blocks deletion.
 - A directory without `CACHEDIR.TAG` is not a generated cache and is never listed by this page.
 - The selected roots form their own plan object, ordered by size descending, and move through the system Trash. The executor re-checks path, size, safety level and whitelist before each move. It never reads a project plan or project snapshot.
+- The selected build caches can be shown as a separate channel on the project cleanup confirmation page. One confirmation therefore covers the project worktrees/artifacts and the discovered build caches, but the executors stay separate: each item is re-checked against its own snapshot, and a cache move never enters a project plan.
 - Discovery and execution never read a project snapshot. The page is not a second cleanup model for repositories; it only handles the build roots the user selected.
 
 ### 6. Cleanup plan (confirmation page — the most important page in the product)

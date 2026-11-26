@@ -1377,21 +1377,24 @@ export async function executeCacheCleanup() {
 /**
  * Runs the confirmed plan.
  *
- * Nothing is simulated here: the core re-checks every item, executes what still
- * holds, and answers item by item. What it could not do comes back with its
- * reason rather than being smoothed over.
+ * The project channels and the selected build caches are one confirmation but
+ * two executors: a worktree/artifact plan is anchored to one repository, while a
+ * build-cache plan is anchored to tagged directories under the scanned folder.
+ * They are re-checked and reported separately, then merged into one result table.
+ * Nothing is simulated: a skipped item stays skipped and a failure stays visible.
  */
 export async function executeCleanup() {
   const plan = cleanupPlan.value;
+  const cachePlan = buildCachePlan.value;
   const current = snapshot.value;
-  if (!current) return;
-  if (
-    plan.worktree_removals.length === 0 &&
-    plan.trash_moves.length === 0 &&
-    plan.blockers.length === 0
-  ) {
-    return;
-  }
+  const cacheCurrent = buildCacheSnapshot.value;
+  const projectHasItems =
+    plan.worktree_removals.length > 0 ||
+    plan.trash_moves.length > 0 ||
+    plan.blockers.length > 0;
+  const cacheHasItems = cachePlan.trash_moves.length > 0;
+  if (!projectHasItems && !cacheHasItems) return;
+  const ackReasons = [...new Set([...plan.ack_reasons, ...cachePlan.ack_reasons])];
 
   if (!isDesktop()) {
     // The preview cannot reach the file system, and there is no honest way to
@@ -1405,39 +1408,89 @@ export async function executeCleanup() {
   logError.value = null;
   // What the reader confirmed, not what happened afterwards: the deletions are
   // already in the operation log, and this line is what they agreed to.
-  record("cleanup.confirmed", current.root, {
+  record("cleanup.confirmed", current?.root ?? cacheCurrent?.root ?? projectPath.value, {
     worktrees: plan.worktree_removals.length,
-    artifacts: plan.trash_moves.filter((item) => item.bundled_with_worktree === null).length,
+    artifacts:
+      plan.trash_moves.filter((item) => item.bundled_with_worktree === null).length +
+      cachePlan.trash_moves.length,
     forced: plan.worktree_removals.filter((item) => item.force).length,
     typed_name: confirmText.value.trim() !== ""
   });
   executionProgress.value = [];
   let unlisten: (() => void) | null = null;
   try {
-    // The live list is an enhancement, not a condition for running: if the
-    // event channel is unavailable, the final outcome still carries every row.
-    unlisten = await onExecutionProgress((entry) => {
-      executionProgress.value = [...executionProgress.value, entry];
-    }).catch(() => null);
-    const outcome = await executePlan(plan, current, {
-      recent_activity_days: settings.active_days,
-      untracked_as_unsafe: settings.untracked_is_unsafe,
-      whitelist: settings.whitelist_paths,
-      // The same two budgets the scan used. The re-check measures the very same
-      // directories, so a setting that shaped the scan and was then replaced by a
-      // default here would mean one thing on the way in and another on the way out.
-      per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
-      git_timeout_ms: GIT_TIMEOUT_MS,
-      // `null` disables the audit log, which the user is then told about.
-      log_path: await logPath()
-    });
-    await applyOutcome(outcome, plan);
+    let projectOutcome: ExecutionOutcome | null = null;
+    if (projectHasItems && current) {
+      // The live list is an enhancement, not a condition for running: if the
+      // event channel is unavailable, the final outcome still carries every row.
+      unlisten = await onExecutionProgress((entry) => {
+        executionProgress.value = [...executionProgress.value, entry];
+      }).catch(() => null);
+      projectOutcome = await executePlan(plan, current, {
+        recent_activity_days: settings.active_days,
+        untracked_as_unsafe: settings.untracked_is_unsafe,
+        whitelist: settings.whitelist_paths,
+        // The same two budgets the scan used. The re-check measures the very same
+        // directories, so a setting that shaped the scan and was then replaced by a
+        // default here would mean one thing on the way in and another on the way out.
+        per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+        git_timeout_ms: GIT_TIMEOUT_MS,
+        // `null` disables the audit log, which the user is then told about.
+        log_path: await logPath()
+      });
+    }
+
+    let cacheOutcome: ExecutionOutcome | null = null;
+    if (cacheHasItems && cacheCurrent) {
+      cacheOutcome = await executeGeneratedCachePlan(cachePlan, cacheCurrent, {
+        recent_activity_days: settings.active_days,
+        untracked_as_unsafe: false,
+        whitelist: settings.whitelist_paths,
+        per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+        git_timeout_ms: GIT_TIMEOUT_MS,
+        log_path: await logPath()
+      });
+      applyBuildCacheRemovals(cacheOutcome, cachePlan);
+    }
+
+    const combinedPlan: CleanupPlan = {
+      ...plan,
+      trash_moves: [...plan.trash_moves, ...cachePlan.trash_moves],
+      blockers: [...plan.blockers, ...cachePlan.blockers],
+      ack_reasons: ackReasons,
+      total_bytes: plan.total_bytes + cachePlan.total_bytes,
+      total_bytes_unknown: plan.total_bytes_unknown + cachePlan.total_bytes_unknown
+    };
+    const entries = [...(projectOutcome?.entries ?? []), ...(cacheOutcome?.entries ?? [])];
+    const logErrors = [projectOutcome?.log_error, cacheOutcome?.log_error].filter(
+      (error): error is string => error !== null && error !== undefined
+    );
+    await applyOutcome(entries, combinedPlan, logErrors.join("; ") || null);
   } catch (error) {
     executeError.value = "failed";
   } finally {
     unlisten?.();
     executing.value = false;
   }
+}
+
+/** Updates the build-cache inventory and its own result panel after a combined run. */
+function applyBuildCacheRemovals(outcome: ExecutionOutcome, plan: CleanupPlan) {
+  const current = buildCacheSnapshot.value;
+  if (!current) return;
+  const removed = new Set(
+    outcome.entries
+      .filter((entry) => entry.result === "ok" && entry.action === "trash-move")
+      .map((entry) => entry.target)
+  );
+  buildCacheSnapshot.value = {
+    ...current,
+    records: current.records.filter((record) => !removed.has(record.path))
+  };
+  selectedBuildCaches.value = [];
+  buildCacheLastResult.value = outcome.entries;
+  buildCacheResultSummary.value = summarise(outcome.entries, plan);
+  buildCacheAcknowledged.value = false;
 }
 
 /**
@@ -1450,7 +1503,7 @@ export async function executeCleanup() {
  * authority on everything that was skipped, which is why the selection is cleared
  * rather than left pointing at rows whose safety was re-checked at execution time.
  */
-function applyRemovalsToSnapshot(outcome: ExecutionOutcome, plan: CleanupPlan) {
+function applyRemovalsToSnapshot(entries: ResultEntry[], plan: CleanupPlan) {
   const current = snapshot.value;
   if (!current) return;
 
@@ -1458,7 +1511,7 @@ function applyRemovalsToSnapshot(outcome: ExecutionOutcome, plan: CleanupPlan) {
   // runs once in the main worktree and cleans every stale registration. Removing
   // the entry's target would remove the main working tree from the screenshot, so
   // the pruned paths come from the plan items whose command is the prune.
-  const pruned = outcome.entries.some(
+  const pruned = entries.some(
     (entry) => entry.action === "prune" && entry.result === "ok"
   )
     ? plan.worktree_removals
@@ -1466,13 +1519,13 @@ function applyRemovalsToSnapshot(outcome: ExecutionOutcome, plan: CleanupPlan) {
         .map((item) => item.path)
     : [];
   const removedWorktrees = new Set([
-    ...outcome.entries
+    ...entries
       .filter((entry) => entry.result === "ok" && entry.action === "worktree-remove")
       .map((entry) => entry.target),
     ...pruned
   ]);
   const removedArtifacts = new Set(
-    outcome.entries
+    entries
       .filter((entry) => entry.result === "ok" && entry.action === "trash-move")
       .map((entry) => entry.target)
   );
@@ -1491,7 +1544,11 @@ function applyRemovalsToSnapshot(outcome: ExecutionOutcome, plan: CleanupPlan) {
 }
 
 /** Turns the executor's answer into what the result page shows. */
-async function applyOutcome(outcome: ExecutionOutcome, plan: CleanupPlan) {
+async function applyOutcome(
+  entries: ResultEntry[],
+  plan: CleanupPlan,
+  logErrorText: string | null
+) {
   // A whitelist-blocked item never reaches the executor — it was filtered out of
   // both channels before the plan was built — so it is added back here as its own
   // skipped row. Leaving it out would make the plan page's count disagree with
@@ -1506,10 +1563,10 @@ async function applyOutcome(outcome: ExecutionOutcome, plan: CleanupPlan) {
     size_bytes: null
   }));
 
-  applyRemovalsToSnapshot(outcome, plan);
-  lastResult.value = [...outcome.entries, ...blocked];
+  applyRemovalsToSnapshot(entries, plan);
+  lastResult.value = [...entries, ...blocked];
   resultSummary.value = summarise(lastResult.value, plan);
-  logError.value = outcome.log_error;
+  logError.value = logErrorText;
   acknowledged.value = false;
   confirmText.value = "";
   view.value = "result";

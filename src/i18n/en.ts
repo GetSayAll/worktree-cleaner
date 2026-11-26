@@ -912,6 +912,12 @@ export const en = {
       "The working directory is gone; only leftover records are cleaned up, and no files are touched.",
     cleanNote: "The working tree is clean; no unsaved content will be lost",
     channelB: "Move artifact directories to the {{trash}}",
+    channelC: "Move build caches to the {{trash}}",
+    buildCacheHeader: (n: number, bytes: string) => `${n} ${n === 1 ? "cache" : "caches"} · ${bytes}`,
+    buildCacheNote:
+      "These tagged build roots sit outside the repository. They can be restored from the {{trash}}; adjust the selection on the Build caches page.",
+    buildCacheScanning:
+      "Build caches are still being found; the run stays disabled until that scan finishes.",
     trashHeader: (n: number, bytes: string) => `${n} ${n === 1 ? "item" : "items"} · ${bytes}`,
     columns: {
       directory: "Directory",
@@ -926,16 +932,16 @@ export const en = {
     confirmationIntro:
       "This cleanup needs your confirmation:",
     permanenceNote:
-      "Worktrees cannot be recovered from the {{trash}}; build artifacts can.",
+      "Worktrees cannot be recovered from the {{trash}}; build artifacts and build caches can.",
     ackConfirm: (n: number) =>
       n > 0
-        ? `I reviewed the list, including the untracked files that will be deleted in ${n} ${n === 1 ? "worktree" : "worktrees"}. I understand that worktree removal is permanent.`
-        : "I reviewed the list. I understand that worktree removal is permanent.",
+        ? `I reviewed the list, including the untracked files that will be deleted in ${n} ${n === 1 ? "worktree" : "worktrees"} and the selected build caches. I understand that worktree removal is permanent.`
+        : "I reviewed the list, including the selected build caches. I understand that worktree removal is permanent.",
     confirmRequired: "Required confirmation",
     confirmed: "Checked",
     confirmHint: "Check this box to enable cleanup",
     confirmRules:
-      "Worktrees are deleted permanently and their branches remain. Build artifacts go to the {{trash}} and can be restored.",
+      "Worktrees are deleted permanently and their branches remain. Build artifacts and build caches go to the {{trash}} and can be restored.",
     typeNameBefore: "Type the project directory name",
     typeNameAfter: "to proceed",
     exportTitle: "Plan",

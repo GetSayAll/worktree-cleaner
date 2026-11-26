@@ -298,6 +298,30 @@ describe("the app shell", () => {
     host.remove();
   });
 
+  it("shows selected build caches in the project confirmation", async () => {
+    const { app, host } = mountApp();
+    state.snapshot.value = mockSnapshot;
+    state.buildCacheSnapshot.value = mockGeneratedCacheSnapshot;
+    state.selectedBuildCaches.value = mockGeneratedCacheSnapshot.records.map(
+      (record) => record.path
+    );
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [];
+    state.view.value = "plan";
+    await nextTick();
+
+    expect(host.textContent).toContain("Build caches");
+    expect(host.textContent).toContain("host-build");
+    expect(host.textContent).toContain("Move build caches to the Trash");
+
+    state.view.value = "welcome";
+    state.snapshot.value = null;
+    state.buildCacheSnapshot.value = null;
+    state.selectedBuildCaches.value = [];
+    app.unmount();
+    host.remove();
+  });
+
   it("shows the completed banner only when at least one item was handled", async () => {
     const { app, host } = mountApp();
     state.snapshot.value = mockSnapshot;

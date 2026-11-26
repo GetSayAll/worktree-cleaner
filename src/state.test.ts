@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mockCacheSnapshot, mockRoot, mockSnapshot } from "./mock/snapshot";
+import { mockCacheSnapshot, mockGeneratedCacheSnapshot, mockRoot, mockSnapshot } from "./mock/snapshot";
 import { assess } from "./types";
 import type { ExecutionOutcome, ResultEntry } from "./types";
 import { basename, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
@@ -27,11 +27,13 @@ async function freshStateWithExecutor(
 ): Promise<{
   state: typeof import("./state");
   plans: unknown[];
+  cachePlans: unknown[];
   logActivity: ReturnType<typeof vi.fn>;
   progressHandlers: Array<(entry: ResultEntry) => void>;
 }> {
   vi.resetModules();
   const plans: unknown[] = [];
+  const cachePlans: unknown[] = [];
   const logActivity = vi.fn(async () => undefined);
   const progressHandlers: Array<(entry: ResultEntry) => void> = [];
   vi.doMock("./platform", () => ({
@@ -49,6 +51,10 @@ async function freshStateWithExecutor(
     }),
     scanCaches: vi.fn(),
     executeCachePlan: vi.fn(),
+    executeGeneratedCachePlan: async (plan: unknown) => {
+      cachePlans.push(plan);
+      return outcome;
+    },
     executePlan: async (plan: unknown) => {
       plans.push(plan);
       return outcome;
@@ -65,7 +71,7 @@ async function freshStateWithExecutor(
     readActivity: async () => []
   }));
   const state = await import("./state");
-  return { state, plans, logActivity, progressHandlers };
+  return { state, plans, cachePlans, logActivity, progressHandlers };
 }
 
 /** Undoes `freshStateWithExecutor` so the next test sees the real boundary. */
@@ -781,6 +787,41 @@ describe("group selection and blocked execution", () => {
     // Skipped counts toward the failure figure and frees nothing.
     expect(state.resultSummary.value.failed).toBe(1);
     expect(state.resultSummary.value.freed).toBe(0);
+  });
+});
+
+describe("combined project and build-cache cleanup", () => {
+  it("runs selected build caches through their own executor in one confirmation", async () => {
+    const cachePath = mockGeneratedCacheSnapshot.records[0].path;
+    const { state, plans, cachePlans } = await freshStateWithExecutor({
+      entries: [
+        {
+          action: "trash-move",
+          target: cachePath,
+          result: "ok",
+          detail_code: "artifact.trashed",
+          detail_args: {},
+          detail: null,
+          size_bytes: 4_000
+        }
+      ],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = mockSnapshot;
+    state.buildCacheSnapshot.value = mockGeneratedCacheSnapshot;
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [];
+    state.selectedBuildCaches.value = [cachePath];
+    await state.executeCleanup();
+    unmockPlatform();
+
+    expect(plans).toHaveLength(0);
+    expect(cachePlans).toHaveLength(1);
+    expect((cachePlans[0] as { trash_moves: unknown[] }).trash_moves).toHaveLength(1);
+    expect(state.lastResult.value.some((entry) => entry.target === cachePath)).toBe(true);
+    expect(state.resultSummary.value.trash_bytes).toBe(4_000);
+    expect(state.buildCacheSnapshot.value?.records.some((record) => record.path === cachePath)).toBe(false);
   });
 });
 
