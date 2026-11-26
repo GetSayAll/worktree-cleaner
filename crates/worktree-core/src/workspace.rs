@@ -353,7 +353,9 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), root.path().join("linked"))
             .expect("create symlink");
         let snapshot = discover_workspace(root.path().to_str().expect("path")).expect("discover");
-        assert!(snapshot.repositories.is_empty());
+        // `assert_eq!` rather than `assert!(…is_empty())`: a failure prints the
+        // repositories that were found, which is what the reader needs to see.
+        assert_eq!(snapshot.repositories, Vec::<WorkspaceRepository>::new());
     }
 
     #[test]
@@ -375,7 +377,7 @@ mod tests {
         let root = temp_workspace();
         std::fs::create_dir(root.path().join("plain")).expect("plain dir");
         let snapshot = discover_workspace(root.path().to_str().expect("path")).expect("discover");
-        assert!(snapshot.repositories.is_empty());
+        assert_eq!(snapshot.repositories, Vec::<WorkspaceRepository>::new());
         assert!(snapshot
             .warnings
             .iter()
