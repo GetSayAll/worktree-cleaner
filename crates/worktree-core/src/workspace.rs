@@ -133,6 +133,24 @@ fn repository(path: &Path, warnings: &mut Vec<String>) -> WorkspaceRepository {
     }
 }
 
+/// Orders repositories by worktree count, largest first.
+///
+/// An unknown count is not a zero: it is kept after every measured repository,
+/// with the path as the stable tie-breaker. Discovery sets the count from Git,
+/// so this is the order the workspace page displays.
+fn sort_repositories(repositories: &mut [WorkspaceRepository]) {
+    repositories.sort_by(
+        |left, right| match (left.worktree_count, right.worktree_count) {
+            (Some(left_count), Some(right_count)) => right_count
+                .cmp(&left_count)
+                .then_with(|| left.path.cmp(&right.path)),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => left.path.cmp(&right.path),
+        },
+    );
+}
+
 /// Finds the Git repository roots below `path`.
 ///
 /// If `path` is itself a repository, the result contains exactly that repository.
@@ -218,7 +236,7 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
         }
     }
 
-    repositories.sort_by(|left, right| left.path.cmp(&right.path));
+    sort_repositories(&mut repositories);
     if repositories.is_empty() {
         warnings.push(format!(
             "no Git repositories were found below {}",
@@ -265,6 +283,38 @@ mod tests {
         // The worktree count is display-only; a bare `.git` directory has no
         // readable worktree list, so it stays unknown rather than zero.
         assert_eq!(snapshot.repositories[0].worktree_count, None);
+    }
+
+    #[test]
+    fn repositories_are_ordered_by_worktree_count_descending() {
+        let mut repositories = vec![
+            WorkspaceRepository {
+                path: "/root/two".to_string(),
+                name: "two".to_string(),
+                worktree_count: Some(2),
+            },
+            WorkspaceRepository {
+                path: "/root/unknown".to_string(),
+                name: "unknown".to_string(),
+                worktree_count: None,
+            },
+            WorkspaceRepository {
+                path: "/root/many".to_string(),
+                name: "many".to_string(),
+                worktree_count: Some(37),
+            },
+            WorkspaceRepository {
+                path: "/root/one".to_string(),
+                name: "one".to_string(),
+                worktree_count: Some(2),
+            },
+        ];
+        sort_repositories(&mut repositories);
+        let order: Vec<&str> = repositories
+            .iter()
+            .map(|repository| repository.name.as_str())
+            .collect();
+        assert_eq!(order, vec!["many", "one", "two", "unknown"]);
     }
 
     #[test]

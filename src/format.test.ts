@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activityText,
-  compareByActionability,
-  compareSizeNullsFirst,
+  compareSizeNullsLast,
   detailText,
   formatBytes,
   formatCount,
@@ -57,26 +56,25 @@ describe("formatBytes", () => {
   });
 });
 
-describe("compareSizeNullsFirst", () => {
-  it("puts an unmeasurable item above every measured one", () => {
-    // Burying the item the user cannot assess at the bottom of a "largest" list
-    // would hide exactly the row that most needs attention.
-    expect(compareSizeNullsFirst(null, 10)).toBe(-1);
-    expect(compareSizeNullsFirst(10, null)).toBe(1);
-    expect(compareSizeNullsFirst(null, null)).toBe(0);
+describe("compareSizeNullsLast", () => {
+  it("keeps an unmeasurable item after every measured one", () => {
+    // Unknown is not a number and cannot be called larger; it stays last.
+    expect(compareSizeNullsLast(null, 10)).toBe(1);
+    expect(compareSizeNullsLast(10, null)).toBe(-1);
+    expect(compareSizeNullsLast(null, null)).toBe(0);
   });
 
   it("sorts measured sizes descending", () => {
     // Negative means "a first": the larger number sorts earlier.
-    expect(compareSizeNullsFirst(300, 200)).toBe(-100);
-    expect(compareSizeNullsFirst(200, 300)).toBe(100);
-    expect(compareSizeNullsFirst(200, 200)).toBe(0);
+    expect(compareSizeNullsLast(300, 200)).toBe(-100);
+    expect(compareSizeNullsLast(200, 300)).toBe(100);
+    expect(compareSizeNullsLast(200, 200)).toBe(0);
   });
 
-  it("orders a mixed list unknown-first, then largest-first", () => {
+  it("orders a mixed list largest-first, with unknown sizes last", () => {
     const sizes = [50, null, 900, 10, null, 400];
-    const sorted = [...sizes].sort(compareSizeNullsFirst);
-    expect(sorted).toEqual([null, null, 900, 400, 50, 10]);
+    const sorted = [...sizes].sort(compareSizeNullsLast);
+    expect(sorted).toEqual([900, 400, 50, 10, null, null]);
   });
 });
 
@@ -123,32 +121,6 @@ describe("isUnder", () => {
   it("does not match everything when the root is empty", () => {
     // A snapshot with no root must not make every path look like it is inside one.
     expect(isUnder(root, "")).toBe(false);
-  });
-});
-
-describe("compareByActionability", () => {
-  // The list order answers "where do I start". Keeping the scan's own order
-  // scattered the removable items among the main worktree and the dirty ones, so
-  // finding them meant reading every row.
-  const rec = (status: string) => ({ safety: { status } });
-
-  it("puts the safe ones first, then the ones needing a decision, then the rest", () => {
-    const order = ["Unsafe", "Safe", "Review"].map(rec).sort(compareByActionability);
-    expect(order.map((r) => r.safety.status)).toEqual(["Safe", "Review", "Unsafe"]);
-  });
-
-  it("sorts anything it does not recognise to the end, never to the front", () => {
-    // An unknown level is a level this build does not know about. Putting it
-    // first would offer it as the obvious thing to act on; putting it last keeps
-    // it out of the way until someone reads it.
-    const order = ["?weird", "Safe"].map(rec).sort(compareByActionability);
-    expect(order.map((r) => r.safety.status)).toEqual(["Safe", "?weird"]);
-  });
-
-  it("leaves items of the same level in step with the caller", () => {
-    // Zero, deliberately: the volume ordering is a second pass, composed by the
-    // caller. A non-zero here would fight it.
-    expect(compareByActionability(rec("Safe"), rec("Safe"))).toBe(0);
   });
 });
 

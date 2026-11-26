@@ -32,29 +32,6 @@ export function pathMatchesRule(path: string, rule: string): boolean {
   return target.every((segment, index) => segment === candidate[index]);
 }
 
-/**
- * Sort records so the ones a user can act on without thinking come first.
- *
- * The order is deliberate and it is the answer to "which of these do I look at":
- * safe before review before unsafe, and within a level, largest first. Sorting by
- * path alone — which is what the lists used to do — scattered the removable items
- * among the forbidden ones and made the user read every row to find the ones that
- * were actually worth removing. Unsafe last also puts everything that cannot be
- * deleted in one glanceable block at the bottom rather than interleaved.
- *
- * `null` sizes sort before measured ones, for the reason
- * {@link compareSizeNullsFirst} gives.
- */
-export function compareByActionability(
-  a: { safety: { status: string } },
-  b: { safety: { status: string } }
-): number {
-  const rank = { Safe: 0, Review: 1, Unsafe: 2 } as Record<string, number>;
-  const diff = (rank[a.safety.status] ?? 3) - (rank[b.safety.status] ?? 3);
-  if (diff !== 0) return diff;
-  return 0;
-}
-
 export function formatBytes(bytes: number | null, opts: { approximate?: boolean } = {}): string {
   if (bytes === null || bytes === undefined) return messages.common.unknown;
   const prefix = opts.approximate ? messages.units.atLeast : "";
@@ -248,17 +225,17 @@ export function scanFailureText(failure: ScanFailure): string {
 }
 
 /**
- * Sort comparator for "largest first" lists that keeps an unmeasurable item at
- * the top instead of burying it at the bottom.
+ * Sort comparator for lists ordered by size descending.
  *
- * Treating `null` as `0` would sort an item whose size could not be measured
- * *below* every measured one — the one item the user cannot assess would be the
- * hardest to find. Unknown sizes come first; measured sizes follow, descending.
+ * A known size always comes before an unknown one: "unknown" is not a number and
+ * cannot be called larger or smaller, so it stays at the end rather than being
+ * treated as infinity. Equal and unknown sizes fall back to the caller's
+ * tie-breaker.
  */
-export function compareSizeNullsFirst(a: number | null, b: number | null): number {
+export function compareSizeNullsLast(a: number | null, b: number | null): number {
   if (a === null && b === null) return 0;
-  if (a === null) return -1;
-  if (b === null) return 1;
+  if (a === null) return 1;
+  if (b === null) return -1;
   return b - a;
 }
 

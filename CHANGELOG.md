@@ -7,6 +7,12 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Repositories are ordered by worktree count.** A developer root with many
+  worktrees puts the busiest repository first; an unknown count stays last.
+- **Data lists use their own descending order.** Worktrees and build artifacts
+  are largest first, artifact groups and plans are ordered by size, history stays
+  newest first, and an unknown numeric value is listed last instead of being
+  treated as zero or infinity.
 - **Git is built in.** The app reads repositories through libgit2 and removes
   worktrees through gix; it no longer spawns `git` or needs the Xcode Command Line
   Tools on macOS or Git for Windows on Windows. Machine configuration is isolated

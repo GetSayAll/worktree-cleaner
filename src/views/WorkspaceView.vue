@@ -5,6 +5,14 @@ import { homePath } from "../format";
 import { messages } from "../i18n";
 
 const workspace = computed(() => workspaceSnapshot.value);
+const repositories = computed(() =>
+  [...(workspace.value?.repositories ?? [])].sort((a, b) => {
+    if (a.worktree_count === null && b.worktree_count === null) return a.path.localeCompare(b.path);
+    if (a.worktree_count === null) return 1;
+    if (b.worktree_count === null) return -1;
+    return b.worktree_count - a.worktree_count || a.path.localeCompare(b.path);
+  })
+);
 
 function openRepository(path: string) {
   void startScan(path);
@@ -30,11 +38,11 @@ function openRepository(path: string) {
 
     <div class="card">
       <div class="card__head">
-        <h2>{{ messages.workspace.repositoriesTitle(workspace?.repositories.length ?? 0) }}</h2>
+        <h2>{{ messages.workspace.repositoriesTitle(repositories.length) }}</h2>
         <span class="faint tiny">{{ messages.workspace.oneAtATime }}</span>
       </div>
       <div class="card__body card__body--flush">
-        <div v-for="repository in workspace?.repositories || []" :key="repository.path" class="item-row item-row--plain">
+        <div v-for="repository in repositories" :key="repository.path" class="item-row item-row--plain">
           <div class="item-row__main">
             <div class="item-row__head">
               <span class="item-row__name">{{ repository.name }}</span>
@@ -60,7 +68,7 @@ function openRepository(path: string) {
             </button>
           </div>
         </div>
-        <div v-if="(workspace?.repositories.length ?? 0) === 0" class="empty">
+        <div v-if="repositories.length === 0" class="empty">
           {{ messages.workspace.empty }}
         </div>
       </div>

@@ -25,17 +25,27 @@ import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import RevealPathButton from "../components/RevealPathButton.vue";
 import StatCard from "../components/StatCard.vue";
-import { detailText, formatBytes, formatCount, formatRelTime, homePath } from "../format";
+import { compareSizeNullsLast, detailText, formatBytes, formatCount, formatRelTime, homePath } from "../format";
 import { messages } from "../i18n";
 import { isDesktop, openTrash } from "../platform";
 
 const desktop = isDesktop();
 const records = computed(() => cacheSnapshot.value?.records ?? []);
+const sortedCacheResults = computed(() =>
+  [...cacheLastResult.value].sort(
+    (a, b) => compareSizeNullsLast(a.size_bytes, b.size_bytes) || a.target.localeCompare(b.target)
+  )
+);
+
 const visibleRecords = computed(() => {
   const minBytes = settings.min_artifact_mb * 1024 * 1024;
-  return records.value.filter(
-    (record) => record.size_bytes === null || record.size_bytes >= minBytes || record.safety.status === "Unsafe"
-  );
+  return records.value
+    .filter(
+      (record) => record.size_bytes === null || record.size_bytes >= minBytes || record.safety.status === "Unsafe"
+    )
+    .sort(
+      (a, b) => compareSizeNullsLast(a.size_bytes, b.size_bytes) || a.path.localeCompare(b.path)
+    );
 });
 const selected = computed(() => records.value.filter((record) => selectedCaches.value.includes(record.path)));
 const selectableSafes = computed(() =>
@@ -247,7 +257,7 @@ async function openSystemTrash() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(item, index) in cacheLastResult" :key="`${item.target}-${index}`">
+            <tr v-for="(item, index) in sortedCacheResults" :key="`${item.target}-${index}`">
               <td class="cell-target"><div class="row-wrap"><span class="mono">{{ homePath(item.target) }}</span></div></td>
               <td class="cell-detail tiny faint">{{ detailText(item.detail_code, item.detail_args, item.detail) }}</td>
               <td class="cell-outcome"><span class="outcome" :class="`outcome--${item.result}`">{{ messages.common.outcome[item.result] }}</span></td>

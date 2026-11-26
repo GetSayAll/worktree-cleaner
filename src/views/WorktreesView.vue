@@ -14,7 +14,7 @@ import {
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import RevealPathButton from "../components/RevealPathButton.vue";
-import { basename, compareByActionability, compareSizeNullsFirst, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
+import { basename, compareSizeNullsLast, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
 type FilterKey = "all" | SafetyStatus;
@@ -61,14 +61,9 @@ function isOutsideRoot(path: string): boolean {
 }
 
 /**
- * What the list is ordered by, and why.
- *
- * Safe first, then the ones that need a decision, then the ones that cannot be
- * touched — and largest first inside each level. The page used to keep the scan's
- * own order, which is whatever Git listed: the removable worktrees were scattered
- * among the main worktree and the dirty ones, and finding the ones worth acting on
- * meant reading every row. Now the order answers "where do I start" without the
- * reader sorting anything.
+ * The worktree list is ordered by measured size, largest first. An unmeasurable
+ * size stays last because "unknown" is not a number; equal sizes fall back to
+ * the path so the order is stable between scans.
  */
 const filtered = computed<WorktreeRecord[]>(() => {
   const q = query.value.trim().toLowerCase();
@@ -78,15 +73,12 @@ const filtered = computed<WorktreeRecord[]>(() => {
     return item.path.toLowerCase().includes(q) || (item.branch || "").toLowerCase().includes(q);
   });
   // Copied before sorting: `worktrees` is a computed over the snapshot, and
-  // sorting in place would reorder the array the other pages read. The main
-  // workspace is pinned first: it is protected, and it is the anchor every other
-  // worktree is judged against, so it must not be buried among the Unsafe rows.
-  return [...matched].sort((a, b) => {
-    if (a.is_main !== b.is_main) return a.is_main ? -1 : 1;
-    const byStatus = compareByActionability(a, b);
-    if (byStatus !== 0) return byStatus;
-    return compareSizeNullsFirst(a.size_bytes, b.size_bytes);
-  });
+  // sorting in place would reorder the array the other pages read.
+  return [...matched].sort(
+    (a, b) =>
+      compareSizeNullsLast(a.size_bytes, b.size_bytes) ||
+      basename(a.path).localeCompare(basename(b.path))
+  );
 });
 
 const selectable = computed(() => filtered.value.filter((item) => item.safety.status !== "Unsafe").map((item) => item.path));

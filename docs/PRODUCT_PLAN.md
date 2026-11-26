@@ -74,7 +74,7 @@ Before a scan, only "Welcome" in the sidebar is available; data pages appear onl
 
 A developer root such as `~/Develop/Src` is often not itself a Git repository. When the selected folder is not a repository, the app lists the Git repositories below it instead of failing with "not a Git repository". Discovery is read-only, shallow, and does not follow symlinks or generated trees (`node_modules`, `target`, `.build`, `.worktrees`, `DerivedData`, …).
 
-This is a launcher, not a batch-cleanup mode. Selecting a repository starts the ordinary one-repository scan, so every worktree verdict remains anchored to that repository's default branch. The page shows the path, a worktree count, and a "Scan repository" action; it never selects or deletes anything itself.
+This is a launcher, not a batch-cleanup mode. Selecting a repository starts the ordinary one-repository scan, so every worktree verdict remains anchored to that repository's default branch. The page shows the path, a worktree count, and a "Scan repository" action, ordered by worktree count descending; an unknown count is listed after measured repositories. It never selects or deletes anything itself.
 
 ### 3. Overview
 
@@ -98,15 +98,15 @@ Expanded detail panel:
 - Review and Unsafe worktree and artifact rows offer "Show in Finder" / "Show in File Explorer"; opening a location never deletes anything and is available before the decision.
 - **Reason list**: one line per reason; green is positive evidence (merged / clean), amber and red are risk items, each followed by its evidence text.
 
-Top: search box + filter (All / Safe / Review / Unsafe / Locked / Unmerged).
+Top: search box + filter (All / Safe / Review / Unsafe / Locked / Unmerged). The list is ordered by size descending, with an unmeasurable size last and the path as a stable tie-breaker.
 
 Bottom floating action bar: `N selected · X to free` → "View cleanup plan".
 
 ### 5. Build artifacts
 
-- Grouped by owning worktree / project root, collapsible; the group header shows the group's total size.
-- Each row: type badge (`node_modules` / `target` / `dist` / `.venv` …), relative path, size, file count, last activity time, Git status (ignored / untracked / tracked), safety level.
-- Sorting: by size (default) / by last activity.
+- Grouped by owning worktree / project root, collapsible; the group header shows the group's total size. Groups are ordered by measured total size descending.
+- Each row: type badge (`node_modules` / `target` / `dist` / `.build` / `.venv` …), relative path, size, file count, last activity time, Git status (ignored / untracked / tracked), safety level.
+- Sorting: by size (default) / by last activity, both descending; an unmeasurable value is last.
 - Size threshold slider: by default, show only directories larger than 10 MB (small directories are noisy).
 - Relationship to worktrees: if the worktree containing an artifact has already been checked for deletion, that artifact row shows "deleted together with the worktree (not recoverable)" and its independent checkbox is automatically cleared, to avoid double-counting size.
 
@@ -117,7 +117,7 @@ A separate, opt-in page for the caches that do not belong to one repository. It 
 - The inventory covers known cache roots only: on macOS, the user's `~/Library/Caches` children (including unknown owners as `Review`), `~/.cache`, Xcode DerivedData and iOS DeviceSupport, and the standard npm / pnpm / Cargo / SwiftPM / Playwright / Homebrew caches. On Windows it uses `%LOCALAPPDATA%` equivalents for the same package-manager caches; Xcode roots do not exist there.
 - A known cache is `Safe` with positive evidence naming the cache kind. A directory under a cache root whose owner is not in the table is `Review` with `af.unknown_cache`; it is never selected automatically. Credentials, a nested repository, an escaping symlink or a whitelist hit make it `Unsafe`.
 - Recent activity is `Review`, not `Safe`. The page tells the reader to close the owning application before selecting a cache.
-- The selected cache directories form their own plan object and are moved through the system Trash. The cache executor re-checks path, size and verdict before each move; it does not use the worktree/artifact executor and cannot remove a worktree.
+- The selected cache directories form their own plan object, ordered by size descending, and are moved through the system Trash. The cache executor re-checks path, size and verdict before each move; it does not use the worktree/artifact executor and cannot remove a worktree.
 - The page does not read Docker's data directory, CI runner state, Application Support, Downloads or arbitrary `~/Library` content. Those are not cache records and have no safe generic deletion rule.
 
 ### 6. Cleanup plan (confirmation page — the most important page in the product)
@@ -130,11 +130,12 @@ Split "what will be done" into two channels shown separately, each landing on a 
 - Entries that need `--force` (untracked files present) are marked separately, and the **list of untracked files that will be force-deleted** is listed line by line — this is what users most need to see.
 - Lost worktrees (directory no longer exists) go through `git worktree prune`, with a note that only metadata is cleaned up and no files are touched.
 - Undeletable entries do not appear here, but the footer shows "N undeletable items automatically excluded, view".
+- Sorted by size descending; an unmeasurable size stays last.
 
 **Channel B: move artifact directories to Trash**
 
 - Each entry shows: path, size, file count, whether recoverable (the Trash is recoverable, with a note on "recovering from the Trash").
-- Sorted by size descending.
+- Sorted by size descending; an unmeasurable size stays last.
 
 **Precondition verification (dry run)**
 
@@ -156,7 +157,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 
 ### 7. Execution result
 
-- Per-item results: success / skipped / failed, each with its reason. A skipped or failed row offers "Show in Finder" so the reader can inspect what remains.
+- Per-item results: success / skipped / failed, each with its reason. The table is ordered by size descending, with an unmeasurable size last. A skipped or failed row offers "Show in Finder" so the reader can inspect what remains.
 - Summary: **worktree bytes freed immediately**, **artifact bytes waiting in the Trash**, the total after emptying the Trash, the number of artifact directories moved, the number of worktrees permanently removed, and the prune result. **Only measured `Ok` bytes count**: an artifact that left together with its worktree was not a separate move, and a skipped or failed item freed nothing. A size that was never measurable is counted as unknown rather than as `0 B`. Moving a directory to the Trash does not free disk space until the Trash is emptied; the result page must say which bytes are recoverable and which are already free. The volume's free space is not read before and after, so nothing here claims to be exact.
 - The summary names the largest remaining items when there are skipped or failed rows (otherwise the largest handled items), so the reader knows what to inspect first.
 - Failed items: provide copyable reason text and the corresponding command, for manual handling.
@@ -183,7 +184,7 @@ Before execution, walk through each item; if one fails, show the blocking reason
 Every other page answers "what can I remove now". This one answers "why did it get this bad, and what makes sure it does not happen again". It is `docs/DISK_HYGIENE.md` made checkable from inside a repository: one row per rule, one finding per broken instance, and the wiring that keeps the rule true afterwards.
 
 - **Rule status**: all 22 rules with one of four states — met, worth fixing, broken, not checked. The count of met rules is the page's headline.
-- **Findings, grouped by rule**: each row names the path, says what is wrong in one sentence, shows the evidence the audit actually read (a path, a count, the matching ignore rule, a free-space figure), and gives the one-line fix. Ordered broken first.
+- **Findings, grouped by rule**: each row names the path, says what is wrong in one sentence, shows the evidence the audit actually read (a path, a count, the matching ignore rule, a free-space figure), and gives the one-line fix. Groups are ordered by finding count descending, with severity as the tie-breaker.
 - **Accepted exceptions**: a path waived by `.worktree-keep` stays on the page with the date its waiver expires. Hiding it would make a written exception look like compliance.
 - **Before the first worktree**: four copyable snippets, each tied to the rule it makes true — the two anchored ignore entries, `WORKTREE_BUILD_CACHE` for pointing a build at its slot, the shell wrapper that makes `git clean -x`/`-X` refuse to run, and the two-command close (`git worktree remove` then delete the slot).
 - **What this page cannot see**: the rules no scan can observe from inside one repository (a second clone, `git clean` that already ran, editor indexes, admission decisions) are listed with the audit's own reason, at `not checked` rather than at "met". A page that reported them as passing would be claiming a check that never happened.

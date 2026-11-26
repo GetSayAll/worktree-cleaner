@@ -16,7 +16,7 @@ import {
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import RevealPathButton from "../components/RevealPathButton.vue";
-import { compareByActionability, compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, shortenPath } from "../format";
+import { compareSizeNullsLast, formatBytes, formatCount, formatRelTime, shortenPath } from "../format";
 import { messages } from "../i18n";
 
 const sortMode = ref<"size" | "time">("size");
@@ -32,26 +32,25 @@ const groups = computed(() => {
     list.push(item);
     buckets.set(key, list);
   }
-  // A group holding unmeasurable items sorts first: its total is a lower bound,
-  // and burying the one group the user cannot assess at the bottom of the list
-  // would hide exactly the item that most needs a look (compareSizeNullsFirst).
+  // Groups are ordered by their measured total, largest first. A group with
+  // unmeasurable members has a lower bound rather than an exact total; the
+  // unknown count breaks ties so the uncertain group stays visible.
   const unknownCount = (key: string) => (buckets.get(key) ?? []).filter((item) => item.size_bytes === null).length;
   const total = (key: string) => (buckets.get(key) ?? []).reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
   const keys = [...buckets.keys()].sort((a, b) => {
-    if (unknownCount(a) !== unknownCount(b)) return unknownCount(b) - unknownCount(a);
-    return total(b) - total(a);
+    const bySize = total(b) - total(a);
+    if (bySize !== 0) return bySize;
+    const byUnknown = unknownCount(b) - unknownCount(a);
+    if (byUnknown !== 0) return byUnknown;
+    return a.localeCompare(b);
   });
   return keys.map((key) => {
     const items = [...(buckets.get(key) ?? [])].sort((a, b) => {
-      // Safe first and largest first, whatever the sort control says — a
-      // "newest" view that buried the removable items under the forbidden ones
-      // was not answering the question the user is on this page to ask. The
-      // control still decides within a level.
-      const byStatus = compareByActionability(a, b);
-      if (byStatus !== 0) return byStatus;
-      return sortMode.value === "size"
-        ? compareSizeNullsFirst(a.size_bytes, b.size_bytes)
-        : (b.last_updated_at ?? "").localeCompare(a.last_updated_at ?? "");
+      const bySize =
+        sortMode.value === "size"
+          ? compareSizeNullsLast(a.size_bytes, b.size_bytes)
+          : (b.last_updated_at ?? "").localeCompare(a.last_updated_at ?? "");
+      return bySize || a.path.localeCompare(b.path);
     });
     return {
       key,

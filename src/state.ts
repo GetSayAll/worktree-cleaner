@@ -18,7 +18,7 @@ import type {
 } from "./types";
 import { SEVERITY_RANK } from "./types";
 import { applyLocale, messages, watchSystemLocale } from "./i18n";
-import { formatBytes, pathMatchesRule } from "./format";
+import { compareSizeNullsLast, formatBytes, pathMatchesRule } from "./format";
 import {
   executePlan,
   isDesktop,
@@ -841,8 +841,16 @@ function buildPlan(): CleanupPlan {
     .filter((item) => blocked.has(item.path))
     .map((item) => messages.plan.blocker(item.path));
 
-  const worktree_removals = selectedWorktreeRemovals.filter((w) => !blocked.has(w.path));
-  const trash_moves = selectedTrashMoves.filter((t) => !blocked.has(t.path));
+  const worktree_removals = selectedWorktreeRemovals
+    .filter((w) => !blocked.has(w.path))
+    .sort(
+      (a, b) => compareSizeNullsLast(a.size_bytes, b.size_bytes) || a.path.localeCompare(b.path)
+    );
+  const trash_moves = selectedTrashMoves
+    .filter((t) => !blocked.has(t.path))
+    .sort(
+      (a, b) => compareSizeNullsLast(a.size_bytes, b.size_bytes) || a.path.localeCompare(b.path)
+    );
 
   const excluded_unsafe =
     snap.worktrees.filter((w) => w.safety.status === "Unsafe").length +
@@ -930,14 +938,18 @@ export const cachePlan = computed<CleanupPlan>(() => {
   const selected = records.filter(
     (record) => selectedCaches.value.includes(record.path) && !blocked.has(record.path)
   );
-  const moves: TrashMoveItem[] = selected.map((record) => ({
-    kind: "artifact",
-    path: record.path,
-    artifact_kind: record.kind,
-    size_bytes: record.size_bytes,
-    file_count: record.file_count,
-    bundled_with_worktree: null
-  }));
+  const moves: TrashMoveItem[] = selected
+    .map((record) => ({
+      kind: "artifact" as const,
+      path: record.path,
+      artifact_kind: record.kind,
+      size_bytes: record.size_bytes,
+      file_count: record.file_count,
+      bundled_with_worktree: null
+    }))
+    .sort(
+      (a, b) => compareSizeNullsLast(a.size_bytes, b.size_bytes) || a.path.localeCompare(b.path)
+    );
   const total_bytes = moves.reduce((sum, move) => sum + (move.size_bytes ?? 0), 0);
   const total_bytes_unknown = moves.filter((move) => move.size_bytes === null).length;
   const ack_reasons: string[] = [];

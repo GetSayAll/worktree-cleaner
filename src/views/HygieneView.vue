@@ -27,7 +27,11 @@ const detail = computed(() =>
 
 /** Everything still open. Accepted exceptions are listed separately, with their date. */
 const open = computed(() => detail.value.filter((finding) => finding.waived_until === undefined));
-const accepted = computed(() => detail.value.filter((finding) => finding.waived_until !== undefined));
+const accepted = computed(() =>
+  detail.value
+    .filter((finding) => finding.waived_until !== undefined)
+    .sort((a, b) => (b.waived_until ?? "").localeCompare(a.waived_until ?? ""))
+);
 
 const counts = computed(() => {
   const tally = { violation: 0, advisory: 0, unknown: 0, ok: 0 };
@@ -35,15 +39,22 @@ const counts = computed(() => {
   return tally;
 });
 
-const groups = computed(() =>
-  rules.value
+const groups = computed(() => {
+  const severity: Record<HygieneLevel, number> = { violation: 0, advisory: 1, unknown: 2, ok: 3 };
+  return rules.value
     .map((status) => ({
       rule: status.rule,
       level: status.level,
       items: open.value.filter((finding) => finding.rule === status.rule)
     }))
     .filter((group) => group.items.length > 0)
-);
+    .sort(
+      (a, b) =>
+        b.items.length - a.items.length ||
+        severity[a.level] - severity[b.level] ||
+        a.rule.localeCompare(b.rule)
+    );
+});
 
 /** The rules the scan cannot see, with the audit's own reason for each. */
 const unchecked = computed(() =>

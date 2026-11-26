@@ -4,7 +4,7 @@ import { artifacts, counts, goTo, primaryReason, selectedSummary, snapshot, work
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import StatCard from "../components/StatCard.vue";
-import { basename, compareSizeNullsFirst, formatBytes, formatCount, formatRelTime, displayPath, isUnder } from "../format";
+import { basename, compareSizeNullsLast, formatBytes, formatCount, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
 
 const root = computed(() => snapshot.value?.root ?? "");
@@ -35,17 +35,19 @@ const defaultBranchRef = computed(() => {
   return branch.startsWith("origin/") ? branch : `origin/${branch}`;
 });
 
-// Unknown sizes sort first: an item whose size could not be measured must not be
-// buried at the bottom of a "largest" list (see compareSizeNullsFirst).
+// Known sizes sort first, largest first; an unknown size cannot be called larger
+// and stays after the measured items.
 const topWorktrees = computed(() =>
   [...worktrees.value]
     .filter((item) => !item.is_main)
-    .sort((a, b) => compareSizeNullsFirst(a.size_bytes, b.size_bytes))
+    .sort((a, b) => compareSizeNullsLast(a.size_bytes, b.size_bytes) || a.path.localeCompare(b.path))
     .slice(0, 5)
 );
 
 const topArtifacts = computed(() =>
-  [...artifacts.value].sort((a, b) => compareSizeNullsFirst(a.size_bytes, b.size_bytes)).slice(0, 5)
+  [...artifacts.value]
+    .sort((a, b) => compareSizeNullsLast(a.size_bytes, b.size_bytes) || a.path.localeCompare(b.path))
+    .slice(0, 5)
 );
 
 const safeBytes = computed(() => {

@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { executeErrorMessage, executing, goTo, lastResult, logError, projectPath, resultSummary, snapshot, startScan } from "../state";
 import StatCard from "../components/StatCard.vue";
 import RevealPathButton from "../components/RevealPathButton.vue";
-import { detailText, formatBytes, displayPath } from "../format";
+import { compareSizeNullsLast, detailText, formatBytes, displayPath } from "../format";
 import { messages } from "../i18n";
 import { openTrash, isDesktop } from "../platform";
 
@@ -42,6 +42,13 @@ function outcomeLabel(result: string): string {
 }
 
 const okCount = computed(() => lastResult.value.filter((item) => item.result === "ok").length);
+// The result is a list too: largest items first, with an unmeasurable size after
+// the measured rows. The outcome counts still come from the unsorted run.
+const sortedResults = computed(() =>
+  [...lastResult.value].sort(
+    (a, b) => compareSizeNullsLast(a.size_bytes, b.size_bytes) || a.target.localeCompare(b.target)
+  )
+);
 const skippedTrashMoves = computed(
   () => lastResult.value.filter((item) => item.action === "trash-move" && item.result === "skipped").length
 );
@@ -217,7 +224,7 @@ const logFailure = computed(() => {
           </thead>
           <tbody>
             <tr
-              v-for="(item, index) in lastResult"
+              v-for="(item, index) in sortedResults"
               :key="`${item.target}-${index}`"
               :class="item.result === 'ok' ? 'result-row--removed' : 'result-row--kept'"
               :style="{ animationDelay: `${Math.min(index, 24) * 45}ms` }"
