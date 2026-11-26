@@ -30,7 +30,15 @@ import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import RevealPathButton from "../components/RevealPathButton.vue";
 import StatCard from "../components/StatCard.vue";
-import { compareSizeNullsLast, detailText, formatBytes, formatCount, formatRelTime, homePath } from "../format";
+import {
+  compareSizeNullsLast,
+  detailText,
+  formatBytes,
+  formatCount,
+  formatRelTime,
+  homePath,
+  isUnder
+} from "../format";
 import { messages } from "../i18n";
 import { isDesktop, openTrash, pickDirectory } from "../platform";
 
@@ -84,15 +92,26 @@ const canRun = computed(
 
 onMounted(() => {
   // The page does not ask the reader to know which folder holds a cache. It
-  // starts from the folder that was scanned last, and only falls back to the
-  // system folder picker when there is no such history.
-  if (!buildCacheRoot.value) {
-    buildCacheRoot.value =
-      workspaceSnapshot.value?.root ??
-      lastWorkspaceRoot.value ??
-      projectPath.value ??
-      recentProjects.value[0]?.path ??
-      "";
+  // starts from the workspace the repository was opened from, then from a recent
+  // folder that contains the project; only when neither exists does it fall back
+  // to the project itself or the folder picker.
+  const project = projectPath.value;
+  const knownWorkspace =
+    lastWorkspaceRoot.value && (!project || isUnder(project, lastWorkspaceRoot.value))
+      ? lastWorkspaceRoot.value
+      : "";
+  const ancestor = recentProjects.value
+    .map((entry) => entry.path)
+    .filter((path) => path !== project && project !== "" && isUnder(project, path))
+    .sort((left, right) => left.length - right.length)[0];
+  const preferred = workspaceSnapshot.value?.root ?? knownWorkspace ?? ancestor ?? "";
+  const previousRoot = buildCacheRoot.value;
+  if (!buildCacheRoot.value || (project && previousRoot === project && preferred)) {
+    buildCacheRoot.value = preferred || project || recentProjects.value[0]?.path || "";
+  }
+  if (buildCacheRoot.value !== previousRoot) {
+    buildCacheSnapshot.value = null;
+    selectedBuildCaches.value = [];
   }
   if (!buildCacheSnapshot.value && buildCacheRoot.value) void startBuildCacheScan();
 });

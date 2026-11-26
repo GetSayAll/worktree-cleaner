@@ -19,7 +19,7 @@ import type {
 } from "./types";
 import { SEVERITY_RANK } from "./types";
 import { applyLocale, messages, watchSystemLocale } from "./i18n";
-import { compareSizeNullsLast, formatBytes, pathMatchesRule } from "./format";
+import { compareSizeNullsLast, formatBytes, isUnder, pathMatchesRule } from "./format";
 import {
   executePlan,
   isDesktop,
@@ -465,7 +465,27 @@ function normaliseScanFailure(error: unknown, path: string): ScanFailure {
   return { code: "unknown", detail };
 }
 
-export async function startScan(path: string) {
+/**
+ * The folder build-cache discovery should use for this scan.
+ *
+ * A repository opened from a workspace keeps that workspace as its cache scope:
+ * `design-artifacts` or a shared build directory usually lives beside the
+ * repository, not inside it. A direct repository scan has no such scope and
+ * searches below the repository itself.
+ */
+function cacheScopeFor(workspaceRoot: string, requested?: string): string {
+  const explicit = requested?.trim();
+  if (explicit) return explicit;
+  const previous = lastWorkspaceRoot.value;
+  if (previous && isUnder(workspaceRoot, previous)) return previous;
+  const recentAncestor = recentProjects.value
+    .map((entry) => entry.path)
+    .filter((path) => path !== workspaceRoot && isUnder(workspaceRoot, path))
+    .sort((left, right) => left.length - right.length)[0];
+  return recentAncestor ?? workspaceRoot;
+}
+
+export async function startScan(path: string, buildCacheScope?: string) {
   if (executing.value) return;
   const target = path.trim();
   if (!target) return;
@@ -513,10 +533,11 @@ export async function startScan(path: string) {
       view.value = "welcome";
       return;
     }
+    const cacheScope = cacheScopeFor(workspace.root, buildCacheScope);
     if (workspace.repositories.length > 1) {
-      buildCacheRoot.value = workspace.root;
+      buildCacheRoot.value = cacheScope;
       enterBuildCacheStage();
-      await runBuildCacheScan(workspace.root);
+      await runBuildCacheScan(cacheScope);
       if (scanState.cancelled) return;
       finishWorkspace(workspace);
       return;
@@ -526,9 +547,9 @@ export async function startScan(path: string) {
     projectPath.value = repository.path;
     const result = await scanProject(repository.path, scanKnobs());
     if (scanState.cancelled) return;
-    buildCacheRoot.value = workspace.root;
+    buildCacheRoot.value = cacheScope;
     enterBuildCacheStage();
-    await runBuildCacheScan(workspace.root);
+    await runBuildCacheScan(cacheScope);
     if (scanState.cancelled) return;
     finishScan(result);
   } catch (error) {

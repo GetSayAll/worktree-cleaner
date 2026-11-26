@@ -15,7 +15,7 @@ const repositories = computed(() =>
 );
 
 function openRepository(path: string) {
-  void startScan(path);
+  void startScan(path, workspace.value?.root);
 }
 </script>
 
