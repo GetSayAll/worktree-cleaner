@@ -13,6 +13,7 @@
 //! is not descended into, so nested worktrees are not mistaken for separate
 //! projects.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -20,7 +21,7 @@ use crate::git::GitRunner;
 use crate::git2_runner::Git2Runner;
 use crate::path::{expand_tilde, is_in_system_trash};
 use crate::timefmt::format_rfc3339;
-use crate::worktree::parse_worktree_list;
+use crate::worktree::{parse_worktree_list, WorktreeEntry};
 use crate::{ScanError, WorkspaceRepository, WorkspaceSnapshot, WORKSPACE_SCHEMA_VERSION};
 
 /// How deep below the selected root discovery may look.
@@ -81,23 +82,23 @@ fn has_repository_ancestor(path: &Path) -> bool {
     path.ancestors().skip(1).any(is_repository_root)
 }
 
-/// The worktree count for one repository, or `None` when Git could not answer.
+/// One worktree list, or `None` when Git could not answer.
 ///
 /// The count is display-only. A failure is a warning on the workspace result,
 /// never an error: discovery still has a useful repository path to offer.
-fn worktree_count(path: &Path, warnings: &mut Vec<String>) -> Option<u32> {
+fn worktree_entries(path: &Path, warnings: &mut Vec<String>) -> Option<Vec<WorktreeEntry>> {
     let runner = Git2Runner::new(Duration::from_secs(10));
     match runner.run(path, &["worktree", "list", "--porcelain", "-z"]) {
         Ok(output) if output.success() => {
-            let count = parse_worktree_list(&output.stdout).len();
-            if count == 0 {
+            let entries = parse_worktree_list(&output.stdout);
+            if entries.is_empty() {
                 warnings.push(format!(
                     "Git reported no worktrees for {}; its count is unknown",
                     path.display()
                 ));
                 None
             } else {
-                u32::try_from(count).ok()
+                Some(entries)
             }
         }
         Ok(output) => {
@@ -119,18 +120,88 @@ fn worktree_count(path: &Path, warnings: &mut Vec<String>) -> Option<u32> {
     }
 }
 
-fn repository(path: &Path, warnings: &mut Vec<String>) -> WorkspaceRepository {
+/// A discovered root plus the main worktree that identifies its repository.
+///
+/// Every linked worktree answers `git worktree list` with the same first entry,
+/// so that entry is the identity used to fold the family into one row.
+struct DiscoveredRepository {
+    repository: WorkspaceRepository,
+    main_worktree: Option<PathBuf>,
+}
+
+fn repository(path: &Path, warnings: &mut Vec<String>) -> DiscoveredRepository {
+    let entries = worktree_entries(path, warnings);
+    let main_worktree = entries
+        .as_ref()
+        .and_then(|entries| entries.first())
+        .map(|entry| entry.path.clone());
+    let worktree_count = entries
+        .as_ref()
+        .and_then(|entries| u32::try_from(entries.len()).ok());
     let fallback = path.to_string_lossy().into_owned();
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .map_or(fallback, str::to_string);
-    WorkspaceRepository {
-        path: path.display().to_string(),
-        name,
-        worktree_count: worktree_count(path, warnings),
+    DiscoveredRepository {
+        repository: WorkspaceRepository {
+            path: path.display().to_string(),
+            name,
+            worktree_count,
+        },
+        main_worktree,
     }
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Folds linked worktrees into the repository they belong to.
+///
+/// A linked worktree has its own `.git` file, so the shallow walk finds it as a
+/// repository root; its worktree list, however, contains the main worktree and
+/// every other linked worktree, and repeats the same count. Reporting one row
+/// per discovered root would therefore count the same repository several times.
+/// The first porcelain entry is the main worktree and is the same for every
+/// member of the family, so it is the grouping key. The main worktree's path is
+/// shown when it is inside the selected root; otherwise the lexicographically
+/// first discovered member is shown, keeping the row inside the user's scope.
+fn dedupe_repositories(
+    candidates: Vec<DiscoveredRepository>,
+    root: &Path,
+) -> Vec<WorkspaceRepository> {
+    let root = canonical(root);
+    let mut families: BTreeMap<PathBuf, Vec<DiscoveredRepository>> = BTreeMap::new();
+    let mut unreadable = Vec::new();
+
+    for candidate in candidates {
+        if let Some(main_worktree) = candidate.main_worktree.as_ref() {
+            families
+                .entry(canonical(main_worktree))
+                .or_default()
+                .push(candidate);
+        } else {
+            unreadable.push(candidate.repository);
+        }
+    }
+
+    let mut repositories = unreadable;
+    for (main_worktree, mut members) in families {
+        members.sort_by(|left, right| left.repository.path.cmp(&right.repository.path));
+        let main_is_inside_root = main_worktree.starts_with(&root);
+        let main_member = members
+            .iter()
+            .find(|member| canonical(Path::new(&member.repository.path)) == main_worktree);
+        let chosen = if main_is_inside_root {
+            main_member.unwrap_or_else(|| &members[0])
+        } else {
+            &members[0]
+        };
+        repositories.push(chosen.repository.clone());
+    }
+    repositories
 }
 
 /// Orders repositories by worktree count, largest first.
@@ -168,7 +239,7 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
     }
 
     let mut warnings = Vec::new();
-    let mut repositories = Vec::new();
+    let mut repositories: Vec<DiscoveredRepository> = Vec::new();
     let mut queued = 0usize;
 
     if is_in_system_trash(&root) {
@@ -180,7 +251,7 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
             schema_version: WORKSPACE_SCHEMA_VERSION,
             root: root.display().to_string(),
             scanned_at: format_rfc3339(SystemTime::now()),
-            repositories,
+            repositories: Vec::new(),
             warnings,
         });
     }
@@ -236,6 +307,7 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
         }
     }
 
+    let mut repositories = dedupe_repositories(repositories, &root);
     sort_repositories(&mut repositories);
     if repositories.is_empty() {
         warnings.push(format!(

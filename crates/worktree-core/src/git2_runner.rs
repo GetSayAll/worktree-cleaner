@@ -224,30 +224,43 @@ fn run_once(repo_path: &Path, args: &[&str], command: &str) -> Result<GitOutput,
 // ---------------------------------------------------------------- worktrees
 
 fn worktree_list(repo: &Repository) -> Result<GitOutput, GitError> {
+    // Open the common repository rather than the worktree the caller happened
+    // to pass in. Git's own list starts with the main worktree, and callers
+    // use that first entry to tell the main worktree from a linked one. Starting
+    // from the linked worktree would make it look main and, in workspace
+    // discovery, give every member of one repository family a different key.
+    let main_repo = Repository::open(repo.commondir())
+        .or_else(|_| Repository::open(repo.path()))
+        .map_err(|error| {
+            failed(
+                "git worktree list",
+                format!("cannot open the common repository: {error}"),
+            )
+        })?;
     let mut output = String::new();
-    let (main_head, main_branch, main_detached) = head_facts(repo);
-    let main_path = repo
+    let (main_head, main_branch, main_detached) = head_facts(&main_repo);
+    let main_path = main_repo
         .workdir()
-        .map_or_else(|| repo.path().to_path_buf(), Path::to_path_buf);
+        .map_or_else(|| main_repo.path().to_path_buf(), Path::to_path_buf);
     push_worktree(
         &mut output,
         &main_path,
         main_head.as_deref(),
         main_branch.as_deref(),
-        repo.is_bare(),
+        main_repo.is_bare(),
         main_detached,
         None,
         None,
     );
 
-    let names = repo.worktrees().map_err(|error| {
+    let names = main_repo.worktrees().map_err(|error| {
         failed(
             "git worktree list",
             format!("cannot list worktrees: {error}"),
         )
     })?;
     for name in names.iter().flatten() {
-        let worktree = repo
+        let worktree = main_repo
             .find_worktree(name)
             .map_err(|error| failed("git worktree list", format!("cannot read {name}: {error}")))?;
         let (head, branch, detached) = worktree_head_facts(&worktree);

@@ -495,6 +495,11 @@ pub struct ArtifactRecord {
 
 /// One Git repository found below a selected workspace directory.
 ///
+/// A linked worktree is not a separate entry: the path is the main worktree
+/// when it is inside the selected root, otherwise one discovered linked
+/// worktree represents the family. `worktree_count` is the shared Git worktree
+/// list for that whole repository.
+///
 /// Discovery is deliberately cheap: it does not scan worktrees or artifacts.
 /// Selecting one repository starts the ordinary [`scan_project`] path, so a
 /// workspace is a way to find the repositories, not a second cleanup model.

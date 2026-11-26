@@ -74,7 +74,7 @@ Before a scan, only "Welcome" in the sidebar is available; data pages appear onl
 
 A developer root such as `~/Develop/Src` is often not itself a Git repository. When the selected folder is not a repository, the app lists the Git repositories below it instead of failing with "not a Git repository". Discovery is read-only, shallow, and does not follow symlinks or generated trees (`node_modules`, `target`, `.build`, `.worktrees`, `DerivedData`, …).
 
-This is a launcher, not a batch-cleanup mode. Selecting a repository starts the ordinary one-repository scan, so every worktree verdict remains anchored to that repository's default branch. The page shows the path, a worktree count, and a "Scan repository" action, ordered by worktree count descending; an unknown count is listed after measured repositories. It never selects or deletes anything itself.
+This is a launcher, not a batch-cleanup mode. Selecting a repository starts the ordinary one-repository scan, so every worktree verdict remains anchored to that repository's default branch. The page shows the path, a worktree count, and a "Scan repository" action, ordered by worktree count descending; an unknown count is listed after measured repositories. A linked worktree found under the root is folded into its main repository: there is one row per Git repository, and the count is that repository's shared worktree list, not a count per discovered root. The main worktree's path is shown when it is inside the root; otherwise one discovered linked worktree represents the family. It never selects or deletes anything itself.
 
 ### 3. Overview
 

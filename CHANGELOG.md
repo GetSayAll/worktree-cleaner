@@ -5,6 +5,12 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A repository is listed once, even when several of its linked worktrees sit
+  below the selected root.** The shared `git worktree list` is folded into one
+  repository row, so its worktree count is no longer repeated for every member.
+
 ### Changed
 
 - **Repositories are ordered by worktree count.** A developer root with many
