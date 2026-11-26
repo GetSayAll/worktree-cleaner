@@ -381,10 +381,12 @@ export const zhCN = {
   buildCaches: {
     title: "构建缓存",
     lede:
-      "扫描一个文件夹，找出带有 CACHEDIR.TAG 标记的构建根目录，例如 SwiftPM 为每次构建生成的目录。只有你明确选中的目录才会移入{{trash}}；不会启动仓库扫描。",
+      "扫描你已经打开的工作区或项目，找出带有 CACHEDIR.TAG 标记的构建根目录，例如 SwiftPM 为每次构建生成的目录。你不需要知道哪个文件夹是缓存；只有你明确选中的构建根目录才会移入{{trash}}。",
     rulesSummary:
       "带标记的构建根目录是可重建缓存。凭据、最近活动、符号链接和白名单仍会使它需要确认或被禁止删除。",
-    rootLabel: "要扫描的文件夹",
+    scopeTitle: "扫描范围",
+    scopeHint: "自动使用当前已打开的文件夹；只有缓存位于别处时才需要另选。",
+    noScope: "还没有打开工作区。",
     chooseFolder: "选择文件夹",
     scan: "扫描构建缓存",
     scanning: "正在扫描构建缓存…",

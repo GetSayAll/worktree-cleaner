@@ -16,6 +16,8 @@ import {
   executeErrorMessage,
   goTo,
   logError,
+  projectPath,
+  recentProjects,
   selectedBuildCaches,
   settings,
   startBuildCacheScan,
@@ -80,16 +82,29 @@ const canRun = computed(
 );
 
 onMounted(() => {
-  if (!buildCacheRoot.value) buildCacheRoot.value = workspaceSnapshot.value?.root ?? "";
+  // The page does not ask the reader to know which folder holds a cache. It
+  // starts from the workspace or project the app already has open, and only falls
+  // back to the system folder picker when there is no such scope.
+  if (!buildCacheRoot.value) {
+    buildCacheRoot.value =
+      workspaceSnapshot.value?.root ??
+      projectPath.value ??
+      recentProjects.value[0]?.path ??
+      "";
+  }
+  if (!buildCacheSnapshot.value && buildCacheRoot.value) void startBuildCacheScan();
 });
 
 async function chooseFolder() {
   try {
     const picked = await pickDirectory(messages.buildCaches.chooseFolder);
-    if (picked !== null) buildCacheRoot.value = picked;
+    if (picked !== null) {
+      buildCacheRoot.value = picked;
+      void startBuildCacheScan();
+    }
   } catch {
-    // The page's normal scan error covers a failed picker; the text field remains
-    // the fallback path.
+    // The page's normal scan error covers a failed picker; the folder can also be
+    // changed from the workspace by rescanning there.
   }
 }
 
@@ -123,17 +138,12 @@ async function openSystemTrash() {
 
     <div class="card">
       <div class="card__head">
-        <h2>{{ messages.buildCaches.rootLabel }}</h2>
-        <span class="faint tiny">{{ messages.buildCaches.inventoryHint }}</span>
+        <h2>{{ messages.buildCaches.scopeTitle }}</h2>
+        <span class="faint tiny">{{ messages.buildCaches.scopeHint }}</span>
       </div>
       <div class="card__body">
-        <div class="pick-row">
-          <input
-            v-model="buildCacheRoot"
-            class="input input--mono"
-            :placeholder="messages.welcome.pathPlaceholder"
-            @keyup.enter="scan"
-          />
+        <div class="row-wrap">
+          <span class="mono">{{ buildCacheRoot ? homePath(buildCacheRoot) : messages.buildCaches.noScope }}</span>
           <button class="btn" :disabled="buildCacheScanning || executing" @click="chooseFolder">
             {{ messages.buildCaches.chooseFolder }}
           </button>
