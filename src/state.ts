@@ -189,6 +189,10 @@ export const confirmText = ref("");
  */
 let recordedPlan = "";
 
+/** A scan that is superseded by a newer run must not finish the newer one. */
+let scanRun = 0;
+let buildCacheRun = 0;
+
 export const scanState = reactive({
   stageIndex: 0,
   traceLine: 0,
@@ -377,7 +381,10 @@ const STAGE_INTERVAL_MS = 700;
 /** Advances the step marker while a real scan runs. */
 function startStageTimer() {
   stageTimer = window.setInterval(() => {
-    if (scanState.stageIndex < SCAN_STAGES.length - 1) {
+    // The last stage is "Summarize"; the real build-cache scan owns the
+    // penultimate marker, and a timer that ran ahead would jump back when
+    // enterBuildCacheStage parks it there.
+    if (scanState.stageIndex < SCAN_STAGES.length - 2) {
       scanState.stageIndex += 1;
     }
   }, STAGE_INTERVAL_MS);
@@ -490,17 +497,22 @@ function cacheScopeFor(workspaceRoot: string, requested?: string): string {
  *
  * A repository is normally opened from a developer root, while its build output
  * may sit beside it under that root (`design-artifacts`, a shared build cache).
- * The user selects the repository, not the cache folder; walking three levels up
- * finds that common layout without asking them to know the path. The home
- * directory and filesystem roots are never searched: a project needs at least
- * three path components for an ancestor to be considered.
+ * The user selects the repository, not the cache folder; checking the root and
+ * two parent folders finds that common layout without asking them to know the
+ * path. The home directory and filesystem roots are never searched: a project
+ * needs at least three path components for an ancestor to be considered.
  */
-function cacheSearchScopes(root: string): string[] {
+export function cacheSearchScopes(root: string): string[] {
   let current = normalizePathKey(root).replace(/\/+$/, "");
   const scopes: string[] = [];
   for (let level = 0; level < 3; level += 1) {
     const parts = current.split("/").filter(Boolean);
-    if (parts.length < 3) break;
+    // A Windows drive letter is part of the path but not a normal directory
+    // name. Without subtracting it, `C:\Users\andy` looked like three
+    // components and a project directly under the user's home searched the
+    // whole home directory.
+    const components = parts.length - (/^[A-Za-z]:$/.test(parts[0] ?? "") ? 1 : 0);
+    if (components < 3) break;
     scopes.push(current);
     const slash = current.lastIndexOf("/");
     if (slash <= 0) break;
@@ -514,6 +526,10 @@ export async function startScan(path: string, buildCacheScope?: string) {
   const target = path.trim();
   if (!target) return;
 
+  const runId = ++scanRun;
+  // Stop a page-level build-cache refresh from writing into this run's state.
+  buildCacheRun += 1;
+  buildCacheScanning.value = false;
   record("scan.started", target);
   projectPath.value = target;
   selectedWorktrees.value = [];
@@ -548,7 +564,7 @@ export async function startScan(path: string, buildCacheScope?: string) {
     // read-only; it either confirms this is one repository, offers the nested
     // repositories, or produces an honest empty answer.
     const workspace = await scanWorkspace(target);
-    if (scanState.cancelled) return;
+    if (scanState.cancelled || runId !== scanRun) return;
     if (workspace.repositories.length === 0) {
       scanState.running = false;
       clearTimers();
@@ -557,6 +573,7 @@ export async function startScan(path: string, buildCacheScope?: string) {
       view.value = "welcome";
       return;
     }
+    const explicitCacheScope = Boolean(buildCacheScope?.trim());
     const cacheScope =
       workspace.repositories.length > 1
         ? workspace.root
@@ -565,7 +582,7 @@ export async function startScan(path: string, buildCacheScope?: string) {
       buildCacheRoot.value = cacheScope;
       enterBuildCacheStage();
       await runBuildCacheScan(cacheScope, false);
-      if (scanState.cancelled) return;
+      if (scanState.cancelled || runId !== scanRun) return;
       finishWorkspace(workspace);
       return;
     }
@@ -573,14 +590,16 @@ export async function startScan(path: string, buildCacheScope?: string) {
     const repository = workspace.repositories[0];
     projectPath.value = repository.path;
     const result = await scanProject(repository.path, scanKnobs());
-    if (scanState.cancelled) return;
+    if (scanState.cancelled || runId !== scanRun) return;
     buildCacheRoot.value = cacheScope;
     enterBuildCacheStage();
-    await runBuildCacheScan(cacheScope, true);
-    if (scanState.cancelled) return;
+    // A repository opened from a workspace has that workspace as its cache
+    // scope. Only a direct repository scan widens the search to nearby parents.
+    await runBuildCacheScan(cacheScope, !explicitCacheScope);
+    if (scanState.cancelled || runId !== scanRun) return;
     finishScan(result);
   } catch (error) {
-    if (scanState.cancelled) return;
+    if (scanState.cancelled || runId !== scanRun) return;
     scanState.running = false;
     clearTimers();
     const failure = normaliseScanFailure(error, target);
@@ -654,6 +673,9 @@ function finishScan(result: ProjectSnapshot, sample = false) {
 
 export function cancelScan() {
   clearTimers();
+  scanRun += 1;
+  buildCacheRun += 1;
+  buildCacheScanning.value = false;
   scanState.running = false;
   scanState.cancelled = true;
   record("scan.cancelled", projectPath.value, { elapsed: scanState.elapsed });
@@ -689,24 +711,28 @@ export function resetToWelcome() {
  */
 function recordPlanGenerated(): void {
   const plan = cleanupPlan.value;
+  const cachePlan = buildCachePlan.value;
   // The figure the confirmation line carries, kept the same way on purpose: an
   // artifact that leaves with its worktree is not a separate move, and counting it
   // as one would make the two lines disagree about the same plan.
-  const artifacts = plan.trash_moves.filter((item) => item.bundled_with_worktree === null).length;
+  const artifacts =
+    plan.trash_moves.filter((item) => item.bundled_with_worktree === null).length +
+    cachePlan.trash_moves.length;
   if (plan.worktree_removals.length + artifacts === 0) return;
 
   const signature = [
     ...plan.worktree_removals.map((item) => item.path),
     ...plan.trash_moves.map((item) => item.path),
-    String(plan.total_bytes)
+    ...cachePlan.trash_moves.map((item) => item.path),
+    String(plan.total_bytes + cachePlan.total_bytes)
   ].join("\u0000");
   if (signature === recordedPlan) return;
   recordedPlan = signature;
 
-  record("plan.generated", snapshot.value?.root ?? projectPath.value, {
+  record("plan.generated", snapshot.value?.root ?? buildCacheSnapshot.value?.root ?? projectPath.value, {
     worktrees: plan.worktree_removals.length,
     artifacts,
-    total_bytes: plan.total_bytes
+    total_bytes: plan.total_bytes + cachePlan.total_bytes
   });
 }
 
@@ -1176,6 +1202,7 @@ export function applyBuildCacheDefaultSelection() {
     .filter((record) => record.size_bytes === null || record.size_bytes >= minBytes)
     .map((record) => record.path);
   buildCacheAcknowledged.value = false;
+  acknowledged.value = false;
 }
 
 /** Selects every known-safe cache, leaving an unknown owner for the reader. */
@@ -1220,6 +1247,7 @@ export function toggleBuildCache(path: string) {
     ? selectedBuildCaches.value.filter((item) => item !== path)
     : [...selectedBuildCaches.value, path];
   buildCacheAcknowledged.value = false;
+  acknowledged.value = false;
 }
 
 export function toggleGroupBuildCaches(paths: string[], select: boolean) {
@@ -1236,6 +1264,7 @@ export function toggleGroupBuildCaches(paths: string[], select: boolean) {
   }
   selectedBuildCaches.value = [...next];
   buildCacheAcknowledged.value = false;
+  acknowledged.value = false;
 }
 
 /**
@@ -1247,6 +1276,7 @@ export function toggleGroupBuildCaches(paths: string[], select: boolean) {
  * one.
  */
 async function runBuildCacheScan(root: string, searchAncestors = false) {
+  const runId = ++buildCacheRun;
   buildCacheScanning.value = true;
   buildCacheError.value = false;
   buildCacheLastResult.value = [];
@@ -1262,6 +1292,7 @@ async function runBuildCacheScan(root: string, searchAncestors = false) {
     failed: 0
   };
   buildCacheAcknowledged.value = false;
+  acknowledged.value = false;
   if (!isDesktop()) {
     buildCacheSnapshot.value = mockGeneratedCacheSnapshot;
     buildCacheRoot.value = mockGeneratedCacheSnapshot.root;
@@ -1270,6 +1301,12 @@ async function runBuildCacheScan(root: string, searchAncestors = false) {
     buildCacheScanning.value = false;
     return;
   }
+  // A folder-scoped inventory is replaced as a whole. Keeping the previous
+  // folder's rows while a new scope is being scanned would pair a failed scan's
+  // error with the old records, and could leave those old paths selectable.
+  buildCacheSnapshot.value = null;
+  selectedBuildCaches.value = [];
+  buildCacheSample.value = false;
   record("scan.started", root);
   try {
     const options = {
@@ -1284,13 +1321,21 @@ async function runBuildCacheScan(root: string, searchAncestors = false) {
     let warnings: string[] = [];
     for (const scope of scopes) {
       const candidate = await scanGeneratedCaches(scope, options);
+      if (runId !== buildCacheRun) return;
       result = candidate;
-      for (const record of candidate.records) records.set(record.path, record);
+      for (const record of candidate.records) {
+        // Windows returns a path built from the scope's spelling plus a native
+        // separator, so the same cache can arrive as `C:/root/cache` from one
+        // scope and `C:/root\cache` from another. Compare normalised keys, not
+        // the raw display strings, or the inventory counts it twice.
+        records.set(normalizePathKey(record.path), record);
+      }
       if (candidate.records.length > 0) {
         if (recordScope === "") recordScope = candidate.root;
         warnings = [...warnings, ...candidate.warnings];
       }
     }
+    if (runId !== buildCacheRun) return;
     if (result === null) throw new Error("build-cache scan returned no result");
     const merged: GeneratedCacheSnapshot = {
       ...result,
@@ -1310,10 +1355,11 @@ async function runBuildCacheScan(root: string, searchAncestors = false) {
       sample: false
     });
   } catch {
+    if (runId !== buildCacheRun) return;
     buildCacheError.value = true;
     record("scan.failed", root, { error: "build_cache_scan_failed" });
   } finally {
-    buildCacheScanning.value = false;
+    if (runId === buildCacheRun) buildCacheScanning.value = false;
   }
 }
 
@@ -1524,37 +1570,46 @@ export async function executeCleanup() {
   let unlisten: (() => void) | null = null;
   try {
     let projectOutcome: ExecutionOutcome | null = null;
+    let cacheOutcome: ExecutionOutcome | null = null;
+    let executorFailed = false;
     if (projectHasItems && current) {
-      // The live list is an enhancement, not a condition for running: if the
-      // event channel is unavailable, the final outcome still carries every row.
-      unlisten = await onExecutionProgress((entry) => {
-        executionProgress.value = [...executionProgress.value, entry];
-      }).catch(() => null);
-      projectOutcome = await executePlan(plan, current, {
-        recent_activity_days: settings.active_days,
-        untracked_as_unsafe: settings.untracked_is_unsafe,
-        whitelist: settings.whitelist_paths,
-        // The same two budgets the scan used. The re-check measures the very same
-        // directories, so a setting that shaped the scan and was then replaced by a
-        // default here would mean one thing on the way in and another on the way out.
-        per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
-        git_timeout_ms: GIT_TIMEOUT_MS,
-        // `null` disables the audit log, which the user is then told about.
-        log_path: await logPath()
-      });
+      try {
+        // The live list is an enhancement, not a condition for running: if the
+        // event channel is unavailable, the final outcome still carries every row.
+        unlisten = await onExecutionProgress((entry) => {
+          executionProgress.value = [...executionProgress.value, entry];
+        }).catch(() => null);
+        projectOutcome = await executePlan(plan, current, {
+          recent_activity_days: settings.active_days,
+          untracked_as_unsafe: settings.untracked_is_unsafe,
+          whitelist: settings.whitelist_paths,
+          // The same two budgets the scan used. The re-check measures the very same
+          // directories, so a setting that shaped the scan and was then replaced by a
+          // default here would mean one thing on the way in and another on the way out.
+          per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+          git_timeout_ms: GIT_TIMEOUT_MS,
+          // `null` disables the audit log, which the user is then told about.
+          log_path: await logPath()
+        });
+      } catch {
+        executorFailed = true;
+      }
     }
 
-    let cacheOutcome: ExecutionOutcome | null = null;
     if (cacheHasItems && cacheCurrent) {
-      cacheOutcome = await executeGeneratedCachePlan(cachePlan, cacheCurrent, {
-        recent_activity_days: settings.active_days,
-        untracked_as_unsafe: false,
-        whitelist: settings.whitelist_paths,
-        per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
-        git_timeout_ms: GIT_TIMEOUT_MS,
-        log_path: await logPath()
-      });
-      applyBuildCacheRemovals(cacheOutcome, cachePlan);
+      try {
+        cacheOutcome = await executeGeneratedCachePlan(cachePlan, cacheCurrent, {
+          recent_activity_days: settings.active_days,
+          untracked_as_unsafe: false,
+          whitelist: settings.whitelist_paths,
+          per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+          git_timeout_ms: GIT_TIMEOUT_MS,
+          log_path: await logPath()
+        });
+        applyBuildCacheRemovals(cacheOutcome, cachePlan);
+      } catch {
+        executorFailed = true;
+      }
     }
 
     const combinedPlan: CleanupPlan = {
@@ -1569,7 +1624,10 @@ export async function executeCleanup() {
     const logErrors = [projectOutcome?.log_error, cacheOutcome?.log_error].filter(
       (error): error is string => error !== null && error !== undefined
     );
-    await applyOutcome(entries, combinedPlan, logErrors.join("; ") || null);
+    if (projectOutcome !== null || cacheOutcome !== null) {
+      await applyOutcome(entries, combinedPlan, logErrors.join("; ") || null);
+    }
+    if (executorFailed) executeError.value = "failed";
   } catch (error) {
     executeError.value = "failed";
   } finally {

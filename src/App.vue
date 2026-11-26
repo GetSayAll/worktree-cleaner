@@ -21,6 +21,7 @@ import {
   worktrees,
   workspaceSnapshot,
   buildCacheSnapshot,
+  selectedBuildCaches,
   type ViewKey
 } from "./state";
 import { homePath } from "./format";
@@ -106,8 +107,14 @@ function navCount(key: ViewKey): string {
       return visible > 0 ? `${visible}` : "";
     }
     case "buildCaches": {
-      const count = buildCacheSnapshot.value?.records.length ?? 0;
-      return count > 0 ? `${count}` : "";
+      const minBytes = settings.min_artifact_mb * 1024 * 1024;
+      const visible = (buildCacheSnapshot.value?.records ?? []).filter(
+        (record) =>
+          record.size_bytes === null ||
+          record.size_bytes >= minBytes ||
+          record.safety.status === "Unsafe"
+      ).length;
+      return visible > 0 ? `${visible}` : "";
     }
     case "hygiene": {
       // What is broken, not what was checked: a page whose badge counted 22
@@ -116,7 +123,10 @@ function navCount(key: ViewKey): string {
       return broken > 0 ? `${broken}` : "";
     }
     case "plan": {
-      const picked = selectedSummary.value.worktrees + selectedSummary.value.artifacts;
+      const picked =
+        selectedSummary.value.worktrees +
+        selectedSummary.value.artifacts +
+        selectedBuildCaches.value.length;
       return picked > 0 ? `${picked}` : "";
     }
     case "result":

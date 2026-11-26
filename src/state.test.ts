@@ -4,7 +4,7 @@ import { assess } from "./types";
 import type { ExecutionOutcome, ResultEntry } from "./types";
 import { basename, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
 import { messages } from "./i18n";
-import { primaryReason } from "./state";
+import { primaryReason, cacheSearchScopes } from "./state";
 
 // The state module keeps mutable refs at module scope, so every test imports a
 // fresh copy: `vi.resetModules()` clears the registry and the dynamic import below
@@ -1048,5 +1048,24 @@ describe("result accounting", () => {
     expect(summary.trash_unknown).toBe(1);
     expect(summary.reclaimable).toBe(1400);
     expect(summary.reclaimable_unknown).toBe(1);
+  });
+});
+
+describe("build-cache search scopes", () => {
+  it("does not treat a Windows home directory as a search scope", () => {
+    expect(cacheSearchScopes("C:\\Users\\andy\\Develop\\repo")).toEqual([
+      "C:/Users/andy/Develop/repo",
+      "C:/Users/andy/Develop"
+    ]);
+    expect(cacheSearchScopes("C:\\Users\\andy\\repo")).toEqual(["C:/Users/andy/repo"]);
+    expect(cacheSearchScopes("\\\\server\\share\\repo")).toEqual(["//server/share/repo"]);
+  });
+
+  it("still searches the project's nearby parents on POSIX paths", () => {
+    expect(cacheSearchScopes("/Users/andy/Develop/Src/AISrc")).toEqual([
+      "/Users/andy/Develop/Src/AISrc",
+      "/Users/andy/Develop/Src",
+      "/Users/andy/Develop"
+    ]);
   });
 });

@@ -47,6 +47,9 @@ const combinedTotal = computed(() => plan.value.total_bytes + cachePlan.value.to
 const combinedUnknown = computed(
   () => plan.value.total_bytes_unknown + cachePlan.value.total_bytes_unknown
 );
+const excludedUnsafe = computed(
+  () => plan.value.excluded_unsafe + cachePlan.value.excluded_unsafe
+);
 
 const bundledCount = computed(() => plan.value.trash_moves.filter((item) => item.bundled_with_worktree !== null).length);
 const independentMoves = computed(() => plan.value.trash_moves.filter((item) => item.bundled_with_worktree === null));
@@ -237,7 +240,7 @@ async function copyPlan() {
         :label="messages.plan.stats.autoExcluded"
         tone="unsafe"
         value-tone
-        :value="`${plan.excluded_unsafe}`"
+        :value="`${excludedUnsafe}`"
         :sub="messages.plan.stats.autoExcludedSub"
       />
     </div>
@@ -454,7 +457,7 @@ async function copyPlan() {
             {{ messages.plan.backToAdjust }}
           </button>
         </div>
-        <span class="actionbar__summary faint tiny">{{ messages.plan.excludedNote(plan.excluded_unsafe) }}</span>
+        <span class="actionbar__summary faint tiny">{{ messages.plan.excludedNote(excludedUnsafe) }}</span>
         <div class="actionbar__side" style="margin-left: auto">
           <!-- Same height as the button beside it: two buttons of different sizes in
                one row do not read as a pair, and the taller one sets the row height so

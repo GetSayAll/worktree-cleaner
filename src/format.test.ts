@@ -7,6 +7,8 @@ import {
   formatCount,
   homePath,
   isUnder,
+  normalizePathKey,
+  pathMatchesRule,
   reasonText,
   scanFailureText
 } from "./format";
@@ -99,6 +101,18 @@ describe("formatCount", () => {
   });
 });
 
+describe("normalizePathKey", () => {
+  it("preserves the UNC prefix instead of turning it into a drive-relative path", () => {
+    expect(normalizePathKey("\\\\server\\share\\repo")).toBe("//server/share/repo");
+    expect(normalizePathKey("//server/share/repo/")).toBe("//server/share/repo");
+  });
+
+  it("still unifies separators and collapses repeated separators", () => {
+    expect(normalizePathKey("C:\\Users\\andy\\repo")).toBe("C:/Users/andy/repo");
+    expect(normalizePathKey("/Users/andy//repo/")).toBe("/Users/andy/repo");
+  });
+});
+
 describe("isUnder", () => {
   // Used to tell the reader that a worktree of the repository they picked lives
   // somewhere else. `git worktree add` takes any path, so a sibling directory, a
@@ -121,6 +135,11 @@ describe("isUnder", () => {
   it("does not match everything when the root is empty", () => {
     // A snapshot with no root must not make every path look like it is inside one.
     expect(isUnder(root, "")).toBe(false);
+  });
+
+  it("compares Windows paths case-insensitively", () => {
+    expect(isUnder("C:\\Users\\Andy\\Repo\\dist", "c:\\users\\andy\\repo")).toBe(true);
+    expect(pathMatchesRule("C:\\Users\\Andy\\Repo\\dist", "c:\\users\\andy\\repo")).toBe(true);
   });
 });
 

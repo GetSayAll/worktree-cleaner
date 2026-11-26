@@ -8,6 +8,7 @@
 mod common;
 
 use common::Repo;
+use std::path::Path;
 use worktree_core::discover_workspace;
 
 #[test]
@@ -27,8 +28,11 @@ fn linked_worktrees_are_one_repository_with_one_worktree_count() {
     );
     let repository = &snapshot.repositories[0];
     assert_eq!(repository.worktree_count, Some(3));
-    assert!(
-        repository.path.ends_with("/repo"),
+    assert_eq!(
+        Path::new(&repository.path)
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("repo"),
         "the main worktree is shown when it is inside the selected root: {}",
         repository.path
     );

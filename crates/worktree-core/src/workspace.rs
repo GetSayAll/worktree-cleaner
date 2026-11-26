@@ -422,10 +422,10 @@ mod tests {
         std::fs::write(tagged.join("CACHEDIR.TAG"), "Signature: cache\n").expect("cache tag");
 
         let snapshot = discover_workspace(root.path().to_str().expect("path")).expect("discover");
-        let paths: Vec<&str> = snapshot
+        let paths: Vec<String> = snapshot
             .repositories
             .iter()
-            .map(|repo| repo.path.as_str())
+            .map(|repo| repo.path.replace('\\', "/"))
             .collect();
         assert!(paths.iter().any(|path| path.ends_with("/one")));
         assert!(paths.iter().any(|path| path.ends_with("/nested/two")));

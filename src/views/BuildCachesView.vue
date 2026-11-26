@@ -63,7 +63,7 @@ const selected = computed(() =>
   records.value.filter((record) => selectedBuildCaches.value.includes(record.path))
 );
 const selectableSafes = computed(() =>
-  records.value.filter((record) => record.safety.status === "Safe").map((record) => record.path)
+  visibleRecords.value.filter((record) => record.safety.status === "Safe").map((record) => record.path)
 );
 const allSafeSelected = computed(
   () =>
@@ -117,8 +117,11 @@ onMounted(() => {
   // search also looks in parent folders, which is where this project's cache
   // lives. A non-empty result is left alone.
   const emptyResult = buildCacheSnapshot.value?.records.length === 0;
-  if ((!buildCacheSnapshot.value || emptyResult) && buildCacheRoot.value) {
-    if (emptyResult) {
+  // Keep the result card after a run that removed every selected cache; only an
+  // empty inventory with no result to show needs another scan.
+  const retryEmpty = emptyResult && buildCacheLastResult.value.length === 0;
+  if ((!buildCacheSnapshot.value || retryEmpty) && buildCacheRoot.value) {
+    if (retryEmpty) {
       buildCacheSnapshot.value = null;
       selectedBuildCaches.value = [];
     }

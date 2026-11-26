@@ -14,8 +14,14 @@ const KB = 1024;
 
 /** Normalise a path for comparison: unify separators, collapse repeats, drop a trailing separator. */
 export function normalizePathKey(path: string): string {
-  let key = path.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-  if (key.length > 1) key = key.replace(/\/+$/, "");
+  let key = path.replace(/\\/g, "/");
+  // A leading double separator is the UNC prefix on Windows (`\\server\share`),
+  // not a repeated separator. Collapsing it to `/server/share` turns a network
+  // path into a drive-relative one, so preserve the two leading slashes.
+  const unc = key.startsWith("//");
+  key = key.replace(/\/{2,}/g, "/");
+  if (unc) key = `//${key.replace(/^\/+/, "")}`;
+  if (key.length > (unc ? 2 : 1)) key = key.replace(/\/+$/, "");
   return key;
 }
 
@@ -24,10 +30,20 @@ export function isAbsolutePath(path: string): boolean {
   return /^[\\/]/.test(path) || /^[A-Za-z]:[\\/]/.test(path);
 }
 
+/** Whether a path is written in a Windows form, where names are case-insensitive. */
+function isWindowsPath(path: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\") || path.startsWith("//");
+}
+
+function foldSegments(segments: string[], windows: boolean): string[] {
+  return windows ? segments.map((segment) => segment.toLowerCase()) : segments;
+}
+
 /** Whether `path` is `rule` itself or lives inside it, compared component by component. */
 export function pathMatchesRule(path: string, rule: string): boolean {
-  const candidate = normalizePathKey(path).split("/");
-  const target = normalizePathKey(rule).split("/");
+  const windows = isWindowsPath(path) || isWindowsPath(rule);
+  const candidate = foldSegments(normalizePathKey(path).split("/"), windows);
+  const target = foldSegments(normalizePathKey(rule).split("/"), windows);
   if (target.length === 0 || target.length > candidate.length) return false;
   return target.every((segment, index) => segment === candidate[index]);
 }
@@ -286,9 +302,14 @@ export function displayPath(path: string, root: string): string {
  * verdict: the scanner and the executor work from the paths Git reports.
  */
 export function isUnder(path: string, root: string): boolean {
-  const key = normalizePathKey(path);
-  const rootKey = normalizePathKey(root);
+  const windows = isWindowsPath(path) || isWindowsPath(root);
+  let key = normalizePathKey(path);
+  let rootKey = normalizePathKey(root);
   if (rootKey.length === 0) return false;
+  if (windows) {
+    key = key.toLowerCase();
+    rootKey = rootKey.toLowerCase();
+  }
   return key === rootKey || key.startsWith(`${rootKey}/`);
 }
 
