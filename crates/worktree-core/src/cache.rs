@@ -7,8 +7,9 @@
 //! - only directories under a known cache root are considered;
 //! - a known cache gets a positive `af.rebuildable` reason, while an unknown
 //!   owner gets `af.unknown_cache` at `Review` and is never selected by default;
-//! - credentials, nested repositories, escaping symlinks and whitelist hits stay
-//!   `Unsafe`;
+//! - a credential-looking file is `af.credentials` at `Review` (a package cache
+//!   carries third-party fixtures), while a nested repository, an escaping symlink
+//!   or a whitelist hit stays `Unsafe`;
 //! - every directory is moved through the system Trash, never permanently
 //!   deleted;
 //! - the executor re-checks the record before it moves anything.
@@ -100,12 +101,18 @@ fn local_app_data() -> Option<PathBuf> {
     home().map(|home| home.join("AppData").join("Local"))
 }
 
+// The two helpers below enumerate the children of a cache parent, which only the
+// macOS and Linux tables do. Windows names each package-manager cache directly
+// under `%LOCALAPPDATA%`, so compiling the walk there would leave it unused — and
+// the workspace gate denies `unused`.
+#[cfg(not(target_os = "windows"))]
 fn is_known_cache_name(name: &str, known: &[&str]) -> bool {
     known
         .iter()
         .any(|candidate| candidate.eq_ignore_ascii_case(name))
 }
 
+#[cfg(not(target_os = "windows"))]
 fn add_children(sources: &mut Vec<CacheSource>, parent: &Path, known: &[&str], kind: &'static str) {
     let Ok(entries) = std::fs::read_dir(parent) else {
         return;
@@ -390,7 +397,12 @@ fn check_cache(
             1_000_000,
             options.per_dir_timeout.min(Duration::from_mins(1)) / 2,
         ) {
-            CredentialScan::Complete(Some(name)) => reasons.push(Reason::blocking(
+            // Review, not Unsafe: a package cache is downloaded third-party
+            // content, and its fixtures and public certificate material match the
+            // same names a personal secret would. `Unsafe` would make the cache
+            // permanently unselectable — the evidence is what a reader needs to
+            // confirm, not a prohibition that leaves them no move.
+            CredentialScan::Complete(Some(name)) => reasons.push(Reason::review(
                 ReasonCode::AfCredentials,
                 "contains what looks like a credential file",
                 format!("{name} is inside; deleting the cache would delete it too"),
@@ -819,7 +831,9 @@ mod tests {
     }
 
     #[test]
-    fn a_credential_inside_a_cache_is_unsafe() {
+    fn a_credential_inside_a_cache_is_review_not_unsafe() {
+        // A package cache is downloaded third-party content. The hit is worth
+        // showing, but `Unsafe` would leave the reader no way to act on it at all.
         let root = temp();
         let cache = root.path().join("cache");
         std::fs::create_dir_all(&cache).expect("cache");
@@ -835,12 +849,42 @@ mod tests {
             )],
             &options(),
         );
-        assert_eq!(snapshot.records[0].safety.status, SafetyStatus::Unsafe);
+        assert_eq!(snapshot.records[0].safety.status, SafetyStatus::Review);
         assert!(snapshot.records[0]
             .safety
             .reasons
             .iter()
             .any(|reason| reason.code == ReasonCode::AfCredentials));
+    }
+
+    #[test]
+    fn a_directory_named_credentials_does_not_block_a_cache() {
+        // The regression this exists for: a uv cache's sdists tree contained
+        // `winsdk/windows/security/credentials`, and the directory name alone made
+        // 2.75 GB of cache `Unsafe` — permanently unselectable.
+        let root = temp();
+        let cache = root.path().join("cache");
+        let nested = cache.join("credentials");
+        std::fs::create_dir_all(&nested).expect("create nested");
+        std::fs::write(nested.join("module.py"), b"source").expect("module");
+        // The same tree ships a public CA bundle next to it.
+        std::fs::write(
+            cache.join("cacert.pem"),
+            b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        )
+        .expect("bundle");
+        backdate_tree(&cache, 10);
+
+        let snapshot = scan_sources(
+            &[source(
+                cache,
+                root.path().to_path_buf(),
+                "known-cache",
+                true,
+            )],
+            &options(),
+        );
+        assert_eq!(snapshot.records[0].safety.status, SafetyStatus::Safe);
     }
 
     #[test]

@@ -18,9 +18,10 @@ import type {
 } from "./types";
 import { SEVERITY_RANK } from "./types";
 import { applyLocale, messages, watchSystemLocale } from "./i18n";
-import { formatBytes, pathMatchesRule } from "./format";
+import { formatBytes, pathIdentityKey, pathMatchesRule } from "./format";
 import {
   executePlan,
+  hostOs,
   isDesktop,
   logActivity,
   logPath,
@@ -245,15 +246,37 @@ function loadRecents() {
     if (!raw) return;
     const stored = JSON.parse(raw) as unknown;
     if (!Array.isArray(stored)) return;
-    recentProjects.value = stored.filter(
-      (item): item is RecentProject =>
-        typeof item === "object" &&
-        item !== null &&
-        typeof (item as RecentProject).path === "string"
-    );
+    const seen = new Set<string>();
+    recentProjects.value = stored
+      .filter(
+        (item): item is RecentProject =>
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as RecentProject).path === "string"
+      )
+      // One project, one row: an older build stored the same directory under two
+      // separator or case spellings.
+      .filter((item) => {
+        const key = recentKey(item.path);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   } catch {
     recentProjects.value = [];
   }
+}
+
+/**
+ * What two spellings of one project have in common.
+ *
+ * Windows accepts both separators and is case-insensitive, so `C:\src\repo` and
+ * `c:/SRC/repo` are one directory. macOS is compared as written: its default
+ * volume folds case, but a case-sensitive one is legal and there the difference is
+ * real.
+ */
+function recentKey(path: string): string {
+  return pathIdentityKey(path, hostOs() === "windows");
 }
 
 /** Records that `path` was scanned just now, and keeps the list short. */
@@ -263,10 +286,11 @@ function rememberProject(path: string) {
     record("project.switched", path, { from: previous });
   }
   const entry: RecentProject = { path, scanned_at: new Date().toISOString() };
-  recentProjects.value = [entry, ...recentProjects.value.filter((item) => item.path !== path)].slice(
-    0,
-    RECENTS_LIMIT
-  );
+  const key = recentKey(path);
+  recentProjects.value = [
+    entry,
+    ...recentProjects.value.filter((item) => recentKey(item.path) !== key)
+  ].slice(0, RECENTS_LIMIT);
   settings.recent_projects = recentProjects.value.map((item) => item.path);
   const store = storage();
   if (store) store.setItem(RECENTS_KEY, JSON.stringify(recentProjects.value));

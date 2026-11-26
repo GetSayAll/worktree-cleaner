@@ -19,6 +19,20 @@ export function normalizePathKey(path: string): string {
   return key;
 }
 
+/**
+ * The key two spellings of one project share.
+ *
+ * `normalizePathKey` unifies the separator and drops a trailing one; Windows also
+ * treats letter case as irrelevant, while a POSIX filesystem may not. The caller
+ * decides which rule applies, which keeps this testable on any host. The recent
+ * list compared raw strings and held one repository twice once discovery began
+ * returning the path it built from the user's own input.
+ */
+export function pathIdentityKey(path: string, foldCase: boolean): string {
+  const key = normalizePathKey(path);
+  return foldCase ? key.toLowerCase() : key;
+}
+
 /** Whether the path is absolute on POSIX (`/x`), Windows (`C:\x`), or UNC (`\\host\share`). */
 export function isAbsolutePath(path: string): boolean {
   return /^[\\/]/.test(path) || /^[A-Za-z]:[\\/]/.test(path);

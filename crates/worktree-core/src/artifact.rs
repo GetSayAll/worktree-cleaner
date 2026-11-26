@@ -23,6 +23,7 @@
 //! (development contract section 3). A size timeout does **not** downgrade the
 //! verdict — the verdict rests on the Git facts, which stay cheap.
 
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
@@ -1011,7 +1012,11 @@ fn credential_walk(
                 };
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            if looks_like_credential(&name) {
+            // The table names files. A directory is read instead, so the files
+            // inside it are matched by their own names; see `looks_like_credential`.
+            let is_directory = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
+            if !is_directory && looks_like_credential(&name) && holds_secret_material(&entry.path())
+            {
                 let relative = entry
                     .path()
                     .strip_prefix(dir)
@@ -1039,6 +1044,13 @@ fn credential_walk(
 /// `.env.example` is matched too, because a template that was filled in where it
 /// stood is a real mistake. A public key is the one thing left out: `id_rsa.pub` is
 /// meant to be shared, and the private half beside it is caught by its own name.
+///
+/// Files only: the walk reads a directory named `credentials` instead of matching
+/// it, because an SDK ships `winsdk/windows/security/credentials` as ordinary
+/// source. Matching the directory made a whole package cache `Unsafe`, which is
+/// not a confirmation the user can act on — the cache never enters a plan. The
+/// files inside are still matched by their own names. `.pem` is the one entry
+/// whose content decides: see [`holds_secret_material`].
 ///
 /// Not covered, on purpose: a secret whose name gives nothing away — `config.json`
 /// holding an API key reads as a config file. That one is recorded as an open item
@@ -1089,6 +1101,45 @@ fn looks_like_credential(name: &str) -> bool {
 
     // Service-account files are named after the account: `service-account-prod.json`.
     lower.starts_with("service-account") && extension == Some("json")
+}
+
+/// Whether a name-matched file really holds secret material.
+///
+/// The table is a name test, and one entry names a container rather than a secret:
+/// a `.pem` holds a certificate or a public key as often as a private key.
+/// `cacert.pem` ships inside botocore, certifi and every CA bundle, so a package
+/// cache full of public certificates was `Unsafe` and could never be cleaned. The
+/// file is read — once, only after its name matched, and only its first kilobytes —
+/// and a private-key block is the answer. An unreadable file keeps the name-based
+/// answer: a check that cannot look must not pass.
+fn holds_secret_material(path: &Path) -> bool {
+    /// Enough for the `-----BEGIN … PRIVATE KEY-----` header of any encoding.
+    const HEAD: u64 = 16 * 1024;
+    if !path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pem"))
+    {
+        return true;
+    }
+    let Ok(file) = std::fs::File::open(path) else {
+        return true;
+    };
+    let mut bytes = Vec::new();
+    if std::io::BufReader::new(file)
+        .take(HEAD)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return true;
+    }
+    let Ok(text) = String::from_utf8(bytes) else {
+        return true;
+    };
+    if text.is_empty() {
+        return true;
+    }
+    text.contains("PRIVATE KEY")
 }
 
 /// Parses the ignore check output (`<source>:<line>:<pattern>\t<path>`) into
@@ -1410,6 +1461,58 @@ mod tests {
             CredentialScan::Complete(Some(
                 ["left-pad", ".env"].join(std::path::MAIN_SEPARATOR_STR)
             ))
+        );
+    }
+
+    #[test]
+    fn a_directory_named_credentials_is_searched_not_flagged() {
+        // A uv sdists tree holds `winsdk/windows/security/credentials` as ordinary
+        // source. Treating the directory name as a credential made the whole cache
+        // `Unsafe`, and an `Unsafe` cache never enters a plan, so the user could not
+        // act on the finding at all.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let nested = dir.path().join("credentials");
+        std::fs::create_dir_all(&nested).expect("create nested");
+        std::fs::write(nested.join("module.py"), "x").expect("write module");
+        assert_eq!(
+            credential_in_within(dir.path(), CREDENTIAL_SCAN_LIMIT, Duration::from_secs(10)),
+            CredentialScan::Complete(None)
+        );
+
+        // A real secret inside it is still found, by its own name.
+        std::fs::write(nested.join("id_rsa"), "key").expect("write key");
+        assert_eq!(
+            credential_in_within(dir.path(), CREDENTIAL_SCAN_LIMIT, Duration::from_secs(10)),
+            CredentialScan::Complete(Some(
+                ["credentials", "id_rsa"].join(std::path::MAIN_SEPARATOR_STR)
+            ))
+        );
+    }
+
+    #[test]
+    fn a_public_certificate_bundle_is_not_a_credential() {
+        // `cacert.pem` arrives with botocore, certifi and most Python images. The
+        // name says `.pem`; the content says the file is public.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        std::fs::write(
+            dir.path().join("cacert.pem"),
+            "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        )
+        .expect("write bundle");
+        assert_eq!(
+            credential_in_within(dir.path(), CREDENTIAL_SCAN_LIMIT, Duration::from_secs(10)),
+            CredentialScan::Complete(None)
+        );
+
+        // The same extension holding a private key still blocks.
+        std::fs::write(
+            dir.path().join("server.pem"),
+            "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n",
+        )
+        .expect("write key");
+        assert_eq!(
+            credential_in_within(dir.path(), CREDENTIAL_SCAN_LIMIT, Duration::from_secs(10)),
+            CredentialScan::Complete(Some("server.pem".to_string()))
         );
     }
 

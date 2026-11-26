@@ -127,9 +127,28 @@ fn repository(path: &Path, warnings: &mut Vec<String>) -> WorkspaceRepository {
         .filter(|name| !name.is_empty())
         .map_or(fallback, str::to_string);
     WorkspaceRepository {
-        path: path.display().to_string(),
+        path: host_path(path),
         name,
         worktree_count: worktree_count(path, warnings),
+    }
+}
+
+/// The path as this host writes it.
+///
+/// Discovery starts from the string the user typed, and `read_dir` keeps that
+/// string as the prefix of every child it yields: a root typed `C:/Src` produced
+/// `C:/Src\repo`. Both are valid on Windows, but every other path in the window —
+/// and every path Git reports — uses the platform separator, so one line showed
+/// two. The snapshot is a display string and a scan path, so it is written the
+/// way the host writes paths.
+fn host_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        // A file name cannot contain `/` on Windows; every one of them is a
+        // separator here, including in a UNC prefix.
+        text.replace('/', "\\")
+    } else {
+        text.into_owned()
     }
 }
 
@@ -160,7 +179,7 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
         ));
         return Ok(WorkspaceSnapshot {
             schema_version: WORKSPACE_SCHEMA_VERSION,
-            root: root.display().to_string(),
+            root: host_path(&root),
             scanned_at: format_rfc3339(SystemTime::now()),
             repositories,
             warnings,
@@ -233,7 +252,7 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
 
     Ok(WorkspaceSnapshot {
         schema_version: WORKSPACE_SCHEMA_VERSION,
-        root: root.display().to_string(),
+        root: host_path(&root),
         scanned_at: format_rfc3339(SystemTime::now()),
         repositories,
         warnings,
@@ -281,15 +300,47 @@ mod tests {
             .iter()
             .map(|repo| repo.path.as_str())
             .collect();
-        assert!(paths.iter().any(|path| path.ends_with("/one")));
-        assert!(paths.iter().any(|path| path.ends_with("/nested/two")));
+        // Paths carry the host's separator, so compare components rather than
+        // matching a `/`-shaped string: `C:\…\one` must satisfy this too.
+        let has_component = |name: &str| {
+            paths.iter().any(|path| {
+                Path::new(path)
+                    .components()
+                    .any(|part| part.as_os_str() == name)
+            })
+        };
+        assert!(paths.iter().any(|path| Path::new(path).ends_with("one")));
+        assert!(paths
+            .iter()
+            .any(|path| Path::new(path).ends_with("nested/two")));
         assert!(
-            !paths.iter().any(|path| path.contains("/.worktrees/")),
+            !has_component(".worktrees"),
             "a worktree is not a separate workspace repository"
         );
         assert!(
-            !paths.iter().any(|path| path.contains("/node_modules/")),
+            !has_component("node_modules"),
             "dependency trees are not searched for repositories"
+        );
+    }
+
+    /// A root typed with forward slashes used to yield mixed paths — `C:/Src\repo`
+    /// — because `read_dir` keeps the prefix it was given. The window then showed
+    /// two separator styles on one line, and the path travelled into the scan and
+    /// the recent-projects list in that shape.
+    #[cfg(windows)]
+    #[test]
+    fn a_root_typed_with_slashes_is_reported_with_backslashes() {
+        let root = temp_workspace();
+        make_repo(&root.path().join("one"));
+        let typed = root.path().to_string_lossy().replace('\\', "/");
+
+        let snapshot = discover_workspace(&typed).expect("discover");
+        assert_eq!(snapshot.root, root.path().display().to_string());
+        assert_eq!(snapshot.repositories.len(), 1);
+        assert!(
+            !snapshot.repositories[0].path.contains('/'),
+            "{} still carries a forward slash",
+            snapshot.repositories[0].path
         );
     }
 
