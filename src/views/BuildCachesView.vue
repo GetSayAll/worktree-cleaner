@@ -113,7 +113,17 @@ onMounted(() => {
     buildCacheSnapshot.value = null;
     selectedBuildCaches.value = [];
   }
-  if (!buildCacheSnapshot.value && buildCacheRoot.value) void startBuildCacheScan();
+  // An empty result from an old, narrower scan is worth retrying: the current
+  // search also looks in parent folders, which is where this project's cache
+  // lives. A non-empty result is left alone.
+  const emptyResult = buildCacheSnapshot.value?.records.length === 0;
+  if ((!buildCacheSnapshot.value || emptyResult) && buildCacheRoot.value) {
+    if (emptyResult) {
+      buildCacheSnapshot.value = null;
+      selectedBuildCaches.value = [];
+    }
+    void startBuildCacheScan();
+  }
 });
 
 async function chooseFolder() {

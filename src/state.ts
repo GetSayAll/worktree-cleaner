@@ -19,7 +19,7 @@ import type {
 } from "./types";
 import { SEVERITY_RANK } from "./types";
 import { applyLocale, messages, watchSystemLocale } from "./i18n";
-import { compareSizeNullsLast, formatBytes, isUnder, pathMatchesRule } from "./format";
+import { compareSizeNullsLast, formatBytes, isUnder, normalizePathKey, pathMatchesRule } from "./format";
 import {
   executePlan,
   isDesktop,
@@ -485,6 +485,30 @@ function cacheScopeFor(workspaceRoot: string, requested?: string): string {
   return recentAncestor ?? workspaceRoot;
 }
 
+/**
+ * The project and a few parent folders to search for tagged build caches.
+ *
+ * A repository is normally opened from a developer root, while its build output
+ * may sit beside it under that root (`design-artifacts`, a shared build cache).
+ * The user selects the repository, not the cache folder; walking three levels up
+ * finds that common layout without asking them to know the path. The home
+ * directory and filesystem roots are never searched: a project needs at least
+ * three path components for an ancestor to be considered.
+ */
+function cacheSearchScopes(root: string): string[] {
+  let current = normalizePathKey(root).replace(/\/+$/, "");
+  const scopes: string[] = [];
+  for (let level = 0; level < 3; level += 1) {
+    const parts = current.split("/").filter(Boolean);
+    if (parts.length < 3) break;
+    scopes.push(current);
+    const slash = current.lastIndexOf("/");
+    if (slash <= 0) break;
+    current = current.slice(0, slash);
+  }
+  return scopes.length > 0 ? scopes : [root];
+}
+
 export async function startScan(path: string, buildCacheScope?: string) {
   if (executing.value) return;
   const target = path.trim();
@@ -533,11 +557,14 @@ export async function startScan(path: string, buildCacheScope?: string) {
       view.value = "welcome";
       return;
     }
-    const cacheScope = cacheScopeFor(workspace.root, buildCacheScope);
+    const cacheScope =
+      workspace.repositories.length > 1
+        ? workspace.root
+        : cacheScopeFor(workspace.root, buildCacheScope);
     if (workspace.repositories.length > 1) {
       buildCacheRoot.value = cacheScope;
       enterBuildCacheStage();
-      await runBuildCacheScan(cacheScope);
+      await runBuildCacheScan(cacheScope, false);
       if (scanState.cancelled) return;
       finishWorkspace(workspace);
       return;
@@ -549,7 +576,7 @@ export async function startScan(path: string, buildCacheScope?: string) {
     if (scanState.cancelled) return;
     buildCacheRoot.value = cacheScope;
     enterBuildCacheStage();
-    await runBuildCacheScan(cacheScope);
+    await runBuildCacheScan(cacheScope, true);
     if (scanState.cancelled) return;
     finishScan(result);
   } catch (error) {
@@ -1219,7 +1246,7 @@ export function toggleGroupBuildCaches(paths: string[], select: boolean) {
  * the scanning page can await it. The exported entry point below is the guarded
  * one.
  */
-async function runBuildCacheScan(root: string) {
+async function runBuildCacheScan(root: string, searchAncestors = false) {
   buildCacheScanning.value = true;
   buildCacheError.value = false;
   buildCacheLastResult.value = [];
@@ -1245,18 +1272,41 @@ async function runBuildCacheScan(root: string) {
   }
   record("scan.started", root);
   try {
-    const result = await scanGeneratedCaches(root, {
+    const options = {
       per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
       recent_activity_days: settings.active_days,
       whitelist: settings.whitelist_paths
-    });
-    buildCacheSnapshot.value = result;
-    buildCacheRoot.value = result.root;
+    };
+    const scopes = searchAncestors ? cacheSearchScopes(root) : [root];
+    const records = new Map<string, ArtifactRecord>();
+    let result: GeneratedCacheSnapshot | null = null;
+    let recordScope = "";
+    let warnings: string[] = [];
+    for (const scope of scopes) {
+      const candidate = await scanGeneratedCaches(scope, options);
+      result = candidate;
+      for (const record of candidate.records) records.set(record.path, record);
+      if (candidate.records.length > 0) {
+        if (recordScope === "") recordScope = candidate.root;
+        warnings = [...warnings, ...candidate.warnings];
+      }
+    }
+    if (result === null) throw new Error("build-cache scan returned no result");
+    const merged: GeneratedCacheSnapshot = {
+      ...result,
+      root: recordScope || result.root,
+      records: [...records.values()],
+      // An empty parent is not a warning once a child supplied caches. If nothing
+      // was found anywhere, keep the last scan's honest "no tagged roots" note.
+      warnings: records.size > 0 ? warnings : result.warnings
+    };
+    buildCacheSnapshot.value = merged;
+    buildCacheRoot.value = merged.root;
     buildCacheSample.value = false;
     applyBuildCacheDefaultSelection();
-    record("scan.finished", result.root, {
+    record("scan.finished", merged.root, {
       worktrees: 0,
-      artifacts: result.records.length,
+      artifacts: merged.records.length,
       sample: false
     });
   } catch {
@@ -1275,7 +1325,7 @@ export async function startBuildCacheScan() {
     buildCacheError.value = false;
     return;
   }
-  await runBuildCacheScan(root);
+  await runBuildCacheScan(root, true);
 }
 
 /** Runs the selected build-root moves after their own re-check. */
