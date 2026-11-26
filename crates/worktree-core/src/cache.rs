@@ -27,7 +27,9 @@ use serde::{Deserialize, Serialize};
 use crate::artifact::{credential_in_within, credential_in_worktree, measure_dir, CredentialScan};
 use crate::cleanup::{move_to_trash, ExecuteOptions, ExecutionOutcome};
 use crate::log;
-use crate::path::{is_in_system_trash, validate_path_for_deletion, whitelist_hit, DeletionContext};
+use crate::path::{
+    host_path, is_in_system_trash, validate_path_for_deletion, whitelist_hit, DeletionContext,
+};
 use crate::reason::{Reason, ReasonCode, SafetyAssessment, SafetyStatus};
 use crate::timefmt::{elapsed_days, format_rfc3339, humanize_days};
 use crate::{
@@ -370,7 +372,7 @@ fn collect_generated_sources(
             Err(error) => {
                 warnings.push(format!(
                     "{} could not be read while looking for build caches: {error}",
-                    directory.display()
+                    host_path(&directory)
                 ));
                 continue;
             }
@@ -420,7 +422,7 @@ pub fn scan_generated_caches(root: &Path, options: &CacheScanOptions) -> Generat
     } else {
         warnings.push(format!(
             "the build-cache root does not exist or is not a directory: {}",
-            root.display()
+            host_path(&root)
         ));
     }
 
@@ -433,13 +435,13 @@ pub fn scan_generated_caches(root: &Path, options: &CacheScanOptions) -> Generat
     if records.is_empty() && warnings.is_empty() {
         warnings.push(format!(
             "no directories carrying CACHEDIR.TAG were found below {}",
-            root.display()
+            host_path(&root)
         ));
     }
 
     GeneratedCacheSnapshot {
         schema_version: GENERATED_CACHE_SCHEMA_VERSION,
-        root: root.display().to_string(),
+        root: host_path(&root),
         scanned_at: format_rfc3339(SystemTime::now()),
         records,
         warnings,
@@ -467,7 +469,7 @@ fn scan_sources(sources: &[CacheSource], options: &CacheScanOptions) -> CacheSna
             Err(error) => {
                 warnings.push(format!(
                     "{} could not be inspected: {error}",
-                    source.path.display()
+                    host_path(&source.path)
                 ));
                 continue;
             }
@@ -502,7 +504,7 @@ fn check_cache(
 ) -> Option<ArtifactRecord> {
     let path = source.path.as_path();
     let mut reasons = Vec::new();
-    let dir_text = path.display().to_string();
+    let dir_text = host_path(path);
     let link_meta = std::fs::symlink_metadata(path).ok()?;
     let is_symlink = link_meta.file_type().is_symlink();
     let mut symlink_target = None;
@@ -512,14 +514,14 @@ fn check_cache(
             Ok(target) => {
                 let root =
                     std::fs::canonicalize(&source.root).unwrap_or_else(|_| source.root.clone());
-                symlink_target = Some(target.display().to_string());
+                symlink_target = Some(host_path(&target));
                 if target.starts_with(&root) {
                     reasons.push(Reason::review(
                         ReasonCode::AfCannotVerify,
                         "could not complete the check",
                         format!(
                             "symlink target {} is inside the cache root; deleting it removes only the link",
-                            target.display()
+                            host_path(&target)
                         ),
                     ));
                 } else {
@@ -528,8 +530,8 @@ fn check_cache(
                         "symlink pointing outside the cache root",
                         format!(
                             "target {} is outside {}; deleting the link would leave an unrelated directory in place",
-                            target.display(),
-                            source.root.display()
+                            host_path(&target),
+                            host_path(&source.root)
                         ),
                     ));
                 }
@@ -548,7 +550,7 @@ fn check_cache(
         reasons.push(Reason::blocking(
             ReasonCode::AfWhitelisted,
             "protected by a whitelist rule",
-            format!("matches the whitelist rule {}", rule.display()),
+            format!("matches the whitelist rule {}", host_path(&rule)),
         ));
     }
 
@@ -670,7 +672,7 @@ fn check_cache(
         path: dir_text,
         kind: source.kind.to_string(),
         ecosystem: "system".to_string(),
-        project_root: source.root.display().to_string(),
+        project_root: host_path(&source.root),
         worktree_path: None,
         size_bytes: measurement.bytes,
         file_count: measurement.files,
@@ -1059,6 +1061,29 @@ mod tests {
                 .iter()
                 .all(|record| !record.path.contains("plain-directory")),
             "an untagged directory is not a build cache"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_generated_cache_under_a_slash_root_is_reported_with_backslashes() {
+        // The scope is the user's typed root, and `read_dir` keeps its `/` prefix
+        // while appending `\`: `D:/Src\repo\target` was shown with both separators.
+        let root = temp();
+        let build = root.path().join("host-build");
+        std::fs::create_dir_all(&build).expect("build root");
+        std::fs::write(build.join("CACHEDIR.TAG"), b"Signature: cache\n").expect("cache tag");
+        std::fs::write(build.join("blob"), b"build state").expect("build output");
+        backdate_tree(&build, 10);
+        let typed = root.path().to_string_lossy().replace('\\', "/");
+
+        let snapshot = scan_generated_caches(Path::new(&typed), &options());
+        assert_eq!(snapshot.records.len(), 1);
+        assert!(!snapshot.root.contains('/'), "{}", snapshot.root);
+        assert!(
+            !snapshot.records[0].path.contains('/'),
+            "{}",
+            snapshot.records[0].path
         );
     }
 

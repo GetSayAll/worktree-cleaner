@@ -341,6 +341,24 @@ pub fn expand_tilde(raw: &str) -> PathBuf {
     PathBuf::from(trimmed)
 }
 
+/// The path as this host writes it.
+///
+/// A path built by appending to a string the user typed keeps that string's
+/// separators: `read_dir("C:/Src")` yields `C:/Src\repo`. Both are valid on
+/// Windows, but every other path in the window — and every path Git reports —
+/// uses the platform separator, so one line showed two. Use this for any path
+/// that enters a snapshot, a reason or an audit line.
+pub(crate) fn host_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        // A file name cannot contain `/` on Windows; every one of them is a
+        // separator here, including in a UNC prefix.
+        text.replace('/', "\\")
+    } else {
+        text.into_owned()
+    }
+}
+
 /// The user's home directory, or an empty path when it cannot be determined.
 fn home_dir() -> PathBuf {
     for variable in ["HOME", "USERPROFILE"] {

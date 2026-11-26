@@ -14,6 +14,21 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   discovery stops at `CACHEDIR.TAG` build roots and skips `checkouts`,
   `SourcePackages` and temporary CI trees, so SwiftPM's per-build copies of
   Sparkle or Sentry are not offered as projects to scan.
+- **A portable Git's checkout settings are read.** libgit2 looks for a system
+  config only under ProgramData and Program Files, so the Git that another
+  application ships beside its own executable was invisible: its
+  `core.autocrlf=true` was missed and every CRLF worktree read as modified. The
+  installation on `PATH` is now consulted too, by reading `<prefix>/etc/gitconfig`
+  without starting the program.
+- **A credential is a secret, not a name.** A directory named `credentials` is read
+  rather than matched, and a `.pem` is decided by its content: a public certificate
+  bundle such as botocore's `cacert.pem` no longer makes an artifact `Unsafe`, while
+  a private key still does. In a system cache a credential hit is `Review`, not
+  `Unsafe`: the evidence names the file, and the reader confirms before selecting it.
+- **A discovered repository keeps one spelling.** Workspace discovery and
+  build-cache scans write their paths with the host's separator instead of mixing
+  the `/` the user typed with the `\` they appended, and the recent-project list
+  treats two spellings of one Windows directory as one project.
 
 ### Changed
 
@@ -66,24 +81,6 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Finder or File Explorer.
 - **Unknown agent labels explain themselves.** The worktree list says when neither
   the path nor the branch carries an agent marker, without guessing.
-
-### Fixed
-
-- **A portable Git's checkout settings are read.** libgit2 looks for a system
-  config only under ProgramData and Program Files, so the Git that another
-  application ships beside its own executable was invisible: its
-  `core.autocrlf=true` was missed and every CRLF worktree read as modified. The
-  installation on `PATH` is now consulted too, by reading `<prefix>/etc/gitconfig`
-  without starting the program.
-- **A credential is a secret, not a name.** A directory named `credentials` is read
-  rather than matched, and a `.pem` is decided by its content: a public certificate
-  bundle such as botocore's `cacert.pem` no longer makes an artifact `Unsafe`, while
-  a private key still does. In a system cache a credential hit is `Review`, not
-  `Unsafe`: the evidence names the file, and the reader confirms before selecting it.
-- **A discovered repository keeps one spelling.** Discovery writes its paths with
-  the host's separator instead of mixing the `/` the user typed with the `\` it
-  appended, and the recent-project list treats two spellings of one Windows
-  directory as one project.
 
 ## [0.2.1] — 2026-11-21
 
