@@ -14,7 +14,10 @@ never through `rm -rf`.
 
 ## Screenshots
 
-The four pages, in the order a cleanup takes.
+The four pages, in the order a cleanup takes. Choose a platform.
+
+<details name="screenshots" open>
+<summary>macOS</summary>
 
 ![The Project page, with no repository chosen yet](docs/screenshots/project.webp)
 
@@ -31,6 +34,29 @@ The four pages, in the order a cleanup takes.
 ![The Cleanup plan page, reviewed before anything is executed](docs/screenshots/cleanup-plan.webp)
 
 *Cleanup plan — the whole plan is shown before anything is executed.*
+
+</details>
+
+<details name="screenshots">
+<summary>Windows (Chinese UI)</summary>
+
+![The Project page in Chinese on Windows, with no repository chosen yet](docs/screenshots/windows/project.webp)
+
+*Project — pick a repository by path, folder picker, or drag and drop.*
+
+![The scan in progress in Chinese on Windows, with each read-only phase listed](docs/screenshots/windows/scanning.webp)
+
+*Scanning — read-only, with every phase listed as it runs.*
+
+![The Overview page in Chinese on Windows, listing every worktree and build artifact with its verdict](docs/screenshots/windows/overview.webp)
+
+*Overview — every worktree and artifact, with its verdict and the evidence behind it.*
+
+![The Cleanup plan page in Chinese on Windows, reviewed before anything is executed](docs/screenshots/windows/cleanup-plan.webp)
+
+*Cleanup plan — the whole plan is shown before anything is executed.*
+
+</details>
 
 ---
 
