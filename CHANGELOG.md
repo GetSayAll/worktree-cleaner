@@ -25,6 +25,11 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bundle such as botocore's `cacert.pem` no longer makes an artifact `Unsafe`, while
   a private key still does. In a system cache a credential hit is `Review`, not
   `Unsafe`: the evidence names the file, and the reader confirms before selecting it.
+- **A tagged root inside the repository is not counted twice.** A direct scan
+  searches the repository itself, so its own `target/` arrived from the artifact
+  walk and from the build-cache walk; both were selected and the confirmation
+  promised the same directory and its bytes twice. A build-cache record the
+  artifact walk already covers is left to the artifact channel.
 - **A discovered repository keeps one spelling.** Workspace discovery and
   build-cache scans write their paths with the host's separator instead of mixing
   the `/` the user typed with the `\` they appended, and the recent-project list
