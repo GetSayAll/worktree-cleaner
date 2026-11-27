@@ -679,6 +679,27 @@ function finishWorkspace(workspace: WorkspaceSnapshot) {
   view.value = "workspace";
 }
 
+/**
+ * Drops build-cache records the artifact walk already reports.
+ *
+ * A direct scan searches the repository itself as one of its cache scopes, so a
+ * tagged `target/` arrives twice: once as an artifact and once as a build cache.
+ * Both are `Safe`, both are selected by default, and the confirmation then
+ * promises the same directory and its bytes twice — the second move is skipped at
+ * execution because the first has already moved it. The artifact channel owns a
+ * path that is already an artifact; the build-cache channel is for roots the
+ * artifact walk does not reach.
+ */
+export function withoutProjectArtifacts(
+  records: ArtifactRecord[],
+  artifacts: ArtifactRecord[]
+): ArtifactRecord[] {
+  if (artifacts.length === 0) return records;
+  const fold = hostOs() === "windows";
+  const covered = new Set(artifacts.map((artifact) => pathIdentityKey(artifact.path, fold)));
+  return records.filter((record) => !covered.has(pathIdentityKey(record.path, fold)));
+}
+
 function finishScan(result: ProjectSnapshot, sample = false) {
   clearTimers();
   scanState.running = false;
@@ -693,6 +714,15 @@ function finishScan(result: ProjectSnapshot, sample = false) {
     sample
   });
   applyDefaultSelection();
+  // The build-cache stage ran before this snapshot existed, so its inventory could
+  // still hold a root that is also an artifact of this repository.
+  if (buildCacheSnapshot.value) {
+    const records = withoutProjectArtifacts(buildCacheSnapshot.value.records, result.artifacts);
+    if (records.length !== buildCacheSnapshot.value.records.length) {
+      buildCacheSnapshot.value = { ...buildCacheSnapshot.value, records };
+      applyBuildCacheDefaultSelection();
+    }
+  }
   view.value = "overview";
   if (sample && !buildCacheSnapshot.value) {
     buildCacheSnapshot.value = mockGeneratedCacheSnapshot;
@@ -1371,7 +1401,10 @@ async function runBuildCacheScan(root: string, searchAncestors = false) {
     const merged: GeneratedCacheSnapshot = {
       ...result,
       root: recordScope || result.root,
-      records: [...records.values()],
+      // A refresh runs with the project snapshot in hand; the initial scan runs
+      // before it, and `finishScan` applies the same filter once the snapshot
+      // exists.
+      records: withoutProjectArtifacts([...records.values()], snapshot.value?.artifacts ?? []),
       // An empty parent is not a warning once a child supplied caches. If nothing
       // was found anywhere, keep the last scan's honest "no tagged roots" note.
       warnings: records.size > 0 ? warnings : result.warnings

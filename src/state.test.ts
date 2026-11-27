@@ -4,7 +4,7 @@ import { assess } from "./types";
 import type { ExecutionOutcome, ResultEntry } from "./types";
 import { basename, isAbsolutePath, normalizePathKey, pathMatchesRule } from "./format";
 import { messages } from "./i18n";
-import { primaryReason, cacheSearchScopes } from "./state";
+import { primaryReason, cacheSearchScopes, withoutProjectArtifacts } from "./state";
 
 // The state module keeps mutable refs at module scope, so every test imports a
 // fresh copy: `vi.resetModules()` clears the registry and the dynamic import below
@@ -791,6 +791,20 @@ describe("group selection and blocked execution", () => {
 });
 
 describe("combined project and build-cache cleanup", () => {
+  it("keeps a tagged root that is already an artifact out of the build-cache channel", () => {
+    // The direct scan searches the repository itself, so its own tagged `target/`
+    // arrives from the artifact walk and the build-cache walk. Counting it twice
+    // promised 748 MB for 728 MB of data and left one move to be skipped.
+    const artifact = { ...mockSnapshot.artifacts[0], path: "/repo/target" };
+    const duplicate = { ...mockGeneratedCacheSnapshot.records[0], path: "\\repo\\target" };
+    const sibling = { ...mockGeneratedCacheSnapshot.records[0], path: "/repo/host-build" };
+
+    expect(withoutProjectArtifacts([duplicate, sibling], [artifact]).map((record) => record.path)).toEqual([
+      "/repo/host-build"
+    ]);
+    expect(withoutProjectArtifacts([duplicate], [])).toHaveLength(1);
+  });
+
   it("runs selected build caches through their own executor in one confirmation", async () => {
     const cachePath = mockGeneratedCacheSnapshot.records[0].path;
     const { state, plans, cachePlans } = await freshStateWithExecutor({

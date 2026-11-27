@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::git::GitRunner;
 use crate::git2_runner::Git2Runner;
-use crate::path::{expand_tilde, is_in_system_trash};
+use crate::path::{expand_tilde, host_path, is_in_system_trash};
 use crate::timefmt::format_rfc3339;
 use crate::worktree::{parse_worktree_list, WorktreeEntry};
 use crate::{ScanError, WorkspaceRepository, WorkspaceSnapshot, WORKSPACE_SCHEMA_VERSION};
@@ -234,25 +234,6 @@ fn sort_repositories(repositories: &mut [WorkspaceRepository]) {
             (None, None) => left.path.cmp(&right.path),
         },
     );
-}
-
-/// The path as this host writes it.
-///
-/// Discovery starts from the string the user typed, and `read_dir` keeps that
-/// string as the prefix of every child it yields: a root typed `C:/Src` produced
-/// `C:/Src\repo`. Both are valid on Windows, but every other path in the window —
-/// and every path Git reports — uses the platform separator, so one line showed
-/// two. The snapshot is a display string and a scan path, so it is written the
-/// way the host writes paths.
-fn host_path(path: &Path) -> String {
-    let text = path.to_string_lossy();
-    if cfg!(windows) {
-        // A file name cannot contain `/` on Windows; every one of them is a
-        // separator here, including in a UNC prefix.
-        text.replace('/', "\\")
-    } else {
-        text.into_owned()
-    }
 }
 
 /// Finds the Git repository roots below `path`.

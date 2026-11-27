@@ -313,7 +313,8 @@ describe("the app shell", () => {
 
     expect(host.textContent).toContain("Build caches");
     expect(host.textContent).toContain("host-build");
-    expect(host.textContent).toContain("Move build caches to the Trash");
+    // The word is the host's: "Trash" on macOS, "Recycle Bin" on Windows.
+    expect(host.textContent).toContain(messages.plan.channelC);
 
     state.view.value = "welcome";
     state.snapshot.value = null;
