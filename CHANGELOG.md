@@ -52,6 +52,11 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   names ending in `.env` now match the credential table. A worktree holding one is
   `Unsafe` instead of an unclassified Review, so a group action cannot delete the
   local secret.
+- **Removing a whole clone works on Windows.** Git for Windows marks the object
+  files under `.git/objects` read-only, and the shell refuses to recycle a tree
+  containing them with `access denied to the source`. The mover now clears the
+  read-only attribute after that exact refusal and retries, so the clone still
+  leaves as one recoverable Recycle Bin entry instead of failing.
 
 ## [0.3.0] — 2026-11-28
 
