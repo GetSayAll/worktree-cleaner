@@ -3,10 +3,26 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] — 2026-11-28
 
 ### Changed
 
+- **Selecting a repository finds its local clones.** Discovery now searches the
+  selected repository's parent folder for independent clones whose `origin` remote
+  matches, folding `https`, `ssh` and `git@` spellings. The result is a repository
+  list; each row still opens the ordinary one-repository scan. Linked worktrees and
+  repositories without `origin` are not expanded.
+- **The repository list can scan all found clones in one action.** Each repository
+  is scanned into its own snapshot, the list shows progress and per-repository
+  counts, and a failure in one repository does not stop the others. Opening a
+  result does not rescan, but cleanup remains one confirmed plan per repository;
+  the snapshots are never merged.
+- **A redundant clone can be removed as a whole.** The overview offers a separate
+  clone-level action when the main worktree is clean and every linked worktree is
+  Safe. It runs the clone root's path guard before anything moves, removes linked
+  worktrees through Git, re-checks the main worktree, and moves the whole clone to
+  the system Trash; a failed linked removal or a protected clone root leaves the
+  main clone in place. The main worktree remains protected from ordinary cleanup.
 - **Review worktrees are grouped by what removal can lose.** The clean/no-untracked
   and untracked groups can be selected with one explicit action; recent activity,
   detached HEAD, an index lock, and unfinished checks stay per row. The cleanup
@@ -18,9 +34,10 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A clean worktree no longer needs a merged branch when only replaceable content
   is left.** `wt.reclaimable_clean` keeps the branch ref and promotes the worktree
   to Safe when every ignored entry is a Safe artifact record, a verified
-  reproducible nested checkout, a zero-byte file, or an empty directory. It never
-  overrides a credential, dirty or untracked file, active lock, incomplete check,
-  or another worktree. The executor repeats the proof with a fresh artifact scan.
+  reproducible nested checkout, Finder's `.DS_Store` metadata, a zero-byte file, or
+  an empty directory. It never overrides a credential, dirty or untracked file,
+  active lock, incomplete check, or another worktree. The executor repeats the proof
+  with a fresh artifact scan.
 
 ### Fixed
 
@@ -31,6 +48,10 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `wt.reproducible_checkout` when the checkout is clean, ignored by the parent,
   remote-backed, free of local-only commits or stashes, and free of ignored
   credential files. The rule is based on Git facts, not on a directory name.
+- **Environment-first dotenv names are credentials.** `production.env` and other
+  names ending in `.env` now match the credential table. A worktree holding one is
+  `Unsafe` instead of an unclassified Review, so a group action cannot delete the
+  local secret.
 
 ## [0.3.0] — 2026-11-28
 
