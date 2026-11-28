@@ -468,11 +468,14 @@ mod tests {
 
     #[test]
     fn timeout_is_enforced() {
-        // A one-nanosecond budget expires before any real command can finish, which
-        // is the same path a hung git process takes.
+        // A one-nanosecond budget expires before a real command can finish, which
+        // is the same path a hung git process takes. `--version` is not slow enough
+        // on a warm runner: it can exit before the first poll, so the test would
+        // report success on a machine that happens to be fast. A shell alias that
+        // sleeps makes the command block for one second on every platform Git runs.
         let runner = ProcessGitRunner::new(Duration::from_nanos(1));
         let error = runner
-            .run(Path::new("."), &["--version"])
+            .run(Path::new("."), &["-c", "alias.wait=!sleep 1", "wait"])
             .expect_err("instant timeout must fire");
         match error {
             GitError::Timeout { .. } => {}
