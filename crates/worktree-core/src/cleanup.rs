@@ -604,6 +604,13 @@ where
 /// when it is refused. The `NSFileManager` call reaches the same Trash
 /// (recoverable, "Put Back" subject to a macOS bug the crate documents) without
 /// asking for anything beyond what the app already has.
+///
+/// On Windows the shell refuses a tree that contains read-only files with
+/// `COPYENGINE_E_ACCESS_DENIED_SRC` (`0x80270021`). Git for Windows marks the
+/// object files under `.git/objects` read-only, so every clone hits this even
+/// though nothing in it is inaccessible. The attribute is not content: clear it
+/// and hand the same tree to the shell again. The retry runs only after that
+/// exact refusal, so an ordinary artifact move pays no extra walk.
 pub(crate) fn move_to_trash(path: &str) -> Result<(), trash::Error> {
     #[allow(unused_mut)]
     let mut context = trash::TrashContext::default();
@@ -612,7 +619,62 @@ pub(crate) fn move_to_trash(path: &str) -> Result<(), trash::Error> {
         use trash::macos::{DeleteMethod, TrashContextExtMacos};
         context.set_delete_method(DeleteMethod::NsFileManager);
     }
-    context.delete(path)
+    let attempt = context.delete(path);
+    #[cfg(windows)]
+    let attempt = match attempt {
+        Err(error) if is_access_denied_source(&error) => {
+            clear_read_only_attributes(Path::new(path)).map_err(|error| {
+                trash::into_unknown(format!(
+                    "could not clear the read-only attribute under {path}: {error}"
+                ))
+            })?;
+            context.delete(path)
+        }
+        result => result,
+    };
+    attempt
+}
+
+/// Whether the shell reported `COPYENGINE_E_ACCESS_DENIED_SRC` for the item.
+#[cfg(windows)]
+fn is_access_denied_source(error: &trash::Error) -> bool {
+    matches!(
+        error,
+        trash::Error::Os { code, .. } if *code as u32 == 0x8027_0021
+    )
+}
+
+/// Clears the Windows read-only attribute under `root`.
+///
+/// Symlinks are skipped: changing attributes must never follow one out of the
+/// tree that is about to move. A directory entry that cannot be read is an error
+/// rather than a silent skip, because the following trash attempt would fail on
+/// the same entry and this way the cause names the path.
+#[cfg(windows)]
+fn clear_read_only_attributes(root: &Path) -> std::io::Result<()> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        let mut permissions = metadata.permissions();
+        if permissions.readonly() {
+            // Deliberate: this is the DOS read-only attribute on Windows, not the
+            // Unix write bits the pedantic lint is about. The tree is already
+            // cleared for the Trash and a clone with writable object files still
+            // restores correctly.
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            std::fs::set_permissions(&path, permissions)?;
+        }
+        if metadata.is_dir() {
+            for entry in std::fs::read_dir(&path)? {
+                stack.push(entry?.path());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Whether a directory the worktree removal reported as removed is still there.
