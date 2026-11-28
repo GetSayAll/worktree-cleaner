@@ -831,16 +831,32 @@ export function canOpen(key: ViewKey): boolean {
 }
 
 export function applyDefaultSelection() {
+  selectedWorktrees.value = [];
+  selectedArtifacts.value = [];
+  selectAllSafe();
+}
+
+/**
+ * Adds every currently Safe record to the selection without clearing an explicit
+ * Review selection. The overview uses this when a cleanup has cleared the
+ * selection and the remaining Safe records are still available.
+ */
+export function selectAllSafe() {
   const snap = snapshot.value;
   if (!snap) return;
-  selectedWorktrees.value = snap.worktrees.filter((w) => w.safety.status === "Safe").map((w) => w.path);
-  selectedArtifacts.value = snap.artifacts
+  const safeWorktrees = snap.worktrees
+    .filter((w) => w.safety.status === "Safe")
+    .map((w) => w.path);
+  const safeArtifacts = snap.artifacts
     .filter((a) => a.safety.status === "Safe")
     // An unmeasurable size is not "below the threshold": hiding it would silently
     // drop an item the user cannot assess (and `visibleArtifacts` keeps it for the
     // same reason).
     .filter((a) => a.size_bytes === null || a.size_bytes >= settings.min_artifact_mb * 1024 * 1024)
     .map((a) => a.path);
+
+  selectedWorktrees.value = [...new Set([...selectedWorktrees.value, ...safeWorktrees])];
+  selectedArtifacts.value = [...new Set([...selectedArtifacts.value, ...safeArtifacts])];
   // Artifacts inside a worktree that is also selected are removed with it; drop
   // them here so `selectedSummary` and `cleanupPlan` never disagree.
   pruneBundledArtifacts();

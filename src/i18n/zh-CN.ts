@@ -71,8 +71,10 @@ export const zhCN = {
     title: "清理规则",
     shortLabel: "规则：",
     hint: "每一行按同一套规则判定；默认只勾选「可安全删除」",
-    safeBody: "工作区干净且工作已在默认分支；或可重建或为空、没有受保护内容的构建产物",
-    reviewBody: "有未合并的工作、未跟踪文件、可能丢失的近期活动，或检查未完成",
+    safeBody:
+      "工作区干净且工作已在默认分支；或分支 ref 会保留，所有忽略项都已证明可生成、可重建或为空；或可重建或为空、没有受保护内容的构建产物",
+    reviewBody:
+      "有未合并且忽略内容无法证明可丢弃的工作、未跟踪文件、可能丢失的近期活动，或检查未完成",
     unsafeBody: "主工作树、未提交改动、凭据、锁定、已跟踪文件或白名单",
     defaultSelected: "默认勾选",
     defaultUnselected: "默认不选",
@@ -80,7 +82,7 @@ export const zhCN = {
     footer:
       "工作树永久删除，分支保留；构建产物进{{trash}}，可以恢复。",
     worktreesSummary:
-      "默认只勾选「可安全删除」；「需人工确认」必须逐项勾选；「禁止删除」不可选",
+      "默认只勾选「可安全删除」；「需人工确认」按删除影响分组，绝不会自动勾选；「禁止删除」不可选",
     artifactsSummary:
       "只删除可重建或为空的产物；其他项留待确认。",
     welcomeSummary:
@@ -106,6 +108,9 @@ export const zhCN = {
       unmerged: "未合并进默认分支",
       untracked: "含有未跟踪文件",
       credentials: "含有疑似凭据文件",
+      reproducible_checkout: "包含可重建的嵌套 checkout",
+      reclaimable_clean:
+        "干净；分支 ref 会保留，所有忽略项都是可生成、可重建或空的",
       // 扫描不再产生：stash 属于仓库而不属于被判定 worktree。保留只为让旧审计日志仍能渲染。
       stash: "存在 stash 条目",
       recent_activity: "活动时间窗口内有过提交",
@@ -471,7 +476,7 @@ export const zhCN = {
       safeSubUnknown: (bytes: string, unknown: number) =>
         `合计 ${bytes} · ${unknown} 项体积未知 · 可删条目默认勾选`,
       reviewLabel: "需人工确认",
-      reviewSub: "未合并 / 最近有改动",
+      reviewSub: "忽略内容未证明 / 最近有改动",
       unsafeLabel: "禁止删除",
       unsafeSub: "主工作树 / 有未提交改动 / 已锁定 / 已提交进仓库",
       reclaimableLabel: "预计可回收",
@@ -488,6 +493,7 @@ export const zhCN = {
     // 可回收卡片下方：选中项里有无法测量的，合计只是下界，用户必须一眼看到。
     selectedUnknown: (n: number) =>
       `${n} 项体积未知，合计为下限。`,
+    selectAllSafe: "选中全部可安全删除项",
     selectHint: "在「工作树」或「构建产物」页面勾选；可删条目默认已勾选",
     adjustSelection: "调整选择",
     generatePlan: "生成清理计划"
@@ -506,6 +512,22 @@ export const zhCN = {
     filterUnsafe: (n: number) => `禁止删除 ${n}`,
     searchPlaceholder: "按路径或分支搜索",
     selectAll: "全选可移除的工作树",
+    reviewGroupHint: (n: number) =>
+      `有 ${n} 个工作树需人工确认；它们按删除影响分组。`,
+    reviewGroupHintAction: "按风险查看",
+    reviewGroupBatchTitle: "无未跟踪文件",
+    reviewGroupBatchImpact:
+      "保留所有分支 ref；不会丢掉未提交或未跟踪文件，但目录内被 Git 忽略的文件会删除。",
+    reviewGroupUntrackedTitle: "有未跟踪文件",
+    reviewGroupUntrackedImpact:
+      "这些未跟踪文件会随工作树一起删除；清理计划会在执行前列出每个文件。",
+    reviewGroupAttentionTitle: "需逐项查看",
+    reviewGroupAttentionImpact:
+      "存在近期活动、游离 HEAD、Git 锁或未完成的检查；这些需要逐项勾选。",
+    reviewGroupCount: (n: number) => `${n} 个工作树`,
+    reviewGroupSelect: (n: number) => `选择这 ${n} 个工作树`,
+    reviewGroupClear: "清除本组选择",
+    reviewGroupIndividual: "逐项选择",
     details: "详情",
     collapse: "收起",
     gitFacts: "Git 事实",
@@ -833,6 +855,24 @@ export const zhCN = {
       // 两条推迟的检查说明删除前会核对什么，避免把「已勾选」理解成「一定删除」。
       identityNotRun: "执行前复查路径与体积",
       activityNotRun: "执行前检查新改动"
+    },
+    removalGroups: {
+      safe: "可安全删除",
+      batch: "无未跟踪文件",
+      untracked: "有未跟踪文件",
+      attention: "需逐项查看",
+      meta: (n: number, bytes: string) => `${n} 个工作树 · ${bytes}`,
+      impact: {
+        safe: "检查全部通过，这些条目已默认勾选。",
+        batch:
+          "保留分支 ref；不会丢掉未提交或未跟踪文件，但目录内被 Git 忽略的文件会删除。",
+        untracked:
+          "未跟踪文件会随工作树一起删除；执行前会在下方列出每个文件。",
+        attention:
+          "存在近期活动、游离 HEAD、Git 锁或未完成的检查；执行前请逐项查看。"
+      },
+      showPaths: (n: number) => `显示 ${n} 个路径`,
+      hidePaths: "收起路径"
     },
     channelA: "永久移除工作树",
     items: (n: number) => `${n} 项`,

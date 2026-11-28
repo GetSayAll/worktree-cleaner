@@ -35,7 +35,7 @@ All worktrees and build artifacts fall into one of three levels, and the level i
 
 | Level | Meaning | UI presentation | Selectable by default |
 |---|---|---|---|
-| **Safe** (safe to delete) | all checks pass, with positive evidence (merged / already gitignored) | green badge | yes, checked by default |
+| **Safe** (safe to delete) | all checks pass, with positive evidence (the work is in the default branch, the branch ref is kept with only proven-disposable ignored entries, or an artifact is rebuildable and gitignored) | green badge | yes, checked by default |
 | **Review** (needs confirmation) | not dangerous, but with uncertain factors (unmerged, recent activity on work not yet in the default branch, read failure) | amber badge | yes, but **not** checked by default; the user must check it explicitly |
 | **Unsafe** (must not be deleted) | hits a hard prohibition condition (main working tree, uncommitted changes, credential files, Git-locked, already tracked) | red badge | no, checkbox disabled |
 
@@ -80,6 +80,7 @@ This is a launcher, not a batch-cleanup mode. Selecting a repository starts the 
 
 - Three large cards: safe to clean (count + releasable space), needs confirmation (count), must not be deleted (count).
 - Main number: **estimated releasable space** (the sum of checked Safe + Review items). It is an estimate and is presented as one: items whose size could not be measured contribute nothing to it and are counted separately, so any total that includes one is shown as a lower bound (`≥`).
+- Safe items are selected by default. After a run, the selection is cleared, but the remaining Safe items stay selectable: when nothing is selected, the overview offers "Select all Safe items", which adds them back without clearing any explicit Review selection.
 - Two summary lists: the 5 largest worktrees and the 5 largest build artifacts; each row includes a level badge and a one-line primary reason, and clicking jumps to the corresponding page.
 - Scan warning area (if any).
 - Primary button: "Generate cleanup plan" — disabled with an explanation when nothing is checked.
@@ -99,6 +100,14 @@ Expanded detail panel:
 - **Reason list**: one line per reason; green is positive evidence (merged / clean), amber and red are risk items, each followed by its evidence text.
 
 Top: search box + filter (All / Safe / Review / Unsafe / Locked / Unmerged). The list is ordered by size descending, with an unmeasurable size last and the path as a stable tie-breaker.
+
+In the Review filter, rows are grouped by **what removal can lose**, not by a new score:
+
+- **No untracked files**: no uncommitted changes and no untracked files; the Review reasons are branch facts (unmerged, no upstream, or commits not pushed). Branch refs are kept; Git-ignored files inside the directory are removed. One explicit group action may select the group.
+- **Has untracked files**: the untracked files are deleted with the directory. The group action is offered only beside the impact text, and the cleanup plan lists every file before execution.
+- **Needs an individual look**: recent activity, detached HEAD, an index lock, or a check that did not finish. These rows have no group action and must be selected one by one.
+
+No lane is selected automatically, and an unrecognised Review reason lands in the individual lane. A group action is still a `Review` selection under D12, not a new safety level.
 
 Bottom floating action bar: `N selected · X to free` → "View cleanup plan".
 
@@ -137,10 +146,11 @@ Split "what will be done" into two channels shown separately, each landing on a 
 **Channel A: remove worktrees**
 
 - Each entry shows: path, branch, and the equivalent Git operation (`git worktree remove <path>`; the app performs it in-process through Git's worktree API).
+- Entries are grouped under the same loss headings as the worktree page. A clean `Review` group with more than three entries starts folded under a header that states the count, size, and impact, so a group selection is not expanded into fifty rows; the reader can expand the exact paths. `Safe`, untracked-file, and individual-review groups stay open.
 - Entries that need `--force` (untracked files present) are marked separately, and the **list of untracked files that will be force-deleted** is listed line by line — this is what users most need to see.
 - Lost worktrees (directory no longer exists) go through `git worktree prune`, with a note that only metadata is cleaned up and no files are touched.
 - Undeletable entries do not appear here, but the footer shows "N undeletable items automatically excluded, view".
-- Sorted by size descending; an unmeasurable size stays last.
+- Within each loss group, entries are sorted by size descending; an unmeasurable size stays last.
 
 **Channel B: move artifact directories to Trash**
 
@@ -321,6 +331,7 @@ The data sources are read-only libgit2 calls; the `.git` file format is never pa
 - the **repository stash list**, read **once per scan** from the repository root. A stash is a repository fact, not a worktree one: `refs/stash` lives in the common Git directory, so every worktree answers with the same list, and worktree removal never touches it. It is carried on the record as a fact and contributes no reason (see §5.1 note).
 - The **HEAD commit time** is taken as "last activity". The directory mtime is *not* part of the signal: it moves only when a top-level entry is created, deleted or renamed, not when a file deeper inside is edited, so a bulk touch (indexer, backup, cleanup script) marks a worktree "recent" that nobody worked in — measured: 22 clean-and-merged worktrees with an 8-10-day-old HEAD were downgraded by one such touch. Genuine recent work is already covered by `wt.dirty` / `wt.untracked` / `wt.agent_active`. If the HEAD time cannot be read, `last_updated_at` stays empty and the failure adds `wt.cannot_verify`; a more severe reason still decides the overall level.
 - the **untracked file list** — shown when `--force`.
+- the **ignored entry list** — `git ls-files --others --ignored --exclude-standard --directory -z`, read for a clean branch candidate. Each top-level entry is proven disposable independently: a Safe artifact record, a verified reproducible nested checkout, a zero-byte file, or a directory of those. A name, a non-empty unknown file, a symlink, another worktree, or an incomplete artifact record is not proof.
 - A bounded walk of the worktree root for credential-looking file names. It skips the recognised artifact directories — the artifact scanner's `af.credentials` checks those when it visits them — and the reproducible dependency and build trees such as `.build`, `SourcePackages` and `checkouts`. Passing the walk's time bound, which is the per-directory budget capped at five seconds, produces `wt.cannot_verify`, never a silent pass.
 
 Decision table:
@@ -330,15 +341,17 @@ Decision table:
 | `wt.main` | is the main working tree | Unsafe | first entry of `git worktree list` |
 | `wt.locked` | has `locked` in porcelain | Unsafe | lock reason (if any) |
 | `wt.dirty` | uncommitted changes > 0 | Unsafe | `N files with uncommitted changes` |
-| `wt.unpushed_branch` | ahead > 0 (known) **and** not merged/absorbed | Review | `N commits not pushed to <upstream>; the branch ref is kept when the worktree is removed` |
+| `wt.unpushed_branch` | ahead > 0 (known), not merged/absorbed, and `wt.reclaimable_clean` does not replace it | Review | `N commits not pushed to <upstream>; the branch ref is kept when the worktree is removed` |
 | `wt.detached` | detached HEAD with no upstream **and** not merged/absorbed | Review | `HEAD is detached` |
-| `wt.no_upstream` | no upstream and the work is not in the default branch (neither merged nor absorbed) | Review | `branch has no upstream and is not merged into main` |
-| `wt.unmerged` | not merged into the default branch | Review | `not merged into main` |
+| `wt.no_upstream` | no upstream and the work is not in the default branch (neither merged nor absorbed), unless `wt.reclaimable_clean` replaces it | Review | `branch has no upstream and is not merged into main` |
+| `wt.unmerged` | not merged into the default branch, unless `wt.reclaimable_clean` replaces it | Review | `not merged into main` |
 | `wt.absorbed` | the files this branch changed relative to the merge base hold the same content in the default branch, though the commits are not ancestors of it | Safe (positive) | `the 2 touched file(s) hold the same content in origin/main` |
 | `wt.absorbed_content_changed` | **No longer emitted.** The old patch-id answer for a matching patch whose files changed afterwards; retained so older audit logs render | Review (old) | old logs only |
 | `wt.untracked` | untracked files > 0 | Review (configurable to Unsafe) | `N untracked files` |
 | `wt.credentials` | on a worktree with no tracked changes, a credential-looking file sits outside the artifact, dependency and build directories, and Git does not track it | Unsafe | `<relative path> is inside; deleting the worktree would delete it too` |
-| `wt.recent_activity` | the HEAD commit is newer than the activity window (default 3 days) **and** the worktree is not clean-and-already-in-the-default-branch | Review | `last activity: 2 days ago` |
+| `wt.reproducible_checkout` | a nested Git checkout is clean, ignored by the parent worktree, has a remote-tracking ref, has no commits reachable only from its HEAD/local branches, and has no stash or ignored credential-looking file | Safe (positive) | `<relative path> is clean, ignored by the parent worktree, and its HEAD/local branches are reachable from <remote ref>` |
+| `wt.reclaimable_clean` | a clean worktree on a branch ref, not main/locked/detached/prunable, with no dirty or untracked files; every ignored top-level entry is a Safe artifact record, a verified reproducible nested checkout with a `.git` directory, a zero-byte file, or a directory of those; no `.git` file, credential, active-lock or incomplete check remains | Safe (positive) | `branch ref <branch> is kept; ignored entries: <evidence>` — replaces `wt.unmerged`, `wt.no_upstream`, `wt.unpushed_branch` and `wt.recent_activity` |
+| `wt.recent_activity` | the HEAD commit is newer than the activity window (default 3 days), the worktree is not clean-and-already-in-the-default-branch, and `wt.reclaimable_clean` does not replace it | Review | `last activity: 2 days ago` |
 | `wt.agent_active` | a `.git/index.lock` exists in the directory | Review | `index.lock present, possibly in use` |
 | `wt.cannot_verify` | any check timed out / no permission / command failed, or the credential walk did not finish | Review | `cannot read status: <reason>` |
 | `wt.whitelisted` | matches the user whitelist | Unsafe | `matches whitelist: <rule>` |
@@ -348,15 +361,24 @@ Decision table:
 
 `wt.unpushed` is no longer emitted. It was the `Unsafe` code for the same branch fact; worktree removal keeps the branch ref, so the code was a branch fact wearing a worktree verdict. The enum keeps it for audit logs written before this change and never reuses it; `wt.unpushed_branch` is the append-only replacement at `Review`.
 
-The necessary and sufficient condition for **Safe**: not the main working tree, not locked, no uncommitted changes, no untracked files, the work is in the default branch (`merged_into_default == Some(true)`, or `absorbed_into_default` with the content check agreeing — no `wt.absorbed_content_changed`), no untracked credential, and no `cannot_verify`. If any one is not satisfied, downgrade.
+The necessary and sufficient condition for **Safe** has two routes. Both require: not the main working tree, not locked, no uncommitted changes, no untracked files, no untracked credential, and no `cannot_verify`.
+
+1. **The work is in the default branch** (`merged_into_default == Some(true)`, or `absorbed_into_default` with the content check agreeing — no `wt.absorbed_content_changed`).
+2. **The branch ref is preserved, and nothing else is lost** — `wt.reclaimable_clean`. The worktree has a branch and is not detached or prunable; every ignored top-level entry is independently proven to be a Safe artifact record, a verified reproducible nested checkout, a zero-byte file, or a directory containing only those. The branch need not be merged or have an upstream. This route replaces `wt.unmerged`, `wt.no_upstream`, `wt.unpushed_branch` and `wt.recent_activity`; it does not replace dirty, untracked, credential, active-lock or `cannot_verify` reasons. A stash is not a condition: it belongs to the repository and survives removal.
+
+If any required fact is missing, downgrade. `wt.reclaimable_clean` is not a name-based bypass: an artifact directory is accepted only from its own Safe record, and an unknown non-empty entry, a symlink, another worktree, or an incomplete artifact record leaves the worktree at `Review`.
 
 **Ahead of the upstream is a branch fact, not a worktree fact.** Worktree removal deletes the directory and keeps every branch ref; the product never runs `git branch -d`. `ahead > 0` therefore says nothing about whether this directory can go. When the work is not in the default branch it is `wt.unpushed_branch` at `Review` — the reader should see the commits, and the branch remains — and when the work is already merged or absorbed it is not emitted at all. This is the same distinction that removed the stash count from the verdict; the stash lives in the common Git directory, and an unpushed commit lives on the branch ref. The old `wt.unpushed` code was `Unsafe` and is retained only for audit logs.
 
-**A recent commit on a clean, already-merged worktree is attention, not risk.** The HEAD time remains the only activity signal (the directory mtime is not used, for the reason above), and `last_updated_at` still carries it to the detail panel. It only becomes a `Review` reason when the worktree is dirty, untracked, or not already in the default branch — the states in which something could still be lost.
+**A recent commit on a clean, already-merged worktree is attention, not risk.** The HEAD time remains the only activity signal (the directory mtime is not used, for the reason above), and `last_updated_at` still carries it to the detail panel. It only becomes a `Review` reason when the worktree is dirty, untracked, or not already in the default branch and not `wt.reclaimable_clean` — the states in which something could still be lost.
 
 **Merged and absorbed are two facts, not one.** `merged_into_default` answers "is this commit an ancestor of the default branch"; `absorbed_into_default` answers "do the files this branch changed hold the same content there", which is a tree comparison over the files the branch touched. A branch that is an ancestor is never also reported as absorbed. Content is the whole absorption answer: a difference — a later revert and an ordinary edit look the same to a tree comparison — is `wt.unmerged` at `Review`, never `Safe`. The old patch-id answer and its `wt.absorbed_content_changed` companion are retained only for audit logs written before the in-process transport. Measured when the content check was introduced: 11 of 33 branches reported `wt.unmerged` were fully absorbed.
 
 **Ignored files are deleted too.** A worktree with no tracked changes can still hold a `.env`, a signing key, or a local configuration file that Git ignores; worktree removal deletes the directory and those files with it. The artifact channel has `af.credentials` for exactly this reason, so the worktree channel runs the same name table at the root, bounded by time. A name that is only a container is decided by its content: a `.pem` blocks when it holds a private key, not when it is a public certificate bundle. A directory named `credentials` is read, not matched by its name. It skips the recognised artifact directories (the artifact scanner checks those) and the reproducible dependency and build trees such as `.build/checkouts`. The walk runs when the worktree has no tracked changes; a dirty worktree is already `Unsafe`, and walking it would only add cost. A hit is `Unsafe`; a partial walk is `Review`. An absent file after a full walk is the only pass. A credential-looking file that Git tracks is not a worktree loss — it is in the repository — so it does not block the directory removal.
+
+**A nested checkout is not a credential just because of its name.** A worktree can contain an ignored nested Git checkout, usually a local dependency copy. When that checkout is clean, ignored by the parent, has a remote-tracking ref, has no commits reachable only from its own HEAD or local branches, and has no stash or ignored credential-looking file, the positive `wt.reproducible_checkout` reason is recorded and the credential walk does not descend into it. The evidence names the nested path and the remote ref; the rule is based on Git facts, not a project-specific directory name such as `.private-dependencies`. If any fact is missing or unreadable, the existing credential rule still applies: an untracked `.env.example` there remains a Review or Unsafe decision, never a silent pass (D3).
+
+**A clean branch does not need to be merged when everything left is replaceable.** The `wt.reclaimable_clean` route exists because worktree removal preserves the branch ref: deleting a clean checkout of an unmerged branch loses the checkout, not the commits. The remaining question is what Git-ignored files disappear with the directory. The rule answers it from evidence, not from a directory name. A recognised artifact name is accepted only when its own artifact record is Safe, so a tracked file, hand-written content, a credential, a nested repository, a symlink, recent writes, or a failed check still blocks promotion. The HEAD commit's own `wt.recent_activity` is replaced by the new reason; an artifact's recent-writes Review is not. A nested checkout is accepted only after `wt.reproducible_checkout` verifies it, and only when its `.git` marker is a directory; a `.git` file (a linked worktree or a submodule) is not auto-promoted because the directory may belong to another checkout. An unknown entry is accepted only when it is empty or contains only empty files/directories; another worktree, including one under `.worktrees/`, is always protected. The ignored-entry walk is bounded; passing the bound adds `wt.cannot_verify`, never a pass. The whole rule is run again in the executor with a fresh artifact scan, so a new non-empty ignored file cannot ride a stale Safe plan.
 
 **A deleted upstream does not hide the file counts.** Git omits `# branch.ab` when the upstream ref is gone, and ahead/behind are then unknown; the changed and untracked entries are still printed. The check reads those counts and reports `wt.dirty` / `wt.untracked` from them. The unknown ahead/behind adds `wt.cannot_verify` only when the work is not already merged or absorbed; a clean worktree whose work is in the default branch is not downgraded for an upstream that no longer exists.
 

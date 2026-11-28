@@ -16,8 +16,22 @@ import ReasonList from "../components/ReasonList.vue";
 import RevealPathButton from "../components/RevealPathButton.vue";
 import { basename, compareSizeNullsLast, formatBytes, formatRelTime, displayPath, isUnder } from "../format";
 import { messages } from "../i18n";
+import { reviewLane, type ReviewLane } from "../worktreeGroups";
 
 type FilterKey = "all" | SafetyStatus;
+
+interface ReviewGroup {
+  key: ReviewLane;
+  items: WorktreeRecord[];
+  /** Attention rows must be selected one by one. */
+  selectable: boolean;
+}
+
+interface Section {
+  key: string;
+  group: ReviewGroup | null;
+  items: WorktreeRecord[];
+}
 
 const filter = ref<FilterKey>("all");
 const query = ref("");
@@ -81,12 +95,110 @@ const filtered = computed<WorktreeRecord[]>(() => {
   );
 });
 
-const selectable = computed(() => filtered.value.filter((item) => item.safety.status !== "Unsafe").map((item) => item.path));
+/**
+ * Review rows grouped by what removing them can lose.
+ *
+ * The default selection still contains only `Safe` rows. These groups change
+ * how a reader confirms `Review`, not the verdict: each group action is an
+ * explicit selection, and the executor re-checks every item afterwards.
+ */
+const reviewGroups = computed<ReviewGroup[]>(() => {
+  const buckets: Record<ReviewLane, WorktreeRecord[]> = {
+    batch: [],
+    untracked: [],
+    attention: []
+  };
+  for (const item of filtered.value) {
+    const lane = reviewLane(item);
+    if (lane) buckets[lane].push(item);
+  }
+  return (["batch", "untracked", "attention"] as const)
+    .map((key) => ({ key, items: buckets[key], selectable: key !== "attention" }))
+    .filter((group) => group.items.length > 0);
+});
+
+const reviewCount = computed(
+  () => worktrees.value.filter((item) => item.safety.status === "Review").length
+);
+
+/**
+ * One section per Review lane; every other filter stays one flat section. The
+ * row markup is shared, so a group header never duplicates or replaces a row.
+ */
+const sections = computed<Section[]>(() => {
+  if (filter.value === "Review") {
+    return reviewGroups.value.map((group) => ({
+      key: group.key,
+      group,
+      items: group.items
+    }));
+  }
+  return filtered.value.length > 0
+    ? [{ key: "flat", group: null, items: filtered.value }]
+    : [];
+});
+
+const selectable = computed(() =>
+  filter.value === "Review"
+    ? []
+    : filtered.value.filter((item) => item.safety.status !== "Unsafe").map((item) => item.path)
+);
 
 const allSelected = computed({
   get: () => selectable.value.length > 0 && selectable.value.every((p) => isSelectedWorktree(p)),
   set: (value: boolean) => toggleGroupWorktrees(selectable.value, value)
 });
+
+function reviewGroupAllSelected(group: ReviewGroup | null): boolean {
+  return Boolean(group && group.items.length > 0 && group.items.every((item) => isSelectedWorktree(item.path)));
+}
+
+function toggleReviewGroup(group: ReviewGroup | null) {
+  if (!group || !group.selectable) return;
+  toggleGroupWorktrees(
+    group.items.map((item) => item.path),
+    !reviewGroupAllSelected(group)
+  );
+}
+
+function reviewGroupSize(group: ReviewGroup | null): string {
+  if (!group) return "";
+  const bytes = group.items.reduce((sum, item) => sum + (item.size_bytes ?? 0), 0);
+  const unknown = group.items.filter((item) => item.size_bytes === null).length;
+  return formatBytes(bytes, { approximate: unknown > 0 });
+}
+
+function reviewGroupTitle(key: ReviewLane): string {
+  switch (key) {
+    case "batch":
+      return messages.worktrees.reviewGroupBatchTitle;
+    case "untracked":
+      return messages.worktrees.reviewGroupUntrackedTitle;
+    case "attention":
+      return messages.worktrees.reviewGroupAttentionTitle;
+  }
+}
+
+function reviewGroupImpact(key: ReviewLane): string {
+  switch (key) {
+    case "batch":
+      return messages.worktrees.reviewGroupBatchImpact;
+    case "untracked":
+      return messages.worktrees.reviewGroupUntrackedImpact;
+    case "attention":
+      return messages.worktrees.reviewGroupAttentionImpact;
+  }
+}
+
+function reviewGroupActionLabel(group: ReviewGroup | null): string {
+  if (!group) return "";
+  if (reviewGroupAllSelected(group)) return messages.worktrees.reviewGroupClear;
+  return messages.worktrees.reviewGroupSelect(group.items.length);
+}
+
+function showReviewGroups() {
+  filter.value = "Review";
+}
 
 function toggleExpanded(path: string) {
   expanded.value = expanded.value.includes(path)
@@ -162,13 +274,42 @@ function stateText(item: WorktreeRecord): string {
       <input v-model="query" class="input input--sm" style="max-width: 240px" :placeholder="messages.worktrees.searchPlaceholder" />
     </div>
 
+    <div v-if="filter === 'all' && reviewCount > 0" class="review-hint">
+      <span>{{ messages.worktrees.reviewGroupHint(reviewCount) }}</span>
+      <span style="flex: 1"></span>
+      <button class="btn btn--ghost" @click="showReviewGroups">{{ messages.worktrees.reviewGroupHintAction }}</button>
+    </div>
+
     <div class="card">
       <div class="card__body card__body--flush">
-        <div class="select-all">
+        <div v-if="filter !== 'Review'" class="select-all">
           <input v-model="allSelected" class="check" type="checkbox" :disabled="selectable.length === 0" />
           <span>{{ messages.worktrees.selectAll }}</span>
         </div>
-        <template v-for="item in filtered" :key="item.path">
+        <template v-for="section in sections" :key="section.key">
+          <div v-if="section.group" class="review-group-head" :data-review-group="section.group.key">
+            <div class="review-group-head__body">
+              <div class="row-wrap">
+                <span class="review-group-head__title">{{ reviewGroupTitle(section.group.key) }}</span>
+                <span class="chip">{{ messages.worktrees.reviewGroupCount(section.items.length) }}</span>
+                <span class="faint tiny">{{ reviewGroupSize(section.group) }}</span>
+              </div>
+              <p class="review-group-head__impact">{{ reviewGroupImpact(section.group.key) }}</p>
+            </div>
+            <div class="review-group-head__action">
+              <button
+                v-if="section.group.selectable"
+                class="btn"
+                :aria-pressed="reviewGroupAllSelected(section.group)"
+                @click="toggleReviewGroup(section.group)"
+              >
+                {{ reviewGroupActionLabel(section.group) }}
+              </button>
+              <span v-else class="faint tiny">{{ messages.worktrees.reviewGroupIndividual }}</span>
+            </div>
+          </div>
+
+          <template v-for="item in section.items" :key="item.path">
           <div class="item-row" :class="{ 'item-row--main': item.is_main }">
             <div class="item-row__check">
               <input
@@ -253,8 +394,9 @@ function stateText(item: WorktreeRecord): string {
               </div>
             </div>
           </div>
+          </template>
         </template>
-        <div v-if="filtered.length === 0" class="empty">{{ messages.worktrees.empty }}</div>
+        <div v-if="sections.length === 0" class="empty">{{ messages.worktrees.empty }}</div>
       </div>
     </div>
 

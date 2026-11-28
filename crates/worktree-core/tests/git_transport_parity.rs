@@ -35,6 +35,16 @@ fn sorted_lines(text: &str) -> Vec<String> {
     lines
 }
 
+fn nul_paths(text: &str) -> Vec<String> {
+    let mut paths: Vec<String> = text
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect();
+    paths.sort();
+    paths
+}
+
 fn run_both(
     cli: &ProcessGitRunner,
     lib: &Git2Runner,
@@ -146,6 +156,27 @@ fn both_transports_read_the_same_worktrees_and_status() {
 
     let (cli_dist, lib_dist) = run_both(&cli, &lib, &repo.root, &["ls-files", "--", "dist"]);
     assert_eq!(sort_paths(&cli_dist.stdout), sort_paths(&lib_dist.stdout));
+
+    // The branch-ref-preserved rule reads this NUL list to find ignored entries.
+    // `--directory` collapses a tree, so both transports must agree on the
+    // top-level entries rather than on every file below them.
+    let (cli_ignored, lib_ignored) = run_both(
+        &cli,
+        &lib,
+        &repo.root,
+        &[
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            "-z",
+        ],
+    );
+    assert_eq!(
+        nul_paths(&cli_ignored.stdout),
+        nul_paths(&lib_ignored.stdout)
+    );
 
     // ---- ignore answers: the tracked `dist` is not ignored, `node_modules` is ----
     for (path, expected) in [("dist", 1), ("node_modules", 0)] {

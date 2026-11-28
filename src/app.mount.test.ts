@@ -5,6 +5,7 @@ import App from "./App.vue";
 import { messages } from "./i18n";
 import { mockCacheSnapshot, mockGeneratedCacheSnapshot, mockSnapshot } from "./mock/snapshot";
 import * as state from "./state";
+import type { WorktreeRecord } from "./types";
 
 // The other tests exercise modules in isolation; this one mounts the real app.
 //
@@ -169,6 +170,138 @@ describe("the app shell", () => {
     await nextTick();
     expect(state.view.value, "the banner does not lead to the hygiene page").toBe("hygiene");
 
+    state.view.value = "welcome";
+    state.snapshot.value = null;
+    app.unmount();
+    host.remove();
+  });
+
+  it("groups Review worktrees and offers group actions only for the safe loss profiles", async () => {
+    // A Review row is not automatically selected, but a reader should not have to
+    // click through every clean worktree in the repository. The groups preserve the
+    // verdict while making the clean and untracked groups actionable in one step.
+    const { app, host } = mountApp();
+    const reviewBase = mockSnapshot.worktrees.find((item) => item.safety.status === "Review");
+    expect(reviewBase, "the sample snapshot no longer has a Review worktree").toBeDefined();
+    const batch = {
+      ...(reviewBase as WorktreeRecord),
+      path: `${mockSnapshot.root}--review-batch-0`,
+      branch: "review/batch-0",
+      is_main: false,
+      is_detached: false,
+      is_locked: false,
+      is_prunable: false,
+      dirty_files: 0,
+      untracked_files: 0,
+      untracked_file_list: [],
+      merged_into_default: false,
+      last_updated_at: null,
+      safety: {
+        status: "Review" as const,
+        reasons: [
+          { code: "wt.unmerged" as const, severity: "Review" as const, text: "not merged", evidence: "fixture" }
+        ]
+      }
+    };
+    const batchRecords = Array.from({ length: 4 }, (_, index) => ({
+      ...batch,
+      path: `${mockSnapshot.root}--review-batch-${index}`,
+      branch: `review/batch-${index}`
+    }));
+    const untracked = {
+      ...batch,
+      path: `${mockSnapshot.root}--review-untracked`,
+      branch: "review/untracked",
+      untracked_files: 1,
+      untracked_file_list: ["notes/scratch.md"],
+      safety: {
+        status: "Review" as const,
+        reasons: [
+          { code: "wt.untracked" as const, severity: "Review" as const, text: "untracked", evidence: "1 untracked file" },
+          { code: "wt.unmerged" as const, severity: "Review" as const, text: "not merged", evidence: "fixture" }
+        ]
+      }
+    };
+    state.snapshot.value = {
+      ...mockSnapshot,
+      worktrees: [...mockSnapshot.worktrees, ...batchRecords, untracked]
+    };
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [];
+    state.view.value = "worktrees";
+    await nextTick();
+
+    const reviewTab = [...host.querySelectorAll<HTMLButtonElement>(".segmented button")].find((button) =>
+      button.textContent?.includes(messages.worktrees.filterReview(0).replace(/\d+/g, "").trim())
+    );
+    expect(reviewTab, "the Review filter is missing").toBeDefined();
+    reviewTab?.click();
+    await nextTick();
+
+    const batchHead = host.querySelector<HTMLElement>('[data-review-group="batch"]');
+    const untrackedHead = host.querySelector<HTMLElement>('[data-review-group="untracked"]');
+    const attentionHead = host.querySelector<HTMLElement>('[data-review-group="attention"]');
+    expect(batchHead).not.toBeNull();
+    expect(untrackedHead).not.toBeNull();
+    expect(attentionHead).not.toBeNull();
+    expect(state.selectedWorktrees.value).not.toContain(batch.path);
+    expect(state.selectedWorktrees.value).not.toContain(untracked.path);
+    expect(attentionHead?.querySelector("button"), "attention rows must stay individual").toBeNull();
+
+    batchHead?.querySelector<HTMLButtonElement>("button")?.click();
+    await nextTick();
+    for (const record of batchRecords) {
+      expect(state.selectedWorktrees.value).toContain(record.path);
+    }
+    expect(state.selectedWorktrees.value).not.toContain(untracked.path);
+
+    untrackedHead?.querySelector<HTMLButtonElement>("button")?.click();
+    await nextTick();
+    expect(state.selectedWorktrees.value).toContain(untracked.path);
+
+    state.view.value = "plan";
+    await nextTick();
+    const planBatch = [...host.querySelectorAll<HTMLElement>(".plan-removal-group")].find(
+      (group) => group.querySelector('[data-plan-group="batch"]') !== null
+    );
+    expect(planBatch, "the plan page lost the batch group").toBeDefined();
+    expect(planBatch?.querySelectorAll(".plan-item").length, "a long clean group starts folded").toBe(0);
+    planBatch?.querySelector<HTMLButtonElement>("button")?.click();
+    await nextTick();
+    expect(planBatch?.querySelectorAll(".plan-item").length).toBe(4);
+    expect(host.querySelector('[data-plan-group="untracked"]')).not.toBeNull();
+
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [];
+    state.view.value = "welcome";
+    state.snapshot.value = null;
+    app.unmount();
+    host.remove();
+  });
+
+  it("offers to reselect Safe items when a previous run left the selection empty", async () => {
+    // A cleanup clears the selection so nothing runs twice by accident. The Safe
+    // verdicts remain valid, so the overview must let the reader add them back
+    // without re-selecting every row by hand.
+    const { app, host } = mountApp();
+    state.snapshot.value = mockSnapshot;
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [];
+    state.view.value = "overview";
+    await nextTick();
+
+    const reselect = [...host.querySelectorAll<HTMLButtonElement>(".btn")].find((button) =>
+      button.textContent?.includes(messages.overview.selectAllSafe)
+    );
+    expect(reselect, "the overview has no Safe reselection action").toBeDefined();
+    reselect?.click();
+    await nextTick();
+
+    expect(state.selectedWorktrees.value.length + state.selectedArtifacts.value.length).toBeGreaterThan(0);
+    expect(host.textContent).not.toContain(messages.overview.selectAllSafe);
+
+    state.selectedWorktrees.value = [];
+    state.selectedArtifacts.value = [];
     state.view.value = "welcome";
     state.snapshot.value = null;
     app.unmount();

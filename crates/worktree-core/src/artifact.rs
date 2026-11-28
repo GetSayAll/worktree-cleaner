@@ -943,7 +943,7 @@ pub(crate) enum CredentialScan {
 /// deadline, which is what the caller really controls: `per_dir_timeout` is the
 /// budget the user set for one directory.
 pub(crate) fn credential_in_within(dir: &Path, limit: usize, budget: Duration) -> CredentialScan {
-    credential_walk(dir, limit, budget, false)
+    credential_walk(dir, limit, budget, false, &[])
 }
 
 /// The worktree-level credential check: the same walk, but past the build and
@@ -955,7 +955,20 @@ pub(crate) fn credential_in_within(dir: &Path, limit: usize, budget: Duration) -
 /// dependency tree twice; those directories are artifact candidates and the
 /// artifact scanner already checks them for credentials when it visits them.
 pub(crate) fn credential_in_worktree(dir: &Path, budget: Duration) -> CredentialScan {
-    credential_walk(dir, CREDENTIAL_SCAN_LIMIT, budget, true)
+    credential_in_worktree_skipping(dir, budget, &[])
+}
+
+/// The worktree walk with verified reproducible checkouts removed from it.
+///
+/// A nested checkout is skipped only after the caller has checked it against the
+/// nested repository's own status, remotes and refs. The artifact walk deliberately
+/// does not decide that question; it only honours the caller's evidence.
+pub(crate) fn credential_in_worktree_skipping(
+    dir: &Path,
+    budget: Duration,
+    skip_roots: &[PathBuf],
+) -> CredentialScan {
+    credential_walk(dir, CREDENTIAL_SCAN_LIMIT, budget, true, skip_roots)
 }
 
 /// Directories the worktree credential walk does not descend into.
@@ -991,6 +1004,7 @@ fn credential_walk(
     limit: usize,
     budget: Duration,
     skip_artifacts: bool,
+    skip_roots: &[PathBuf],
 ) -> CredentialScan {
     let started = Instant::now();
     let mut visited = 0usize;
@@ -1027,6 +1041,9 @@ fn credential_walk(
                 return CredentialScan::Complete(Some(relative.display().to_string()));
             }
             if name != ".git" && entry.metadata().is_ok_and(|meta| meta.is_dir()) {
+                if skip_roots.iter().any(|root| entry.path() == *root) {
+                    continue;
+                }
                 if skip_artifacts && is_worktree_generated_dir(&name) {
                     continue;
                 }
@@ -1055,7 +1072,7 @@ fn credential_walk(
 /// Not covered, on purpose: a secret whose name gives nothing away — `config.json`
 /// holding an API key reads as a config file. That one is recorded as an open item
 /// rather than guessed at here.
-fn looks_like_credential(name: &str) -> bool {
+pub(crate) fn looks_like_credential(name: &str) -> bool {
     const EXACT: &[&str] = &[
         ".netrc",
         ".npmrc",

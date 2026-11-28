@@ -16,6 +16,8 @@ export type ReasonCode =
   | "wt.absorbed_content_changed"
   | "wt.untracked"
   | "wt.credentials"
+  | "wt.reproducible_checkout"
+  | "wt.reclaimable_clean"
   | "wt.stash"
   | "wt.recent_activity"
   | "wt.agent_active"
