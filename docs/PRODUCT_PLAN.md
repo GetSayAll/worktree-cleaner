@@ -21,7 +21,7 @@ Platforms: macOS, Windows. Tech: Vue 3 + Tauri 2 + Rust (worktree-core).
 - A deletion decision must rest on a verifiable piece of evidence (command output, path, count), not "looks like garbage."
 - If evidence can't be obtained, treat it as "unknown", and unknown is never judged safe to delete.
 - Never permanently delete artifact directory contents; artifact directories go to the system Trash. Worktrees are permanently removed through Git's worktree API, and the plan and result must say so before and after execution.
-- The main working tree can never be deleted.
+- The main working tree can never be removed as a worktree. A separate whole-clone removal action can move the **whole clone** to the system Trash after the main worktree is clean and every linked worktree is Safe; it never deletes the main tree in place, and never batches two clones.
 
 **Target users**: intermediate and advanced developers who use 2 or more AI coding agents at the same time; their own machines, with sufficient local permissions, and no enterprise centralized control.
 
@@ -74,7 +74,11 @@ Before a scan, only "Welcome" in the sidebar is available; data pages appear onl
 
 A developer root such as `~/Develop/Src` is often not itself a Git repository. When the selected folder is not a repository, the app lists the Git repositories below it instead of failing with "not a Git repository". Discovery is read-only, shallow, and does not follow symlinks or generated trees (`node_modules`, `target`, `.build`, `.worktrees`, `DerivedData`, …). It also stops at a directory carrying `CACHEDIR.TAG` and does not descend into dependency stores such as `checkouts` or `SourcePackages`, so a build's third-party package copies are not offered as local repositories.
 
-This is a launcher, not a batch-cleanup mode. Selecting a repository starts the ordinary one-repository scan, so every worktree verdict remains anchored to that repository's default branch. The page shows the path, a worktree count, and a "Scan repository" action, ordered by worktree count descending; an unknown count is listed after measured repositories. A linked worktree found under the root is folded into its main repository: there is one row per Git repository, and the count is that repository's shared worktree list, not a count per discovered root. The main worktree's path is shown when it is inside the root; otherwise one discovered linked worktree represents the family. It never selects or deletes anything itself.
+When the selected path is itself a repository, discovery also searches its parent folder for independent clones whose `origin` remote matches the selected repository. This is automatic: the reader does not have to choose the parent. The match folds `https`, `ssh` and `git@` spellings, ignores other remote names, skips linked worktrees, and never contacts a remote. It is bounded by the same depth and entry limits as workspace discovery, and is skipped when the repository has no `origin`, is a linked worktree, or its parent is too close to the home or filesystem root. The parent folder is the scope; a clone outside that folder is still found by selecting the parent or that clone directly.
+
+This is a launcher for cleanup, not a batch-cleanup mode. The page can scan every listed repository in one action; each scan produces its own `ProjectSnapshot`, and a failure in one repository does not stop the rest. Opening a row shows that repository's ordinary overview and plan, so every worktree verdict remains anchored to its repository's default branch. Selecting one row starts its ordinary scan and does not re-expand the list, and cleanup still requires one confirmed plan per repository. The page shows the path, a worktree count, and a "Scan repository" action, ordered by worktree count descending; an unknown count is listed after measured repositories. A linked worktree found under the root is folded into its main repository: there is one row per Git repository, and the count is that repository's shared worktree list, not a count per discovered root. The main worktree's path is shown when it is inside the root; otherwise one discovered linked worktree represents the family. It never selects or deletes anything itself.
+
+Whole-clone removal is a separate action for the whole repository, not a worktree removal. The overview shows it only when the scan completed, the main worktree is clean and on a branch, the main branch has an upstream and no unpushed commits, the repository has no stash, and every linked worktree is Safe. The action runs the path guard and whitelist on the clone root before it removes anything. It then removes the linked worktrees through Git; if any of those removals is skipped or fails, the main clone is left in place. Only then does the whole clone, including `.git`, move to the {{trash}}. The main worktree is still never a selectable worktree row, and the clone action never enters a cleanup plan or batches two clones.
 
 ### 3. Overview
 
@@ -285,8 +289,16 @@ pub struct ProjectSnapshot {
     pub default_branch: Option<String>,
     pub worktrees: Vec<WorktreeRecord>,
     pub artifacts: Vec<ArtifactRecord>,
+    pub clone_retirement: CloneRetirement, // clone-level readiness; never in a cleanup plan
     pub hygiene: HygieneReport,        // see Section 5.4; never an input to a deletion decision (D24)
     pub warnings: Vec<String>,         // scan degradation notes
+}
+
+pub struct CloneRetirement {
+    pub eligible: bool,
+    pub main_path: String,
+    pub linked_worktrees: Vec<String>,
+    pub reasons: Vec<Reason>,
 }
 
 /// A repository found below a developer root. Discovery scans no worktrees and
@@ -331,7 +343,7 @@ The data sources are read-only libgit2 calls; the `.git` file format is never pa
 - the **repository stash list**, read **once per scan** from the repository root. A stash is a repository fact, not a worktree one: `refs/stash` lives in the common Git directory, so every worktree answers with the same list, and worktree removal never touches it. It is carried on the record as a fact and contributes no reason (see §5.1 note).
 - The **HEAD commit time** is taken as "last activity". The directory mtime is *not* part of the signal: it moves only when a top-level entry is created, deleted or renamed, not when a file deeper inside is edited, so a bulk touch (indexer, backup, cleanup script) marks a worktree "recent" that nobody worked in — measured: 22 clean-and-merged worktrees with an 8-10-day-old HEAD were downgraded by one such touch. Genuine recent work is already covered by `wt.dirty` / `wt.untracked` / `wt.agent_active`. If the HEAD time cannot be read, `last_updated_at` stays empty and the failure adds `wt.cannot_verify`; a more severe reason still decides the overall level.
 - the **untracked file list** — shown when `--force`.
-- the **ignored entry list** — `git ls-files --others --ignored --exclude-standard --directory -z`, read for a clean branch candidate. Each top-level entry is proven disposable independently: a Safe artifact record, a verified reproducible nested checkout, a zero-byte file, or a directory of those. A name, a non-empty unknown file, a symlink, another worktree, or an incomplete artifact record is not proof.
+- the **ignored entry list** — `git ls-files --others --ignored --exclude-standard --directory -z`, read for a clean branch candidate. Each top-level entry is proven disposable independently: a Safe artifact record, a verified reproducible nested checkout, Finder's `.DS_Store` metadata file, a zero-byte file, or a directory of those. A name, a non-empty unknown file other than `.DS_Store`, a symlink, another worktree, or an incomplete artifact record is not proof.
 - A bounded walk of the worktree root for credential-looking file names. It skips the recognised artifact directories — the artifact scanner's `af.credentials` checks those when it visits them — and the reproducible dependency and build trees such as `.build`, `SourcePackages` and `checkouts`. Passing the walk's time bound, which is the per-directory budget capped at five seconds, produces `wt.cannot_verify`, never a silent pass.
 
 Decision table:
@@ -350,7 +362,7 @@ Decision table:
 | `wt.untracked` | untracked files > 0 | Review (configurable to Unsafe) | `N untracked files` |
 | `wt.credentials` | on a worktree with no tracked changes, a credential-looking file sits outside the artifact, dependency and build directories, and Git does not track it | Unsafe | `<relative path> is inside; deleting the worktree would delete it too` |
 | `wt.reproducible_checkout` | a nested Git checkout is clean, ignored by the parent worktree, has a remote-tracking ref, has no commits reachable only from its HEAD/local branches, and has no stash or ignored credential-looking file | Safe (positive) | `<relative path> is clean, ignored by the parent worktree, and its HEAD/local branches are reachable from <remote ref>` |
-| `wt.reclaimable_clean` | a clean worktree on a branch ref, not main/locked/detached/prunable, with no dirty or untracked files; every ignored top-level entry is a Safe artifact record, a verified reproducible nested checkout with a `.git` directory, a zero-byte file, or a directory of those; no `.git` file, credential, active-lock or incomplete check remains | Safe (positive) | `branch ref <branch> is kept; ignored entries: <evidence>` — replaces `wt.unmerged`, `wt.no_upstream`, `wt.unpushed_branch` and `wt.recent_activity` |
+| `wt.reclaimable_clean` | a clean worktree on a branch ref, not main/locked/detached/prunable, with no dirty or untracked files; every ignored top-level entry is a Safe artifact record, a verified reproducible nested checkout with a `.git` directory, Finder's `.DS_Store` metadata file, a zero-byte file, or a directory of those; no `.git` file, credential, active-lock or incomplete check remains | Safe (positive) | `branch ref <branch> is kept; ignored entries: <evidence>` — replaces `wt.unmerged`, `wt.no_upstream`, `wt.unpushed_branch` and `wt.recent_activity` |
 | `wt.recent_activity` | the HEAD commit is newer than the activity window (default 3 days), the worktree is not clean-and-already-in-the-default-branch, and `wt.reclaimable_clean` does not replace it | Review | `last activity: 2 days ago` |
 | `wt.agent_active` | a `.git/index.lock` exists in the directory | Review | `index.lock present, possibly in use` |
 | `wt.cannot_verify` | any check timed out / no permission / command failed, or the credential walk did not finish | Review | `cannot read status: <reason>` |
@@ -358,15 +370,19 @@ Decision table:
 | `wt.prunable` | the directory is gone | Safe | `working directory no longer exists, cleaning up metadata only` |
 | `wt.merged` | merged into the default branch | Safe (positive) | `merged into main` |
 | `wt.clean` | no changes, no untracked files | Safe (positive) | `working tree clean` |
+| `cl.eligible` | the clone can be removed: complete worktree scan, clean main worktree, every linked worktree Safe, and no main-worktree blocker | Safe (positive) | `main worktree is clean; N linked worktree(s) are Safe ...` |
+| `cl.not_ready` | the clone-level action is blocked, or its main-worktree re-check failed; the evidence names the condition | Review | blocking evidence |
+| `cl.stash` | the repository has stash entries, so the whole clone cannot move yet | Review | `N stash entries; the clone cannot move until they are cleared` |
+| `cl.no_upstream` | the main branch has no upstream, so no check can confirm that every commit is already on a remote | Review | `cannot verify that the clone contains no unpushed commits` |
 
 `wt.unpushed` is no longer emitted. It was the `Unsafe` code for the same branch fact; worktree removal keeps the branch ref, so the code was a branch fact wearing a worktree verdict. The enum keeps it for audit logs written before this change and never reuses it; `wt.unpushed_branch` is the append-only replacement at `Review`.
 
 The necessary and sufficient condition for **Safe** has two routes. Both require: not the main working tree, not locked, no uncommitted changes, no untracked files, no untracked credential, and no `cannot_verify`.
 
 1. **The work is in the default branch** (`merged_into_default == Some(true)`, or `absorbed_into_default` with the content check agreeing — no `wt.absorbed_content_changed`).
-2. **The branch ref is preserved, and nothing else is lost** — `wt.reclaimable_clean`. The worktree has a branch and is not detached or prunable; every ignored top-level entry is independently proven to be a Safe artifact record, a verified reproducible nested checkout, a zero-byte file, or a directory containing only those. The branch need not be merged or have an upstream. This route replaces `wt.unmerged`, `wt.no_upstream`, `wt.unpushed_branch` and `wt.recent_activity`; it does not replace dirty, untracked, credential, active-lock or `cannot_verify` reasons. A stash is not a condition: it belongs to the repository and survives removal.
+2. **The branch ref is preserved, and nothing else is lost** — `wt.reclaimable_clean`. The worktree has a branch and is not detached or prunable; every ignored top-level entry is independently proven to be a Safe artifact record, a verified reproducible nested checkout, Finder's `.DS_Store` metadata file, a zero-byte file, or a directory containing only those. The branch need not be merged or have an upstream. This route replaces `wt.unmerged`, `wt.no_upstream`, `wt.unpushed_branch` and `wt.recent_activity`; it does not replace dirty, untracked, credential, active-lock or `cannot_verify` reasons. A stash is not a condition: it belongs to the repository and survives removal.
 
-If any required fact is missing, downgrade. `wt.reclaimable_clean` is not a name-based bypass: an artifact directory is accepted only from its own Safe record, and an unknown non-empty entry, a symlink, another worktree, or an incomplete artifact record leaves the worktree at `Review`.
+If any required fact is missing, downgrade. `wt.reclaimable_clean` is not a name-based bypass: an artifact directory is accepted only from its own Safe record, and an unknown non-empty entry other than Finder's `.DS_Store`, a symlink, another worktree, or an incomplete artifact record leaves the worktree at `Review`.
 
 **Ahead of the upstream is a branch fact, not a worktree fact.** Worktree removal deletes the directory and keeps every branch ref; the product never runs `git branch -d`. `ahead > 0` therefore says nothing about whether this directory can go. When the work is not in the default branch it is `wt.unpushed_branch` at `Review` — the reader should see the commits, and the branch remains — and when the work is already merged or absorbed it is not emitted at all. This is the same distinction that removed the stash count from the verdict; the stash lives in the common Git directory, and an unpushed commit lives on the branch ref. The old `wt.unpushed` code was `Unsafe` and is retained only for audit logs.
 
@@ -374,11 +390,11 @@ If any required fact is missing, downgrade. `wt.reclaimable_clean` is not a name
 
 **Merged and absorbed are two facts, not one.** `merged_into_default` answers "is this commit an ancestor of the default branch"; `absorbed_into_default` answers "do the files this branch changed hold the same content there", which is a tree comparison over the files the branch touched. A branch that is an ancestor is never also reported as absorbed. Content is the whole absorption answer: a difference — a later revert and an ordinary edit look the same to a tree comparison — is `wt.unmerged` at `Review`, never `Safe`. The old patch-id answer and its `wt.absorbed_content_changed` companion are retained only for audit logs written before the in-process transport. Measured when the content check was introduced: 11 of 33 branches reported `wt.unmerged` were fully absorbed.
 
-**Ignored files are deleted too.** A worktree with no tracked changes can still hold a `.env`, a signing key, or a local configuration file that Git ignores; worktree removal deletes the directory and those files with it. The artifact channel has `af.credentials` for exactly this reason, so the worktree channel runs the same name table at the root, bounded by time. A name that is only a container is decided by its content: a `.pem` blocks when it holds a private key, not when it is a public certificate bundle. A directory named `credentials` is read, not matched by its name. It skips the recognised artifact directories (the artifact scanner checks those) and the reproducible dependency and build trees such as `.build/checkouts`. The walk runs when the worktree has no tracked changes; a dirty worktree is already `Unsafe`, and walking it would only add cost. A hit is `Unsafe`; a partial walk is `Review`. An absent file after a full walk is the only pass. A credential-looking file that Git tracks is not a worktree loss — it is in the repository — so it does not block the directory removal.
+**Ignored files are deleted too.** A worktree with no tracked changes can still hold a `.env`, a `production.env`, a signing key, or a local configuration file that Git ignores; worktree removal deletes the directory and those files with it. The artifact channel has `af.credentials` for exactly this reason, so the worktree channel runs the same name table at the root, bounded by time. The table includes `.env`, `.env.*`, and names ending in `.env` such as `production.env`; the last form puts the environment name first and is still a dotenv file. A name that is only a container is decided by its content: a `.pem` blocks when it holds a private key, not when it is a public certificate bundle. A directory named `credentials` is read, not matched by its name. It skips the recognised artifact directories (the artifact scanner checks those) and the reproducible dependency and build trees such as `.build/checkouts`. The walk runs when the worktree has no tracked changes; a dirty worktree is already `Unsafe`, and walking it would only add cost. A hit is `Unsafe`; a partial walk is `Review`. An absent file after a full walk is the only pass. A credential-looking file that Git tracks is not a worktree loss — it is in the repository — so it does not block the directory removal.
 
 **A nested checkout is not a credential just because of its name.** A worktree can contain an ignored nested Git checkout, usually a local dependency copy. When that checkout is clean, ignored by the parent, has a remote-tracking ref, has no commits reachable only from its own HEAD or local branches, and has no stash or ignored credential-looking file, the positive `wt.reproducible_checkout` reason is recorded and the credential walk does not descend into it. The evidence names the nested path and the remote ref; the rule is based on Git facts, not a project-specific directory name such as `.private-dependencies`. If any fact is missing or unreadable, the existing credential rule still applies: an untracked `.env.example` there remains a Review or Unsafe decision, never a silent pass (D3).
 
-**A clean branch does not need to be merged when everything left is replaceable.** The `wt.reclaimable_clean` route exists because worktree removal preserves the branch ref: deleting a clean checkout of an unmerged branch loses the checkout, not the commits. The remaining question is what Git-ignored files disappear with the directory. The rule answers it from evidence, not from a directory name. A recognised artifact name is accepted only when its own artifact record is Safe, so a tracked file, hand-written content, a credential, a nested repository, a symlink, recent writes, or a failed check still blocks promotion. The HEAD commit's own `wt.recent_activity` is replaced by the new reason; an artifact's recent-writes Review is not. A nested checkout is accepted only after `wt.reproducible_checkout` verifies it, and only when its `.git` marker is a directory; a `.git` file (a linked worktree or a submodule) is not auto-promoted because the directory may belong to another checkout. An unknown entry is accepted only when it is empty or contains only empty files/directories; another worktree, including one under `.worktrees/`, is always protected. The ignored-entry walk is bounded; passing the bound adds `wt.cannot_verify`, never a pass. The whole rule is run again in the executor with a fresh artifact scan, so a new non-empty ignored file cannot ride a stale Safe plan.
+**A clean branch does not need to be merged when everything left is replaceable.** The `wt.reclaimable_clean` route exists because worktree removal preserves the branch ref: deleting a clean checkout of an unmerged branch loses the checkout, not the commits. The remaining question is what Git-ignored files disappear with the directory. The rule answers it from evidence, not from a directory name. A recognised artifact name is accepted only when its own artifact record is Safe, so a tracked file, hand-written content, a credential, a nested repository, a symlink, recent writes, or a failed check still blocks promotion. The HEAD commit's own `wt.recent_activity` is replaced by the new reason; an artifact's recent-writes Review is not. A nested checkout is accepted only after `wt.reproducible_checkout` verifies it, and only when its `.git` marker is a directory; a `.git` file (a linked worktree or a submodule) is not auto-promoted because the directory may belong to another checkout. Finder's `.DS_Store` is the one non-empty file accepted by name: it records a view, not project content. The rule is exact and applies only to a regular file; a directory or symlink with that name is not accepted. An unknown entry is accepted only when it is empty or contains only empty files/directories; another worktree, including one under `.worktrees/`, is always protected. The ignored-entry walk is bounded; passing the bound adds `wt.cannot_verify`, never a pass. The whole rule is run again in the executor with a fresh artifact scan, so a new non-empty ignored file cannot ride a stale Safe plan.
 
 **A deleted upstream does not hide the file counts.** Git omits `# branch.ab` when the upstream ref is gone, and ahead/behind are then unknown; the changed and untracked entries are still printed. The check reads those counts and reports `wt.dirty` / `wt.untracked` from them. The unknown ahead/behind adds `wt.cannot_verify` only when the work is not already merged or absorbed; a clean worktree whose work is in the default branch is not downgraded for an upstream that no longer exists.
 
@@ -404,7 +420,7 @@ Decision table:
 | `af.git_tracked` | files tracked by git exist in the directory | Unsafe | `N files committed to the repository, not a pure artifact` |
 | `af.nested_git` | a nested `.git` exists in the directory | Unsafe | `the directory contains a standalone repository` |
 | `af.authored_content` | a directory with a generic name such as `dist/` holds files that are neither tracked nor ignored | Unsafe | `N files inside are neither tracked by Git nor ignored; they look like authored content` |
-| `af.credentials` | a credential-looking file (`.env`, `id_rsa`, a `*.pem` holding a private key, `credentials.json`, …) sits anywhere inside the directory, at any depth | Unsafe | `<relative path> is inside; deleting the directory would delete it too` |
+| `af.credentials` | a credential-looking file (`.env`, `production.env`, `id_rsa`, a `*.pem` holding a private key, `credentials.json`, …) sits anywhere inside the directory, at any depth | Unsafe | `<relative path> is inside; deleting the directory would delete it too` |
 | `af.symlink_outside` | the directory is a symlink and points outside the project root | Unsafe | `points to <target path>` |
 | `af.whitelisted` | matches the whitelist | Unsafe | `matches whitelist: <rule>` |
 | `af.recent_activity` | a write occurred within the activity window (default 3 days) | Review | `last activity: 2 days ago` |
@@ -550,12 +566,12 @@ Item 6 also guards against accidents such as "a variable being empty during conc
 ## 7. Boundaries and non-goals
 
 - **No permanent deletion of artifact directories**, and no switch to bypass the Trash. Worktrees are permanently removed through Git's worktree API; that is the only permanent path, and the UI must say so before execution.
-- **Never delete the main working tree**, even if it looks clean.
+- **Never delete the main working tree in place**, even if it looks clean. The only way a main working tree leaves is the separate whole-clone removal action, which moves the whole clone to the Trash after every linked worktree is Safe.
 - **Never execute cleanup automatically**; scanning and cleanup are always two explicit steps.
 - **No cleaning of general `~/Library` content, Application Support, the Downloads directory, or installers.** The separate System caches page is limited to the known cache roots in §5.1; unknown cache owners are `Review` and never selected automatically.
-- **No modifying repository contents**: apart from the worktree removal / prune API, no write to the repository is executed; no automatic `git branch -d`, no automatic push.
+- **No modifying repository contents**: apart from the worktree removal / prune API and moving an eligible whole clone to the Trash, no write to the repository is executed; no automatic `git branch -d`, no automatic push.
 - **No judging "whether this branch is still needed"**: report only verifiable facts (unmerged, the branch's upstream state, how many days idle) and leave the conclusion to the user.
-- No multi-project batch cleanup; the workspace page discovers repositories and opens one at a time. Worktrees are still removed only through Git's worktree API.
+- No multi-project batch cleanup; the workspace page can scan every discovered repository, but each repository keeps its own snapshot and cleanup plan. A clone can be removed only as one whole-clone action; two clones are never moved together. Worktrees are still removed only through Git's worktree API.
 
 ---
 
@@ -664,12 +680,18 @@ The core functionality cannot be accomplished in a pure browser, so there is no 
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "root": "/Users/andy/MySrc/remote-mic-app",
   "scanned_at": "2026-10-11T09:12:00Z",
   "default_branch": "main",
   "worktrees": [],
   "artifacts": [],
+  "clone_retirement": {
+    "eligible": false,
+    "main_path": "/Users/andy/MySrc/remote-mic-app",
+    "linked_worktrees": [],
+    "reasons": []
+  },
   "hygiene": { "rules": [], "findings": [], "warnings": [] },
   "warnings": []
 }

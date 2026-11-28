@@ -1103,15 +1103,21 @@ pub(crate) fn looks_like_credential(name: &str) -> bool {
         return true;
     }
 
-    // `.env` and every variant of it: `.env.local`, `.env.production`, `.env.example`.
-    if lower == ".env" || lower.starts_with(".env.") {
-        return true;
-    }
-
     // `Path::extension` rather than a string suffix. Comparing an extension with
     // `ends_with` is how a `.JSON` slips past, and this way the answer does not depend
     // on the lowercasing above having gone right.
     let extension = Path::new(&lower).extension().and_then(|ext| ext.to_str());
+
+    // `.env` and every variant of it: `.env.local`, `.env.production`,
+    // `.env.example`, and names that put the environment first such as
+    // `production.env`.
+    if lower == ".env"
+        || lower.starts_with(".env.")
+        || extension.is_some_and(|ext| ext.eq_ignore_ascii_case("env"))
+    {
+        return true;
+    }
+
     if extension.is_some_and(|ext| EXTENSIONS.contains(&ext)) {
         return true;
     }
@@ -1369,6 +1375,9 @@ mod tests {
             // A template that was filled in where it stood is a real mistake, and the
             // cost of asking is one confirmation.
             ".env.example",
+            // Environment name first, as in a deployed local configuration file.
+            "production.env",
+            "production.ENV",
             ".npmrc",
             ".netrc",
             ".git-credentials",

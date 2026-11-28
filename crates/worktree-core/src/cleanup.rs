@@ -981,6 +981,7 @@ mod tests {
         worktrees: Vec<WorktreeRecord>,
         artifacts: Vec<ArtifactRecord>,
     ) -> ProjectSnapshot {
+        let clone_retirement = crate::retire::assess_clone_retirement(&worktrees, true);
         ProjectSnapshot {
             schema_version: crate::SNAPSHOT_SCHEMA_VERSION,
             root: root.to_string(),
@@ -988,6 +989,7 @@ mod tests {
             default_branch: Some("main".to_string()),
             worktrees,
             artifacts,
+            clone_retirement,
             // The executor's re-check reads the worktree and artifact records; the
             // compliance audit is not an input to a deletion decision (D24), so an
             // empty report is the honest fixture here.

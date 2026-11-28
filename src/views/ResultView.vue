@@ -26,7 +26,8 @@ function actionLabel(action: string): string {
     {
       "worktree-remove": messages.common.action.worktreeRemove,
       "trash-move": messages.common.action.trashMove,
-      prune: messages.common.action.prune
+      prune: messages.common.action.prune,
+      "clone-retire": messages.common.action.cloneRetire
     }[action] ?? action
   );
 }
@@ -51,6 +52,9 @@ const sortedResults = computed(() =>
 );
 const skippedTrashMoves = computed(
   () => lastResult.value.filter((item) => item.action === "trash-move" && item.result === "skipped").length
+);
+const retiredClones = computed(
+  () => lastResult.value.filter((item) => item.action === "clone-retire" && item.result === "ok").length
 );
 
 const measuredResults = computed(() => lastResult.value.filter((item) => item.size_bytes !== null));
@@ -114,7 +118,7 @@ const logFailure = computed(() => {
       <div class="row-wrap">
         <button class="btn" @click="openSystemTrash">{{ messages.result.openTrash }}</button>
         <button class="btn" @click="goTo('history')">{{ messages.result.openLog }}</button>
-        <button class="btn btn--primary" :disabled="executing" @click="startScan(projectPath)">{{ messages.common.rescan }}</button>
+        <button class="btn btn--primary" :disabled="executing" @click="startScan(projectPath, undefined, false)">{{ messages.common.rescan }}</button>
       </div>
     </div>
 
@@ -131,6 +135,9 @@ const logFailure = computed(() => {
     <p v-if="resultSummary.removed > 0" class="notice">
       {{ messages.result.worktreePermanentNotice(resultSummary.removed) }}
     </p>
+    <p v-if="retiredClones > 0" class="notice">
+      {{ messages.result.cloneRetiredNotice(retiredClones) }}
+    </p>
 
     <div
       v-if="lastResult.length > 0"
@@ -146,7 +153,8 @@ const logFailure = computed(() => {
               resultSummary.removed,
               formatBytes(resultSummary.freed, { approximate: resultSummary.freed_unknown > 0 }),
               resultSummary.trashed,
-              formatBytes(resultSummary.trash_bytes, { approximate: resultSummary.trash_unknown > 0 })
+              formatBytes(resultSummary.trash_bytes, { approximate: resultSummary.trash_unknown > 0 }),
+              retiredClones
             )
           }}
         </p>
@@ -200,7 +208,7 @@ const logFailure = computed(() => {
         :value="formatBytes(resultSummary.trash_bytes, { approximate: resultSummary.trash_unknown > 0 })"
         :sub="resultSummary.trash_unknown > 0 ? messages.result.stats.inTrashSubUnknown(resultSummary.trash_unknown) : messages.result.stats.inTrashSub(resultSummary.trashed)"
       />
-      <StatCard :label="messages.result.stats.handled" tone="safe" value-tone :value="String(okCount)" :sub="messages.result.stats.handledSub(resultSummary.removed, resultSummary.trashed)" />
+      <StatCard :label="messages.result.stats.handled" tone="safe" value-tone :value="String(okCount)" :sub="messages.result.stats.handledSub(resultSummary.removed, resultSummary.trashed, retiredClones)" />
       <StatCard
         :label="messages.result.stats.skippedFailed"
         :value="String(resultSummary.failed)"

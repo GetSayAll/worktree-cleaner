@@ -37,7 +37,8 @@ import {
   formatCount,
   formatRelTime,
   homePath,
-  isUnder
+  isUnder,
+  warningText
 } from "../format";
 import { messages } from "../i18n";
 import { isDesktop, openTrash, pickDirectory } from "../platform";
@@ -217,7 +218,7 @@ async function openSystemTrash() {
 
     <div v-for="warning in buildCacheSnapshot?.warnings || []" :key="warning" class="banner banner--warn">
       <span>⚠</span>
-      <span>{{ warning }}</span>
+      <span>{{ warningText(warning) }}</span>
     </div>
 
     <div class="card">

@@ -37,7 +37,11 @@ export type ReasonCode =
   | "af.empty"
   | "af.git_ignored"
   | "af.rebuildable"
-  | "af.unknown_cache";
+  | "af.unknown_cache"
+  | "cl.eligible"
+  | "cl.not_ready"
+  | "cl.stash"
+  | "cl.no_upstream";
 
 export interface Reason {
   code: ReasonCode;
@@ -100,8 +104,9 @@ export interface ArtifactRecord {
 }
 
 /**
- * One Git repository found below a workspace root. Discovery is a launcher, not
- * a cleanup model: selecting a repository starts the ordinary project scan.
+ * One Git repository found below a workspace root, or an independent sibling
+ * clone with the same origin. Discovery is a launcher, not a cleanup model:
+ * selecting a repository starts the ordinary project scan.
  */
 export interface WorkspaceRepository {
   path: string;
@@ -152,6 +157,20 @@ export const WORKSPACE_SCHEMA_VERSION = 1;
 export const CACHE_SCHEMA_VERSION = 1;
 export const GENERATED_CACHE_SCHEMA_VERSION = 1;
 
+/**
+ * Clone-level retirement readiness.
+ *
+ * This is not a worktree verdict and never enters a `CleanupPlan`. When eligible,
+ * the linked worktrees are removed through Git and the whole clone then moves to
+ * the system Trash. Mirrors `CloneRetirement` in `crates/worktree-core/src/lib.rs`.
+ */
+export interface CloneRetirement {
+  eligible: boolean;
+  main_path: string;
+  linked_worktrees: string[];
+  reasons: Reason[];
+}
+
 export interface ProjectSnapshot {
   schema_version: number;
   root: string;
@@ -159,12 +178,14 @@ export interface ProjectSnapshot {
   default_branch: string | null;
   worktrees: WorktreeRecord[];
   artifacts: ArtifactRecord[];
+  /** Clone-level retirement readiness; it never enters a cleanup plan. */
+  clone_retirement: CloneRetirement;
   /** Compliance with the disk-hygiene policy; read-only, and never a deletion verdict. */
   hygiene: HygieneReport;
   warnings: string[];
 }
 
-export const SNAPSHOT_SCHEMA_VERSION = 3;
+export const SNAPSHOT_SCHEMA_VERSION = 4;
 
 /**
  * One numbered rule of `docs/DISK_HYGIENE.md`.
@@ -306,7 +327,10 @@ export type DetailCode =
   | "artifact.trashed"
   | "artifact.trash_failed"
   | "precondition.failed"
-  | "bundled.with_worktree";
+  | "bundled.with_worktree"
+  | "clone.not_ready"
+  | "clone.retired"
+  | "clone.retire_failed";
 
 /** One argument to a `DetailCode`.
  *
@@ -353,7 +377,7 @@ export type ActivityAction =
 
 export interface HistoryEntry {
   at: string;
-  action: "worktree-remove" | "trash-move" | "prune";
+  action: "worktree-remove" | "trash-move" | "prune" | "clone-retire";
   target: string;
   /** The verdict this deletion was based on; `null` when the record has none. */
   reason_code: ReasonCode | null;
@@ -369,7 +393,7 @@ export interface HistoryEntry {
 }
 
 export interface ResultEntry {
-  action: "worktree-remove" | "trash-move" | "prune";
+  action: "worktree-remove" | "trash-move" | "prune" | "clone-retire";
   target: string;
   result: "ok" | "skipped" | "failed";
   detail_code: DetailCode | null;

@@ -11,7 +11,8 @@ import {
   pathIdentityKey,
   pathMatchesRule,
   reasonText,
-  scanFailureText
+  scanFailureText,
+  warningText
 } from "./format";
 import { applyLocale, messages, SOURCE_LOCALE } from "./i18n";
 import { en } from "./i18n/en";
@@ -278,6 +279,76 @@ describe("scanFailureText", () => {
     expect(scanFailureText({ code: "unknown", detail: "fatal: unexpected" })).not.toContain(
       "fatal"
     );
+  });
+});
+
+describe("warningText", () => {
+  const rawWarnings: Array<[string, string]> = [
+    ["Git reported no worktrees for /tmp/repo; its count is unknown", "Git 报告 /tmp/repo 没有工作树"],
+    [
+      "the worktree count for /tmp/repo could not be read: git worktree list exited with Some(128): fatal",
+      "无法读取 /tmp/repo 的工作树数量"
+    ],
+    ["workspace discovery stopped after 250000 entries; some repositories may be missing", "工作区发现达到 250000 个条目上限"],
+    ["workspace discovery stopped after 2000 repositories", "工作区发现达到 2000 个仓库上限"],
+    ["/tmp/repo is inside the system Trash; discovery does not read the Trash", "位于废纸篓中"],
+    [
+      "found 5 other local clone(s) sharing the selected repository's origin remote under /tmp",
+      "发现 5 个其他本地 clone"
+    ],
+    ["no Git repositories were found below /tmp", "没有找到 Git 仓库"],
+    ["the repository stash count could not be read: git stash list exited with Some(1): err", "无法读取仓库的 stash 数量"],
+    ["the scan budget of 10s ran out after 2 of 5 worktrees; the remaining ones were not scanned", "扫描预算 10 秒已用完"],
+    ["size measurement of /tmp/x did not complete within 5s; the size is recorded as unknown", "大小测量在 5 秒内未完成"],
+    ["3 worktree(s) inside the system Trash were not scanned; the Trash is left alone", "3 个工作树位于废纸篓中"],
+    ["the scan budget ran out; artifact scanning stopped at /tmp/x (4 directories checked so far)", "构建产物扫描停在 /tmp/x"],
+    ["/tmp/x is no longer on disk; it is reported as unmeasurable rather than empty", "已不在磁盘上"],
+    ["/tmp/x could not be read while looking for build caches: denied", "查找构建缓存时无法读取 /tmp/x"],
+    ["the build-cache scan stopped after 200000 entries; some caches may be missing", "构建缓存扫描达到 200000 个条目上限"],
+    ["the build-cache root does not exist or is not a directory: /tmp", "构建缓存根目录不存在"],
+    ["no directories carrying CACHEDIR.TAG were found below /tmp", "带 CACHEDIR.TAG 的目录"],
+    ["/tmp/x could not be inspected: denied", "无法检查 /tmp/x"],
+    ["size measurement of /tmp/x did not complete; the cache is shown as unmeasurable", "缓存显示为不可测量"],
+    ["the ignore check could not answer for /x: exited with Some(128): err", "无法为 /x 完成 ignore 检查"],
+    ["the scan budget ran out; npm-cache and the slots after it were not measured", "npm-cache 及其后面的槽位未测量"],
+    [".worktree-keep could not be read, so its exceptions do not apply: denied", ".worktree-keep 无法读取"]
+  ];
+
+  function inLocale(locale: "en" | "zh-CN", run: () => void): void {
+    applyLocale(locale);
+    try {
+      run();
+    } finally {
+      applyLocale(SOURCE_LOCALE);
+    }
+  }
+
+  it("translates every known scanner warning and keeps technical detail", () => {
+    inLocale("zh-CN", () => {
+      for (const [raw, fragment] of rawWarnings) {
+        const text = warningText(raw);
+        expect(text, raw).toContain(fragment);
+      }
+      expect(warningText(rawWarnings[1][0])).toContain("/tmp/repo");
+      expect(warningText(rawWarnings[1][0])).toContain("Some(128)");
+    });
+  });
+
+  it("keeps the source warning in English unchanged", () => {
+    inLocale("en", () => {
+      for (const [raw] of rawWarnings) {
+        if (raw.includes("Trash")) {
+          expect(warningText(raw)).toContain("Trash");
+          continue;
+        }
+        expect(warningText(raw)).toBe(raw);
+      }
+    });
+  });
+
+  it("leaves an unknown warning traceable rather than blank", () => {
+    const future = "a newer core added a note this build does not know";
+    expect(warningText(future)).toBe(future);
   });
 });
 

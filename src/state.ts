@@ -41,7 +41,8 @@ import {
   scanProject,
   scanWorkspace,
   executeCachePlan,
-  executeGeneratedCachePlan
+  executeGeneratedCachePlan,
+  retireClone
 } from "./platform";
 import {
   mockActivity,
@@ -65,6 +66,7 @@ export type ViewKey =
   | "artifacts"
   | "hygiene"
   | "plan"
+  | "retire"
   | "result"
   | "history"
   | "settings";
@@ -111,12 +113,73 @@ export const projectPath = ref("");
 export const snapshot = ref<ProjectSnapshot | null>(null);
 /** Repositories found below a directory that is not itself a Git repository. */
 export const workspaceSnapshot = ref<WorkspaceSnapshot | null>(null);
+
+export type WorkspaceScanStatus = "pending" | "scanning" | "done" | "failed";
+
+/**
+ * One repository's place in a workspace-wide scan.
+ *
+ * The snapshots stay separate on purpose: worktree verdicts are anchored to each
+ * repository's default branch, and the cleanup plan is always for one
+ * repository. This is a progress record, not a merged project.
+ */
+export interface WorkspaceScanEntry {
+  status: WorkspaceScanStatus;
+  snapshot: ProjectSnapshot | null;
+  failure: ScanFailure | null;
+}
+
+/** Per-repository results for the workspace-wide scan, keyed by path. */
+export const workspaceScanEntries = ref<Record<string, WorkspaceScanEntry>>({});
+
+/** Progress of the workspace-wide scan; it stays on the repository page. */
+export const workspaceScanState = reactive({
+  running: false,
+  completed: 0,
+  total: 0,
+  current: ""
+});
+
+/**
+ * Totals across the repositories scanned in this workspace.
+ *
+ * This counts what is on screen and what each independent plan can see; it is
+ * never used to build one cross-repository cleanup plan.
+ */
+export const workspaceScanSummary = computed(() => {
+  const entries = Object.values(workspaceScanEntries.value);
+  const snapshots = entries
+    .filter(
+      (entry): entry is WorkspaceScanEntry & { snapshot: ProjectSnapshot } =>
+        entry.status === "done" && entry.snapshot !== null
+    )
+    .map((entry) => entry.snapshot);
+  const counts = { Safe: 0, Review: 0, Unsafe: 0 };
+  let worktrees = 0;
+  let artifacts = 0;
+  for (const snapshot of snapshots) {
+    worktrees += snapshot.worktrees.length;
+    artifacts += snapshot.artifacts.length;
+    for (const record of [...snapshot.worktrees, ...snapshot.artifacts]) {
+      counts[record.safety.status] += 1;
+    }
+  }
+  return {
+    done: snapshots.length,
+    failed: entries.filter((entry) => entry.status === "failed").length,
+    worktrees,
+    artifacts,
+    ...counts
+  };
+});
+
 /**
  * The folder from the last repository discovery.
  *
- * `workspaceSnapshot` is cleared when one repository is opened for a project
- * scan; this keeps the folder available to the build-cache page, which looks
- * below the folder the reader scanned rather than inside one repository.
+ * A normal single-repository scan clears `workspaceSnapshot`; a cached batch
+ * result keeps it so the repository list remains one click away. Either way this
+ * folder stays available to the build-cache page, which looks below the folder the
+ * reader scanned rather than inside one repository.
  */
 export const lastWorkspaceRoot = ref("");
 /** The cache inventory is a separate surface from the project snapshot. */
@@ -200,6 +263,8 @@ let recordedPlan = "";
 /** A scan that is superseded by a newer run must not finish the newer one. */
 let scanRun = 0;
 let buildCacheRun = 0;
+/** The workspace-wide scan has its own generation, so cancelling one never revives it. */
+let workspaceScanRun = 0;
 
 export const scanState = reactive({
   stageIndex: 0,
@@ -353,6 +418,15 @@ export function forgetRecentProjects() {
   settings.recent_projects = [];
   const store = storage();
   if (store) store.removeItem(RECENTS_KEY);
+}
+
+/** Drops one path after the action removed the directory it named. */
+function forgetProject(path: string) {
+  const key = recentKey(path);
+  recentProjects.value = recentProjects.value.filter((item) => recentKey(item.path) !== key);
+  settings.recent_projects = recentProjects.value.map((item) => item.path);
+  const store = storage();
+  if (store) store.setItem(RECENTS_KEY, JSON.stringify(recentProjects.value));
 }
 
 loadSettings();
@@ -552,10 +626,19 @@ export function cacheSearchScopes(root: string): string[] {
   return scopes.length > 0 ? scopes : [root];
 }
 
-export async function startScan(path: string, buildCacheScope?: string) {
+export async function startScan(
+  path: string,
+  buildCacheScope?: string,
+  expandRelatedClones = true
+) {
   if (executing.value) return;
   const target = path.trim();
   if (!target) return;
+
+  // Opening one repository is a single-repository run; any unfinished batch
+  // belongs to the previous view and must not keep writing into this one.
+  stopWorkspaceScan();
+  workspaceScanEntries.value = {};
 
   const runId = ++scanRun;
   // Stop a page-level build-cache refresh from writing into this run's state.
@@ -591,6 +674,21 @@ export async function startScan(path: string, buildCacheScope?: string) {
   startStageTimer();
 
   try {
+    // A repository row opened from the workspace is already the chosen project.
+    // Skipping discovery here prevents the automatic same-remote expansion from
+    // turning that click back into the workspace page.
+    if (!expandRelatedClones) {
+      const cacheScope = buildCacheScope?.trim() || target;
+      const result = await scanProject(target, scanKnobs());
+      if (scanState.cancelled || runId !== scanRun) return;
+      buildCacheRoot.value = cacheScope;
+      enterBuildCacheStage();
+      await runBuildCacheScan(cacheScope, false);
+      if (scanState.cancelled || runId !== scanRun) return;
+      finishScan(result);
+      return;
+    }
+
     // A developer root is often not a repository itself. Discovery is cheap and
     // read-only; it either confirms this is one repository, offers the nested
     // repositories, or produces an honest empty answer.
@@ -679,6 +777,134 @@ function finishWorkspace(workspace: WorkspaceSnapshot) {
   view.value = "workspace";
 }
 
+/** Stops a workspace-wide scan without publishing a partial result as complete. */
+function stopWorkspaceScan() {
+  workspaceScanRun += 1;
+  workspaceScanState.running = false;
+  workspaceScanState.current = "";
+}
+
+/** Cancels the workspace-wide scan and leaves the unfinished row unscanned. */
+export function cancelWorkspaceScan() {
+  if (!workspaceScanState.running) return;
+  stopWorkspaceScan();
+  workspaceScanEntries.value = Object.fromEntries(
+    Object.entries(workspaceScanEntries.value).map(([path, entry]) => [
+      path,
+      entry.status === "scanning" ? { ...entry, status: "pending" as const } : entry
+    ])
+  );
+}
+
+/**
+ * Scans every repository in the discovered workspace.
+ *
+ * The scans run one after another: each one is a real repository scan, and six
+ * simultaneous walks would contend for the same disk and make the progress list
+ * jump around without making the total faster. Each result stays a separate
+ * snapshot, so opening one repository never blends its cleanup plan with another.
+ */
+export async function scanAllWorkspaceRepositories() {
+  const workspace = workspaceSnapshot.value;
+  if (
+    !workspace ||
+    workspace.repositories.length === 0 ||
+    !isDesktop() ||
+    executing.value ||
+    scanState.running ||
+    workspaceScanState.running
+  ) {
+    return;
+  }
+
+  const runId = ++workspaceScanRun;
+  workspaceScanState.running = true;
+  workspaceScanState.completed = 0;
+  workspaceScanState.total = workspace.repositories.length;
+  workspaceScanState.current = "";
+  workspaceScanEntries.value = Object.fromEntries(
+    workspace.repositories.map((repository) => [
+      repository.path,
+      { status: "pending" as const, snapshot: null, failure: null }
+    ])
+  );
+
+  const setEntry = (path: string, entry: WorkspaceScanEntry) => {
+    workspaceScanEntries.value = { ...workspaceScanEntries.value, [path]: entry };
+  };
+
+  try {
+    for (const [index, repository] of workspace.repositories.entries()) {
+      if (runId !== workspaceScanRun) return;
+      workspaceScanState.current = repository.path;
+      setEntry(repository.path, { status: "scanning", snapshot: null, failure: null });
+      record("scan.started", repository.path);
+      try {
+        const result = await scanProject(repository.path, scanKnobs());
+        if (runId !== workspaceScanRun) return;
+        setEntry(repository.path, { status: "done", snapshot: result, failure: null });
+        record("scan.finished", repository.path, {
+          worktrees: result.worktrees.length,
+          artifacts: result.artifacts.length,
+          sample: false
+        });
+      } catch (error) {
+        if (runId !== workspaceScanRun) return;
+        const failure = normaliseScanFailure(error, repository.path);
+        setEntry(repository.path, { status: "failed", snapshot: null, failure });
+        record("scan.failed", repository.path, {
+          error: "detail" in failure ? failure.detail : failure.code
+        });
+      }
+      workspaceScanState.completed = index + 1;
+    }
+  } finally {
+    if (runId === workspaceScanRun) {
+      workspaceScanState.running = false;
+      workspaceScanState.current = "";
+    }
+  }
+}
+
+/**
+ * Opens a snapshot produced by the workspace-wide scan.
+ *
+ * This is the same overview a single-repository scan leads to, only without a
+ * second scan. The repository list remains available, so the reader can come
+ * back and open the next result. The build-cache inventory is the folder-scoped
+ * one already discovered; records covered by this repository's artifacts are
+ * removed exactly as `finishScan` does after a direct scan.
+ */
+export function openWorkspaceScan(path: string) {
+  const entry = workspaceScanEntries.value[path];
+  if (executing.value || entry?.status !== "done" || entry.snapshot === null) return;
+
+  clearTimers();
+  scanState.running = false;
+  scanState.stageIndex = SCAN_STAGES.length - 1;
+  scanState.cancelled = false;
+  scanFailure.value = null;
+  snapshot.value = entry.snapshot;
+  projectPath.value = path;
+  isDemoData.value = false;
+  selectedWorktrees.value = [];
+  selectedArtifacts.value = [];
+  lastResult.value = [];
+  acknowledged.value = false;
+  confirmText.value = "";
+  recordedPlan = "";
+  rememberProject(path);
+  applyDefaultSelection();
+  if (buildCacheSnapshot.value) {
+    const records = withoutProjectArtifacts(buildCacheSnapshot.value.records, entry.snapshot.artifacts);
+    if (records.length !== buildCacheSnapshot.value.records.length) {
+      buildCacheSnapshot.value = { ...buildCacheSnapshot.value, records };
+      applyBuildCacheDefaultSelection();
+    }
+  }
+  view.value = "overview";
+}
+
 /**
  * Drops build-cache records the artifact walk already reports.
  *
@@ -745,6 +971,8 @@ export function cancelScan() {
 
 export function resetToWelcome() {
   if (executing.value) return;
+  stopWorkspaceScan();
+  workspaceScanEntries.value = {};
   clearTimers();
   scanState.running = false;
   snapshot.value = null;
@@ -808,6 +1036,7 @@ export function recordPlanExport(itemCount: number): void {
 export function goTo(next: ViewKey) {
   if (executing.value) return;
   if (next === "scanning") return;
+  if (next !== "workspace") cancelWorkspaceScan();
   if (next === "workspace" && !isDesktop() && workspaceSnapshot.value === null) {
     workspaceSnapshot.value = mockWorkspaceSnapshot;
     projectPath.value = mockWorkspaceSnapshot.root;
@@ -826,7 +1055,11 @@ export function goTo(next: ViewKey) {
 export function canOpen(key: ViewKey): boolean {
   if (key === "welcome" || key === "settings" || key === "caches" || key === "buildCaches") return true;
   if (key === "workspace") return workspaceSnapshot.value !== null || !isDesktop();
+  if (key === "retire") return snapshot.value?.clone_retirement.eligible === true;
   if (key === "result") return lastResult.value.length > 0;
+  // A retired clone has no snapshot left, but its result and audit log are the
+  // record of what happened; the history page must remain reachable.
+  if (key === "history") return snapshot.value !== null || lastResult.value.length > 0;
   return snapshot.value !== null;
 }
 
@@ -1716,6 +1949,89 @@ export async function executeCleanup() {
   }
 }
 
+/**
+ * Retires one whole clone.
+ *
+ * The core owns the decision and re-checks it. The front end only supplies the
+ * scan that was on screen, the same executor knobs as a project cleanup, and the
+ * operation-log path. On success the whole clone is in the Trash; the snapshot is
+ * cleared because its root no longer exists, while the result rows and audit trail
+ * remain visible.
+ */
+export async function executeRetireClone() {
+  const current = snapshot.value;
+  if (!current || !current.clone_retirement.eligible || executing.value) return;
+  if (!isDesktop()) {
+    executeError.value = "desktop-only";
+    return;
+  }
+
+  executing.value = true;
+  executeError.value = null;
+  logError.value = null;
+  const summaryPlan: CleanupPlan = {
+    worktree_removals: [],
+    trash_moves: [],
+    excluded_unsafe: 0,
+    total_bytes: 0,
+    total_bytes_unknown: 0,
+    blockers: [],
+    ack_reasons: []
+  };
+  record("cleanup.confirmed", current.root, {
+    worktrees: current.worktrees.filter((record) => !record.is_main).length,
+    artifacts: 0,
+    forced: 0,
+    typed_name: true
+  });
+  try {
+    const outcome = await retireClone(current, {
+      recent_activity_days: settings.active_days,
+      untracked_as_unsafe: settings.untracked_is_unsafe,
+      whitelist: settings.whitelist_paths,
+      per_dir_timeout_ms: Math.max(1, settings.per_dir_timeout_sec * 1000),
+      git_timeout_ms: GIT_TIMEOUT_MS,
+      log_path: await logPath()
+    });
+    const retired = outcome.entries.some(
+      (entry) => entry.action === "clone-retire" && entry.result === "ok"
+    );
+    lastResult.value = outcome.entries;
+    resultSummary.value = summarise(outcome.entries, summaryPlan);
+    logError.value = outcome.log_error;
+    projectPath.value = current.root;
+    if (retired) {
+      // The root no longer exists, and keeping it in the workspace would offer a
+      // row that cannot be opened. The result page keeps the record of what left.
+      snapshot.value = null;
+      if (workspaceSnapshot.value) {
+        const repositories = workspaceSnapshot.value.repositories.filter(
+          (repository) => repository.path !== current.root
+        );
+        workspaceSnapshot.value =
+          repositories.length > 0
+            ? { ...workspaceSnapshot.value, repositories }
+            : null;
+        workspaceScanEntries.value = Object.fromEntries(
+          Object.entries(workspaceScanEntries.value).filter(([path]) => path !== current.root)
+        );
+      }
+      buildCacheRoot.value = "";
+      buildCacheSnapshot.value = null;
+      selectedBuildCaches.value = [];
+      selectedWorktrees.value = [];
+      selectedArtifacts.value = [];
+      forgetProject(current.root);
+    }
+    view.value = "result";
+    await refreshHistory();
+  } catch {
+    executeError.value = "failed";
+  } finally {
+    executing.value = false;
+  }
+}
+
 /** Updates the build-cache inventory and its own result panel after a combined run. */
 function applyBuildCacheRemovals(outcome: ExecutionOutcome, plan: CleanupPlan) {
   const current = buildCacheSnapshot.value;
@@ -1780,7 +2096,15 @@ function applyRemovalsToSnapshot(entries: ResultEntry[], plan: CleanupPlan) {
       (record.worktree_path === null || remainingWorktrees.has(record.worktree_path))
   );
 
-  snapshot.value = { ...current, worktrees, artifacts };
+  const updated: ProjectSnapshot = { ...current, worktrees, artifacts };
+  snapshot.value = updated;
+  const workspaceEntry = workspaceScanEntries.value[updated.root];
+  if (workspaceEntry?.status === "done") {
+    workspaceScanEntries.value = {
+      ...workspaceScanEntries.value,
+      [updated.root]: { ...workspaceEntry, snapshot: updated }
+    };
+  }
   selectedWorktrees.value = [];
   selectedArtifacts.value = [];
 }
@@ -1863,6 +2187,11 @@ function summarise(entries: ResultEntry[], plan: CleanupPlan) {
         }
         break;
       case "prune":
+        break;
+      case "clone-retire":
+        // The clone is neither a worktree nor an artifact; the result page has its
+        // own sentence for it. Do not add its unknown size to the artifact Trash
+        // totals.
         break;
     }
   }

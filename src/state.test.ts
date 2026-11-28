@@ -59,6 +59,7 @@ async function freshStateWithExecutor(
       plans.push(plan);
       return outcome;
     },
+    retireClone: async () => outcome,
     logPath: async () => null,
     readHistory: async () => outcome.history,
     // The activity log is written fire-and-forget, so a mock that collects it is
@@ -858,6 +859,57 @@ describe("combined project and build-cache cleanup", () => {
   });
 });
 
+describe("clone retirement", () => {
+  it("clears the project snapshot after the clone is retired", async () => {
+    const { state } = await freshStateWithExecutor({
+      entries: [
+        {
+          action: "clone-retire",
+          target: mockRoot,
+          result: "ok",
+          detail_code: "clone.retired",
+          detail_args: {},
+          detail: null,
+          size_bytes: null
+        }
+      ],
+      history: [],
+      log_error: null
+    });
+    state.snapshot.value = {
+      ...mockSnapshot,
+      clone_retirement: {
+        eligible: true,
+        main_path: mockRoot,
+        linked_worktrees: [],
+        reasons: [
+          {
+            code: "cl.eligible",
+            severity: "Safe",
+            text: "the clone can be retired",
+            evidence: "main worktree is clean"
+          }
+        ]
+      }
+    };
+    state.projectPath.value = mockRoot;
+    state.recentProjects.value = [{ path: mockRoot, scanned_at: new Date().toISOString() }];
+    state.selectedWorktrees.value = [mockRoot];
+
+    await state.executeRetireClone();
+    unmockPlatform();
+
+    expect(state.view.value).toBe("result");
+    expect(state.snapshot.value).toBeNull();
+    expect(state.lastResult.value[0].action).toBe("clone-retire");
+    expect(state.resultSummary.value.trashed).toBe(0);
+    expect(state.resultSummary.value.trash_unknown).toBe(0);
+    expect(state.selectedWorktrees.value).toEqual([]);
+    expect(state.recentProjects.value.some((item) => item.path === mockRoot)).toBe(false);
+    expect(state.canOpen("history"), "the audit log stays reachable").toBe(true);
+  });
+});
+
 describe("primaryReason", () => {
   it("surfaces the most severe reason", () => {
     const primary = primaryReason([
@@ -1009,6 +1061,156 @@ describe("workspace discovery", () => {
     expect(state.view.value).toBe("workspace");
     expect(state.workspaceSnapshot.value?.repositories).toHaveLength(2);
     expect(scanProject).not.toHaveBeenCalled();
+  });
+
+  it("scans a repository directly when related-clone discovery is skipped", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", {
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    });
+    const scanProject = vi.fn(async () => mockSnapshot);
+    const scanWorkspace = vi.fn();
+    vi.doMock("./platform", () => ({
+      isDesktop: () => true,
+      hostOs: () => "macos" as const,
+      scanWorkspace,
+      scanProject,
+      scanGeneratedCaches: async () => mockGeneratedCacheSnapshot,
+      scanCaches: vi.fn(),
+      executePlan: vi.fn(),
+      executeCachePlan: vi.fn(),
+      executeGeneratedCachePlan: vi.fn(),
+      logPath: async () => null,
+      readHistory: async () => [],
+      readActivity: async () => [],
+      logActivity: vi.fn(async () => undefined),
+      onExecutionProgress: async () => null
+    }));
+    const state = await import("./state");
+    await state.startScan("/Users/andy/Develop/Src/AISrc/selected", "/Users/andy/Develop/Src/AISrc", false);
+    unmockPlatform();
+    vi.unstubAllGlobals();
+
+    expect(scanWorkspace).not.toHaveBeenCalled();
+    expect(scanProject).toHaveBeenCalledWith(
+      "/Users/andy/Develop/Src/AISrc/selected",
+      expect.any(Object)
+    );
+    expect(state.snapshot.value).toEqual(mockSnapshot);
+    expect(state.view.value).not.toBe("workspace");
+  });
+  it("scans every repository in the workspace and keeps their snapshots separate", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", {
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    });
+    const first = { ...mockSnapshot, root: "/Users/andy/Develop/Src/AISrc/one" };
+    const second = { ...mockSnapshot, root: "/Users/andy/Develop/Src/AISrc/two" };
+    const scanProject = vi.fn(async (path: string) => (path === first.root ? first : second));
+    const logActivity = vi.fn(async () => undefined);
+    vi.doMock("./platform", () => ({
+      isDesktop: () => true,
+      hostOs: () => "macos" as const,
+      scanProject,
+      logActivity,
+      logPath: async () => null,
+      readHistory: async () => [],
+      readActivity: async () => [],
+      onExecutionProgress: async () => null
+    }));
+    const state = await import("./state");
+    state.workspaceSnapshot.value = {
+      schema_version: 1,
+      root: "/Users/andy/Develop/Src/AISrc",
+      scanned_at: "",
+      repositories: [
+        { path: first.root, name: "one", worktree_count: 2 },
+        { path: second.root, name: "two", worktree_count: 1 }
+      ],
+      warnings: []
+    };
+    state.view.value = "workspace";
+
+    await state.scanAllWorkspaceRepositories();
+
+    expect(state.view.value, "the repository page stays visible").toBe("workspace");
+    expect(state.workspaceScanState.running).toBe(false);
+    expect(state.workspaceScanState.completed).toBe(2);
+    expect(state.workspaceScanEntries.value[first.root]?.status).toBe("done");
+    expect(state.workspaceScanEntries.value[second.root]?.status).toBe("done");
+    expect(state.workspaceScanEntries.value[first.root]?.snapshot).toEqual(first);
+    expect(state.workspaceScanSummary.value).toMatchObject({
+      done: 2,
+      failed: 0,
+      worktrees: first.worktrees.length + second.worktrees.length
+    });
+
+    // Opening a cached result is a view switch, not a second scan and not a
+    // merge: the snapshot on screen is exactly the one repository's snapshot.
+    state.openWorkspaceScan(first.root);
+    expect(state.view.value).toBe("overview");
+    expect(state.snapshot.value).toEqual(first);
+    expect(state.projectPath.value).toBe(first.root);
+    expect(state.workspaceSnapshot.value?.repositories).toHaveLength(2);
+    expect(state.workspaceScanEntries.value[second.root]?.snapshot).toEqual(second);
+
+    unmockPlatform();
+    vi.unstubAllGlobals();
+  });
+
+  it("continues the workspace scan after one repository fails", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", {
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    });
+    const failure = new Error("not a Git repository");
+    const scanProject = vi.fn(async (path: string) => {
+      if (path.endsWith("/broken")) throw failure;
+      return { ...mockSnapshot, root: path };
+    });
+    vi.doMock("./platform", () => ({
+      isDesktop: () => true,
+      hostOs: () => "macos" as const,
+      scanProject,
+      logActivity: vi.fn(async () => undefined),
+      logPath: async () => null,
+      readHistory: async () => [],
+      readActivity: async () => [],
+      onExecutionProgress: async () => null
+    }));
+    const state = await import("./state");
+    state.workspaceSnapshot.value = {
+      schema_version: 1,
+      root: "/Users/andy/Develop/Src/AISrc",
+      scanned_at: "",
+      repositories: [
+        { path: "/Users/andy/Develop/Src/AISrc/one", name: "one", worktree_count: null },
+        { path: "/Users/andy/Develop/Src/AISrc/broken", name: "broken", worktree_count: null },
+        { path: "/Users/andy/Develop/Src/AISrc/three", name: "three", worktree_count: null }
+      ],
+      warnings: []
+    };
+
+    await state.scanAllWorkspaceRepositories();
+
+    expect(scanProject).toHaveBeenCalledTimes(3);
+    expect(state.workspaceScanEntries.value["/Users/andy/Develop/Src/AISrc/one"]?.status).toBe("done");
+    expect(state.workspaceScanEntries.value["/Users/andy/Develop/Src/AISrc/broken"]?.status).toBe("failed");
+    expect(state.workspaceScanEntries.value["/Users/andy/Develop/Src/AISrc/three"]?.status).toBe("done");
+    expect(state.workspaceScanState.running).toBe(false);
+    expect(state.workspaceScanSummary.value.failed).toBe(1);
+
+    unmockPlatform();
+    vi.unstubAllGlobals();
   });
 });
 

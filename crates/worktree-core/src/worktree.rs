@@ -794,7 +794,8 @@ const MAX_RECLAIM_EVIDENCE: usize = 4;
 /// One ignored-entry check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum IgnoredEntryVerdict {
-    /// The entry is empty, a Safe artifact record, or a verified nested checkout.
+    /// The entry is empty, a Safe artifact record, a verified nested checkout, or
+    /// Finder's `.DS_Store` metadata.
     Disposable(String),
     /// The entry contains something that only a person can judge; leave the record
     /// at its branch-only Review level.
@@ -835,8 +836,10 @@ impl ReclaimWalk {
 /// `wt.unpushed_branch`, `wt.recent_activity`) describe work that survives on the
 /// ref, not a file that disappears with the checkout. They are replaced by
 /// [`ReasonCode::WtReclaimableClean`] only when the ignored entries are independently
-/// proven to be a Safe artifact record, a verified reproducible nested checkout, an
-/// empty file, or an empty directory. A name is never enough.
+/// proven to be a Safe artifact record, a verified reproducible nested checkout,
+/// Finder's `.DS_Store` metadata, an empty file, or an empty directory. A name is
+/// never enough, except for the exact Finder metadata file accepted as a regular
+/// file by `is_os_metadata`.
 ///
 /// `protected_paths` holds the other worktree paths from the same scan. An ignored
 /// entry that is, or contains, another worktree is never disposable: deleting the
@@ -954,6 +957,16 @@ const fn is_suppressible_branch_reason(code: ReasonCode) -> bool {
     )
 }
 
+/// Whether an ignored file is the Finder metadata file `.DS_Store`.
+///
+/// The name is exact and the caller has already established that the entry is a
+/// regular file, not a symlink. The file is metadata about how Finder displays its
+/// parent directory, not project content; losing it changes a view, not a source
+/// file. A directory with this name is not covered by this rule.
+fn is_os_metadata(relative: &Path) -> bool {
+    relative.file_name().and_then(|name| name.to_str()) == Some(".DS_Store")
+}
+
 /// Lists the top-level ignored files and directories. `--directory` collapses an
 /// ignored tree to one entry, and `-z` keeps a path that contains a newline intact.
 fn ignored_entries(runner: &dyn GitRunner, root: &Path) -> Result<Vec<PathBuf>, String> {
@@ -1035,6 +1048,12 @@ fn verify_ignored_entry(
         return IgnoredEntryVerdict::NotDisposable;
     }
     if file_type.is_file() {
+        if is_os_metadata(relative) {
+            return IgnoredEntryVerdict::Disposable(format!(
+                "{} is Finder metadata",
+                relative.display()
+            ));
+        }
         return match std::fs::metadata(&absolute) {
             Ok(metadata) if metadata.len() == 0 => {
                 IgnoredEntryVerdict::Disposable(format!("{} is an empty file", relative.display()))
@@ -3761,6 +3780,45 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
+    fn a_suffixed_env_file_is_a_worktree_credential() {
+        // The environment name can come first: `production.env` is a dotenv file,
+        // not an unknown configuration file. Without this match the worktree stayed
+        // Review and a group action could delete the local secret.
+        let dir = temp_dir("worktree-credential-suffixed");
+        backdate(&dir, 30 * 86_400);
+        std::fs::write(dir.join("production.env"), "TOKEN=secret\n").expect("write production.env");
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.push(not_tracked(&[
+            "ls-files",
+            "--error-unmatch",
+            "--",
+            "production.env",
+        ]));
+        let runner = FakeGitRunner::new(rules);
+        let record = check_worktree(
+            &runner,
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(has(&record, ReasonCode::WtCredentials));
+        assert_eq!(record.safety.status, SafetyStatus::Unsafe);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtCredentials)
+            .expect("credential reason");
+        assert!(
+            reason.evidence.contains("production.env"),
+            "the evidence must name the file: {}",
+            reason.evidence
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_tracked_credential_template_is_not_a_worktree_loss() {
         // `.env.example` is matched by the credential table on purpose: a template
         // filled in where it stood is a mistake. But a tracked template is already
@@ -4178,6 +4236,57 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             .expect("reclaim reason");
         assert!(reason.evidence.contains("no ignored entries"));
         assert!(reason.evidence.contains("feature/x"));
+    }
+
+    #[test]
+    fn a_dot_ds_store_file_is_disposable_metadata() {
+        let dir = temp_dir("reclaim-ds-store");
+        std::fs::create_dir_all(dir.join("feature")).expect("create feature");
+        std::fs::write(dir.join("feature/.DS_Store"), b"Finder metadata").expect("write .DS_Store");
+        let mut record = reclaim_record(&dir);
+        let runner = FakeGitRunner::new(ignored_rules("feature/.DS_Store\0"));
+        assert!(apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtReclaimableClean)
+            .expect("reclaim reason");
+        assert!(reason.evidence.contains(".DS_Store"));
+        assert!(reason.evidence.contains("Finder metadata"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dot_ds_store_does_not_make_an_unknown_directory_disposable() {
+        let dir = temp_dir("reclaim-ds-store-mixed");
+        std::fs::create_dir_all(dir.join(".private-dependencies")).expect("create dependency dir");
+        std::fs::write(
+            dir.join(".private-dependencies/.DS_Store"),
+            b"Finder metadata",
+        )
+        .expect("write .DS_Store");
+        std::fs::write(dir.join(".private-dependencies/notes.md"), "keep me\n")
+            .expect("write note");
+        let mut record = reclaim_record(&dir);
+        let runner = FakeGitRunner::new(ignored_rules(".private-dependencies/\0"));
+        assert!(!apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert!(!has(&record, ReasonCode::WtReclaimableClean));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

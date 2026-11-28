@@ -1161,6 +1161,17 @@ h1, h2 { text-wrap: balance; }
 /* The base chip is the neutral one: an "unknown" finding is neither a warning nor a
    reassurance, and colouring it either way would be a claim the audit did not make. */
 .reason--neutral .reason__mark { color: var(--text-3); }
+.reason-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--fs-caption);
+  line-height: 1.65;
+  cursor: pointer;
+}
+.reason-toggle:hover { text-decoration: underline; }
 
 /* ---------- misc blocks ---------- */
 .banner {

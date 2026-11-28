@@ -106,7 +106,7 @@ export function reasonText(reason: Reason): string {
  */
 export function reasonCopy(code: string): string | undefined {
   const dot = code.indexOf(".");
-  const family = code.slice(0, dot) as "wt" | "af";
+  const family = code.slice(0, dot) as "wt" | "af" | "cl";
   const table: Record<string, string> | undefined = messages.reasons[family];
   return table?.[code.slice(dot + 1)];
 }
@@ -252,6 +252,88 @@ export function scanFailureText(failure: ScanFailure): string {
     default:
       return messages.errors.scan.unknown;
   }
+}
+
+/**
+ * The reader-facing wording of one scanner warning.
+ *
+ * Warnings travel from the Rust core as English data, because the operation log
+ * has to stay readable long after the UI language changes. The sentences those
+ * warnings become are UI copy, so they are matched here and written from the
+ * message table. Technical detail — paths, Git commands, error text, slot names —
+ * is passed through unchanged. An unrecognised warning stays as it arrived, so a
+ * newer core still says something true instead of showing a blank banner.
+ */
+export function warningText(warning: string): string {
+  let match = /^Git reported no worktrees for ([\s\S]*); its count is unknown$/.exec(warning);
+  if (match) return messages.warnings.noWorktrees(match[1]);
+
+  match = /^the worktree count for ([\s\S]*?) could not be read: ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.worktreeCount(match[1], match[2]);
+
+  match = /^workspace discovery stopped after (\d+) entries; some repositories may be missing$/.exec(warning);
+  if (match) return messages.warnings.discoveryEntries(Number(match[1]));
+
+  match = /^workspace discovery stopped after (\d+) repositories$/.exec(warning);
+  if (match) return messages.warnings.discoveryRepositories(Number(match[1]));
+
+  match = /^([\s\S]*) is inside the system Trash; discovery does not read the Trash$/.exec(warning);
+  if (match) return messages.warnings.discoveryTrash(match[1]);
+
+  match = /^found (\d+) other local clone\(s\) sharing the selected repository's origin remote under ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.otherClones(Number(match[1]), match[2]);
+
+  match = /^no Git repositories were found below ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.noRepositories(match[1]);
+
+  match = /^the repository stash count could not be read: ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.stashCount(match[1]);
+
+  match = /^the scan budget of (\d+)s ran out after (\d+) of (\d+) worktrees; the remaining ones were not scanned$/.exec(warning);
+  if (match) {
+    return messages.warnings.scanBudgetWorktrees(Number(match[1]), Number(match[2]), Number(match[3]));
+  }
+
+  match = /^size measurement of ([\s\S]*?) did not complete within (\d+)s; the size is recorded as unknown$/.exec(warning);
+  if (match) return messages.warnings.sizeUnknown(match[1], Number(match[2]));
+
+  match = /^(\d+) worktree\(s\) inside the system Trash were not scanned; the Trash is left alone$/.exec(warning);
+  if (match) return messages.warnings.trashedWorktrees(Number(match[1]));
+
+  match = /^the scan budget ran out; artifact scanning stopped at ([\s\S]*?) \((\d+) directories checked so far\)$/.exec(warning);
+  if (match) return messages.warnings.artifactBudget(match[1], Number(match[2]));
+
+  match = /^([\s\S]*) is no longer on disk; it is reported as unmeasurable rather than empty$/.exec(warning);
+  if (match) return messages.warnings.vanished(match[1]);
+
+  match = /^([\s\S]*?) could not be read while looking for build caches: ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.cacheRead(match[1], match[2]);
+
+  match = /^the build-cache scan stopped after (\d+) entries; some caches may be missing$/.exec(warning);
+  if (match) return messages.warnings.cacheScanLimit(Number(match[1]));
+
+  match = /^the build-cache root does not exist or is not a directory: ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.cacheRootMissing(match[1]);
+
+  match = /^no directories carrying CACHEDIR\.TAG were found below ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.noCaches(match[1]);
+
+  match = /^([\s\S]*?) could not be inspected: ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.cacheInspect(match[1], match[2]);
+
+  match = /^size measurement of ([\s\S]*) did not complete; the cache is shown as unmeasurable$/.exec(warning);
+  if (match) return messages.warnings.cacheSizeUnknown(match[1]);
+
+  match = /^the ignore check could not answer for ([\s\S]*?): ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.ignoreCheck(match[1], match[2]);
+
+  match = /^the scan budget ran out; ([\s\S]*) and the slots after it were not measured$/.exec(warning);
+  if (match) return messages.warnings.hygieneBudget(match[1]);
+
+  match = /^\.worktree-keep could not be read, so its exceptions do not apply: ([\s\S]*)$/.exec(warning);
+  if (match) return messages.warnings.keepFileUnreadable(match[1]);
+
+  return warning;
 }
 
 /**

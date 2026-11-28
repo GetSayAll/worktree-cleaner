@@ -30,6 +30,7 @@ use worktree_core::cleanup::{
     execute_plan_with_progress as core_execute, ExecuteOptions, ExecutionOutcome,
 };
 use worktree_core::log;
+use worktree_core::retire::retire_clone as core_retire_clone;
 use worktree_core::workspace::discover_workspace as core_discover_workspace;
 use worktree_core::{
     scan_project as core_scan, ActivityAction, ActivityEvent, CleanupPlan, DetailArg, HistoryEntry,
@@ -286,6 +287,43 @@ async fn execute_plan(
     .map_err(|error| format!("the execution task did not finish: {error}"))
 }
 
+/// Everything the clone-retirement executor needs, in one request.
+///
+/// The snapshot is the scan result that was evaluated; the executor re-checks the
+/// main worktree and every linked removal against it rather than trusting a plan
+/// built outside the core.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct RetireCloneRequest {
+    snapshot: ProjectSnapshot,
+    recent_activity_days: u32,
+    untracked_as_unsafe: bool,
+    whitelist: Vec<String>,
+    per_dir_timeout_ms: u64,
+    git_timeout_ms: u64,
+    log_path: Option<String>,
+}
+
+/// Moves one eligible clone to the system Trash after removing its linked
+/// worktrees through Git. The main worktree is never removed as a worktree item.
+#[tauri::command]
+async fn retire_clone(request: RetireCloneRequest) -> Result<ExecutionOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let options = ExecuteOptions {
+            recent_activity_days: request.recent_activity_days,
+            untracked_as_unsafe: request.untracked_as_unsafe,
+            whitelist: request.whitelist,
+            per_dir_timeout: Duration::from_millis(request.per_dir_timeout_ms.max(1)),
+            git_timeout: Duration::from_millis(request.git_timeout_ms.max(1)),
+            now: std::time::SystemTime::now(),
+            log_path: request.log_path.map(PathBuf::from),
+        };
+        core_retire_clone(&request.snapshot, &options)
+    })
+    .await
+    .map_err(|error| format!("the clone retirement task did not finish: {error}"))
+}
+
 /// Where the operation log lives on this machine, so the settings page can show
 /// the path it is actually writing to instead of a guess.
 #[tauri::command]
@@ -433,6 +471,7 @@ pub fn run() {
             execute_plan,
             execute_cache_plan,
             execute_generated_cache_plan,
+            retire_clone,
             log_path,
             read_history,
             clear_log,

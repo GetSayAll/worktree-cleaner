@@ -153,6 +153,13 @@ export const en = {
       git_ignored: "ignored by .gitignore",
       rebuildable: "regenerable directory",
       unknown_cache: "cache owner is not recognised"
+    },
+    cl: {
+      eligible:
+        "the main worktree is clean and every linked worktree is Safe; the whole clone can be removed",
+      not_ready: "the clone cannot be removed yet: a check is unfinished or the main worktree is missing",
+      stash: "the repository has stash entries",
+      no_upstream: "the main branch has no upstream; cannot confirm every commit is pushed"
     }
   },
   // What one executed action did, keyed by DetailCode (src/types.ts). The core
@@ -205,6 +212,13 @@ export const en = {
       },
       bundled: {
         with_worktree: "Removed with its worktree."
+      },
+      clone: {
+        not_ready:
+          "The clone was not removed. The main worktree or a linked worktree no longer met the removal conditions.",
+        retired: "The whole clone was moved to the {{trash}}.",
+        retire_failed:
+          "The clone could not be moved to the {{trash}}. Its linked worktrees may already be removed; the main clone is still on disk."
       }
     },
     // The name of the field that moved, for the `changed` codes. Without these
@@ -277,12 +291,15 @@ export const en = {
     revealShort: "↗",
     revealHint: "Show this item in {{fileManager}}",
     mainWorktree: (name: string) => `${name} (main worktree)`,
+    showMore: (count: number) => (count === 1 ? "Show 1 more" : `Show ${count} more`),
+    showLess: "Show less",
     rescan: "Rescan",
     copied: "Copied",
     action: {
       worktreeRemove: "Remove Worktree",
       trashMove: "Move to {{trash}}",
-      prune: "Clean up leftovers"
+      prune: "Clean up leftovers",
+      cloneRetire: "Remove whole clone"
     },
     outcome: {
       // Every row on the result page is a deletion, so the label says what happened
@@ -357,13 +374,68 @@ export const en = {
         "The scan did not finish. Try again; the operation log has the technical detail."
     }
   },
+  // Scanner notes are matched by `warningText` in src/format.ts. The raw string
+  // stays on the record for logs and for a newer core this build does not know.
+  warnings: {
+    noWorktrees: (path: string) =>
+      `Git reported no worktrees for ${path}; its count is unknown`,
+    worktreeCount: (path: string, detail: string) =>
+      `the worktree count for ${path} could not be read: ${detail}`,
+    discoveryEntries: (count: number) =>
+      `workspace discovery stopped after ${count} entries; some repositories may be missing`,
+    discoveryRepositories: (count: number) =>
+      `workspace discovery stopped after ${count} repositories`,
+    discoveryTrash: (path: string) =>
+      `${path} is inside the {{trash}}; discovery does not read the {{trash}}`,
+    otherClones: (count: number, path: string) =>
+      `found ${count} other local clone(s) sharing the selected repository's origin remote under ${path}`,
+    noRepositories: (path: string) => `no Git repositories were found below ${path}`,
+    stashCount: (detail: string) =>
+      `the repository stash count could not be read: ${detail}`,
+    scanBudgetWorktrees: (seconds: number, scanned: number, total: number) =>
+      `the scan budget of ${seconds}s ran out after ${scanned} of ${total} worktrees; the remaining ones were not scanned`,
+    sizeUnknown: (path: string, seconds: number) =>
+      `size measurement of ${path} did not complete within ${seconds}s; the size is recorded as unknown`,
+    trashedWorktrees: (count: number) =>
+      `${count} worktree(s) inside the {{trash}} were not scanned; the {{trash}} is left alone`,
+    artifactBudget: (path: string, checked: number) =>
+      `the scan budget ran out; artifact scanning stopped at ${path} (${checked} directories checked so far)`,
+    vanished: (path: string) =>
+      `${path} is no longer on disk; it is reported as unmeasurable rather than empty`,
+    cacheRead: (path: string, error: string) =>
+      `${path} could not be read while looking for build caches: ${error}`,
+    cacheScanLimit: (count: number) =>
+      `the build-cache scan stopped after ${count} entries; some caches may be missing`,
+    cacheRootMissing: (path: string) =>
+      `the build-cache root does not exist or is not a directory: ${path}`,
+    noCaches: (path: string) =>
+      `no directories carrying CACHEDIR.TAG were found below ${path}`,
+    cacheInspect: (path: string, error: string) =>
+      `${path} could not be inspected: ${error}`,
+    cacheSizeUnknown: (path: string) =>
+      `size measurement of ${path} did not complete; the cache is shown as unmeasurable`,
+    ignoreCheck: (probe: string, detail: string) =>
+      `the ignore check could not answer for ${probe}: ${detail}`,
+    hygieneBudget: (slot: string) =>
+      `the scan budget ran out; ${slot} and the slots after it were not measured`,
+    keepFileUnreadable: (error: string) =>
+      `.worktree-keep could not be read, so its exceptions do not apply: ${error}`
+  },
   workspace: {
     title: "Repositories",
     lede:
       "This folder contains several Git repositories. Each one is scanned and cleaned on its own, so every worktree verdict stays anchored to its repository's default branch.",
     chooseAnother: "Choose another folder",
     repositoriesTitle: (count: number) => `Repositories (${count})`,
-    oneAtATime: "One repository at a time",
+    batchHint: "Scan all, then open a repository to clean it under its own plan",
+    scanAll: (count: number) => (count === 1 ? "Scan this repository" : `Scan all ${count} repositories`),
+    scanningAll: (completed: number, total: number) =>
+      `Scanning ${Math.min(completed + 1, total)} of ${total} repositories…`,
+    cancelScanAll: "Cancel scan",
+    batchSummary: (done: number, worktrees: number, artifacts: number) =>
+      `${done} scanned · ${worktrees} worktrees · ${artifacts} artifact directories`,
+    batchFailed: (count: number) =>
+      count === 1 ? "1 repository could not be scanned" : `${count} repositories could not be scanned`,
     worktrees: (count: number | null) =>
       count === null
         ? "worktree count unknown"
@@ -371,8 +443,39 @@ export const en = {
           ? "1 worktree"
           : `${count} worktrees`,
     scan: "Scan repository",
+    retry: "Retry scan",
+    openScan: "Open scan",
+    scanningRepository: (name: string) => `Scanning ${name}…`,
+    scanSummary: (worktrees: number, artifacts: number, safe: number, review: number, unsafe: number) =>
+      `${worktrees} worktrees, ${artifacts} artifact directories · ${safe} safe, ${review} review, ${unsafe} blocked`,
+    scanFailed: "This repository could not be scanned. Nothing was changed.",
     rowEvidence: "Read-only discovery; scan this repository to evaluate its worktrees",
     empty: "No Git repositories were found under this folder."
+  },
+  retire: {
+    title: "Remove whole clone",
+    lede:
+      "Move this whole clone to the {{trash}}. Its linked worktrees are removed through Git first, so their branch refs stay in the clone.",
+    requirements:
+      "To remove the whole clone, the main worktree must be clean and pushed (no changed, untracked or credential files; the branch has an upstream and no unpushed commits), the repository must have no stash, and every linked worktree must be safe to delete.",
+    blockers: "What is blocking removal",
+    cloneTitle: "Clone",
+    mainWorktree: "Main worktree",
+    linkedWorktrees: (count: number) =>
+      count === 1
+        ? "1 linked worktree will be removed first"
+        : `${count} linked worktrees will be removed first`,
+    noLinked: "No linked worktrees.",
+    eligible: "Can be removed",
+    blockedBadge: "Cannot remove yet",
+    trashNotice:
+      "The whole clone, including .git, moves to the {{trash}} and can be restored until the {{trash}} is emptied. Linked worktree removal is permanent; their branch refs stay in the clone.",
+    acknowledge:
+      "I understand that the linked worktrees are removed permanently and the clone is moved to the {{trash}}.",
+    confirm: "Move whole clone to {{trash}}",
+    retiring: "Moving clone to {{trash}}…",
+    blocked: "Resolve the blockers above before removing this clone.",
+    back: "Back to overview"
   },
   caches: {
     title: "System caches",
@@ -546,7 +649,7 @@ export const en = {
     title: "Worktree",
     mainWorkspaceBadge: "Main workspace · Protected",
     mainWorkspaceHint: (_branch: string) =>
-      "The main workspace is the repository itself and cannot be deleted.",
+      "The main workspace is the repository itself and cannot be removed as a worktree; use Remove whole clone to move the whole clone to the {{trash}}.",
     // `git worktree add` takes any path, so a worktree of the repository the user
     // picked can sit anywhere. The page says so rather than leaving the reader to
     // notice that a path is not under the directory at the top of the window.
@@ -1001,8 +1104,8 @@ export const en = {
   result: {
     title: "Result",
     successTitle: "Cleanup complete",
-    successSummary: (worktrees: number, freed: string, artifacts: number, trash: string) =>
-      `Removed ${worktrees} worktrees and freed ${freed} now. Moved ${artifacts} artifact directories to the {{trash}}; ${trash} is freed after it is emptied.`,
+    successSummary: (worktrees: number, freed: string, artifacts: number, trash: string, clones: number) =>
+      `Removed ${worktrees} worktrees and freed ${freed} now. Moved ${artifacts} artifact directories to the {{trash}}; ${trash} is freed after it is emptied.${clones > 0 ? ` ${clones} ${clones === 1 ? "whole clone is" : "whole clones are"} in the {{trash}}.` : ""}`,
     partialTitle: "Cleanup finished with skipped items",
     partialSummary: (
       worktrees: number,
@@ -1023,6 +1126,10 @@ export const en = {
       "Nothing went to the {{trash}}; the table below says why.",
     worktreePermanentNotice: (n: number) =>
       `${n} ${n === 1 ? "worktree was" : "worktrees were"} permanently deleted. ${n === 1 ? "Its branch remains; its working directory and untracked files do not." : "Their branches remain; their working directories and untracked files do not."}`,
+    cloneRetiredNotice: (n: number) =>
+      n === 1
+        ? "The whole clone was moved to the {{trash}}; restore it there before emptying the {{trash}}."
+        : `${n} whole clones were moved to the {{trash}}; restore them there before emptying the {{trash}}.`,
     openLog: "Open log",
     logFailedTitle: "The operation log could not be written",
     stats: {
@@ -1036,8 +1143,8 @@ export const en = {
       inTrashSubUnknown: (n: number) =>
         `At least the measured sizes · ${n} artifact directories had no measurable size`,
       handled: "Handled",
-      handledSub: (worktrees: number, artifacts: number) =>
-        `${worktrees} worktrees and ${artifacts} artifact directories`,
+      handledSub: (worktrees: number, artifacts: number, clones: number) =>
+        `${worktrees} worktrees and ${artifacts} artifact directories${clones > 0 ? `, and ${clones} ${clones === 1 ? "clone" : "clones"}` : ""}`,
       skippedFailed: "Not deleted",
       skippedFailedSub: "nothing was removed; the table below says why"
     },

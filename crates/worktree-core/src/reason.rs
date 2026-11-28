@@ -86,11 +86,11 @@ pub enum ReasonCode {
     WtReproducibleCheckout,
     /// The worktree is clean, its branch ref is kept by removal, and every ignored
     /// entry is proven disposable: a Safe artifact record, a verified reproducible
-    /// nested checkout, an empty file, or an empty directory. The branch may be
-    /// unmerged or have no upstream; the ref survives and the directory holds no
-    /// non-reproducible file. This explicitly replaces the branch-only Review
-    /// reasons `wt.unmerged`, `wt.no_upstream`, `wt.unpushed_branch` and
-    /// `wt.recent_activity`.
+    /// nested checkout, Finder's `.DS_Store` metadata, an empty file, or an empty
+    /// directory. The branch may be unmerged or have no upstream; the ref survives
+    /// and the directory holds no non-reproducible file. This explicitly replaces the
+    /// branch-only Review reasons `wt.unmerged`, `wt.no_upstream`,
+    /// `wt.unpushed_branch` and `wt.recent_activity`.
     #[serde(rename = "wt.reclaimable_clean")]
     WtReclaimableClean,
     /// **No longer emitted.** A stash lives in the common Git directory, so it belongs
@@ -146,12 +146,30 @@ pub enum ReasonCode {
     /// regenerable, so the reader must decide.
     #[serde(rename = "af.unknown_cache")]
     AfUnknownCache,
+    // ---- clone retirement ----
+    /// The whole clone is ready to move to the system Trash: the main worktree is
+    /// clean and every linked worktree is Safe. This is not a worktree verdict.
+    #[serde(rename = "cl.eligible")]
+    CloneEligible,
+    /// The clone cannot be removed yet. The evidence names the first blocking
+    /// condition: the main worktree is not clean, a linked worktree is not Safe,
+    /// or the worktree scan is incomplete.
+    #[serde(rename = "cl.not_ready")]
+    CloneNotReady,
+    /// The repository has stash entries. A stash belongs to the repository, not to
+    /// any one worktree, so it needs a clone-level reason.
+    #[serde(rename = "cl.stash")]
+    CloneStash,
+    /// The main branch has no upstream, so no check can confirm that every commit
+    /// is already on a remote.
+    #[serde(rename = "cl.no_upstream")]
+    CloneNoUpstream,
 }
 
 impl ReasonCode {
     /// All reason codes. Used by the contract-drift test (the serialised value must
     /// match [`Self::as_str`]).
-    pub const ALL: [ReasonCode; 34] = [
+    pub const ALL: [ReasonCode; 38] = [
         ReasonCode::WtMain,
         ReasonCode::WtLocked,
         ReasonCode::WtDirty,
@@ -186,6 +204,10 @@ impl ReasonCode {
         ReasonCode::AfGitIgnored,
         ReasonCode::AfRebuildable,
         ReasonCode::AfUnknownCache,
+        ReasonCode::CloneEligible,
+        ReasonCode::CloneNotReady,
+        ReasonCode::CloneStash,
+        ReasonCode::CloneNoUpstream,
     ];
 
     /// External string form, which must match `serde`'s serialised value.
@@ -225,6 +247,10 @@ impl ReasonCode {
             ReasonCode::AfGitIgnored => "af.git_ignored",
             ReasonCode::AfRebuildable => "af.rebuildable",
             ReasonCode::AfUnknownCache => "af.unknown_cache",
+            ReasonCode::CloneEligible => "cl.eligible",
+            ReasonCode::CloneNotReady => "cl.not_ready",
+            ReasonCode::CloneStash => "cl.stash",
+            ReasonCode::CloneNoUpstream => "cl.no_upstream",
         }
     }
 }
@@ -451,11 +477,11 @@ mod tests {
             );
             let s = code.as_str();
             assert!(
-                s.starts_with("wt.") || s.starts_with("af."),
-                "reason code must carry a wt. / af. prefix: {s}"
+                s.starts_with("wt.") || s.starts_with("af.") || s.starts_with("cl."),
+                "reason code must carry a wt. / af. / cl. prefix: {s}"
             );
         }
-        assert_eq!(ReasonCode::ALL.len(), 34);
+        assert_eq!(ReasonCode::ALL.len(), 38);
     }
 
     #[test]

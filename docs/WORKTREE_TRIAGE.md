@@ -70,8 +70,10 @@ ref, so an unmerged branch is a Review only while the directory may still hold
 something Git cannot restore. `wt.reclaimable_clean` promotes the record to `Safe`
 when that remaining question is answered: the worktree is clean, has a local
 branch, and **every ignored top-level entry** is a Safe artifact record, a verified
-reproducible nested checkout with a `.git` directory, a zero-byte file, or a
-directory containing only those. A name is never the proof. A credential, an active
+reproducible nested checkout with a `.git` directory, Finder's `.DS_Store`
+metadata file, a zero-byte file, or a directory containing only those. A name is
+never the proof, except for the exact Finder metadata file `.DS_Store`, whose
+content is a view preference rather than project data. A credential, an active
 Git lock, a dirty or untracked file, a symlink, another worktree, a `.git` file
 (linked worktree or submodule), a recent artifact write, or a failed check keeps the
 record at Review.
@@ -164,8 +166,10 @@ Always compare against `origin/<default>`. Never against a bare branch name.
   ignored by Git. The artifact scanner has `af.credentials` for artifact directories,
   and the worktree verdict runs the same bounded name-table walk at the worktree root
   as `wt.credentials` when the tracked files are clean, skipping the recognised
-  artifact directories and the reproducible dependency and build trees. A secret whose
-  name gives nothing away, such as a `config.json` holding a key, is still not covered.
+  artifact directories and the reproducible dependency and build trees. The table
+  covers `.env` variants and names ending in `.env`, including `production.env`. A
+  secret whose name gives nothing away, such as a `config.json` holding a key, is
+  still not covered.
 - **Unmerged work that the user still wants.** No command answers this. It is the
   reason `Review` is a real category and not a failure of the tool.
 
@@ -173,7 +177,7 @@ Always compare against `origin/<default>`. Never against a bare branch name.
 
 1. `git fetch` every repository first, in parallel. Every comparison below is
    against a remote-tracking ref, so an unfetched repository answers with old facts.
-2. Enumerate worktrees per repository; drop the main one (it is never removable).
+2. Enumerate worktrees per repository; drop the main one as a worktree item (it is never removable in a worktree plan; only a separate whole-clone removal action can move the whole clone).
 3. Measure size per worktree, never per repository root.
 4. Classify with A, then B. For a clean worktree that fails both, use
    `wt.reclaimable_clean` only when every ignored entry is proven disposable; otherwise

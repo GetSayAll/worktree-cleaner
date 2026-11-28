@@ -137,6 +137,13 @@ export const zhCN = {
       git_ignored: "已被 .gitignore 忽略",
       rebuildable: "可重新生成的目录",
       unknown_cache: "缓存所属应用未知"
+    },
+    cl: {
+      eligible:
+        "主工作树干净，所有关联工作树都是可安全删除；整个 clone 可以移除",
+      not_ready: "这个 clone 暂时不能移除：还有检查未完成，或缺少主工作树信息",
+      stash: "仓库里还有 stash 条目",
+      no_upstream: "主分支没有上游分支，无法确认提交是否都已推送"
     }
   },
   // 一次执行动作的结果，按 DetailCode（`src/types.ts`）索引。核心决定「发生了什么」
@@ -180,6 +187,13 @@ export const zhCN = {
       },
       bundled: {
         with_worktree: "已随所属工作树一起移除。"
+      },
+      clone: {
+        not_ready:
+          "这个 clone 未移除：主工作树或某个关联工作树已不再满足移除条件。",
+        retired: "整个 clone 已移入{{trash}}。",
+        retire_failed:
+          "无法把整个 clone 移入{{trash}}。关联工作树可能已经移除，但主 clone 仍在磁盘上。"
       }
     },
     // 变化字段的名字，供两个 changed 码使用。没有这张表，句子里的字段名会是英文。
@@ -248,12 +262,15 @@ export const zhCN = {
     revealShort: "↗",
     revealHint: "在{{fileManager}}中显示这个项目",
     mainWorktree: (name: string) => `${name}（主工作树）`,
+    showMore: (count: number) => `再显示 ${count} 条`,
+    showLess: "收起",
     rescan: "重新扫描",
     copied: "已复制",
     action: {
       worktreeRemove: "移除工作树",
       trashMove: "移入{{trash}}",
-      prune: "清理残留"
+      prune: "清理残留",
+      cloneRetire: "移除整个 clone"
     },
     outcome: {
       ok: "已删除",
@@ -327,18 +344,100 @@ export const zhCN = {
       unknown: "扫描没有完成。请重试；技术详情见操作日志。"
     }
   },
+  // 扫描器警告由 src/format.ts 的 `warningText` 匹配成这里的一句话。原始英文
+  // 仍留在扫描结果和日志里；更新版核心带来的未知警告会原样显示。
+  warnings: {
+    noWorktrees: (path: string) =>
+      `Git 报告 ${path} 没有工作树；数量未知`,
+    worktreeCount: (path: string, detail: string) =>
+      `无法读取 ${path} 的工作树数量：${detail}`,
+    discoveryEntries: (count: number) =>
+      `工作区发现达到 ${count} 个条目上限，部分仓库可能未显示`,
+    discoveryRepositories: (count: number) =>
+      `工作区发现达到 ${count} 个仓库上限`,
+    discoveryTrash: (path: string) =>
+      `${path} 位于{{trash}}中；发现流程不读取{{trash}}`,
+    otherClones: (count: number, path: string) =>
+      `在 ${path} 下发现 ${count} 个其他本地 clone，共享所选仓库的 origin remote`,
+    noRepositories: (path: string) => `在 ${path} 下没有找到 Git 仓库`,
+    stashCount: (detail: string) =>
+      `无法读取仓库的 stash 数量：${detail}`,
+    scanBudgetWorktrees: (seconds: number, scanned: number, total: number) =>
+      `扫描预算 ${seconds} 秒已用完，只扫描了 ${scanned}/${total} 个工作树；其余未扫描`,
+    sizeUnknown: (path: string, seconds: number) =>
+      `${path} 的大小测量在 ${seconds} 秒内未完成；大小记为未知`,
+    trashedWorktrees: (count: number) =>
+      `${count} 个工作树位于{{trash}}中，未扫描；{{trash}}保持不读取`,
+    artifactBudget: (path: string, checked: number) =>
+      `扫描预算已用完；构建产物扫描停在 ${path}（已检查 ${checked} 个目录）`,
+    vanished: (path: string) =>
+      `${path} 已不在磁盘上；按不可测量处理，而不是空目录`,
+    cacheRead: (path: string, error: string) =>
+      `查找构建缓存时无法读取 ${path}：${error}`,
+    cacheScanLimit: (count: number) =>
+      `构建缓存扫描达到 ${count} 个条目上限，部分缓存可能未显示`,
+    cacheRootMissing: (path: string) =>
+      `构建缓存根目录不存在或不是目录：${path}`,
+    noCaches: (path: string) =>
+      `在 ${path} 下没有找到带 CACHEDIR.TAG 的目录`,
+    cacheInspect: (path: string, error: string) =>
+      `无法检查 ${path}：${error}`,
+    cacheSizeUnknown: (path: string) =>
+      `${path} 的大小测量未完成；缓存显示为不可测量`,
+    ignoreCheck: (probe: string, detail: string) =>
+      `无法为 ${probe} 完成 ignore 检查：${detail}`,
+    hygieneBudget: (slot: string) =>
+      `扫描预算已用完；${slot} 及其后面的槽位未测量`,
+    keepFileUnreadable: (error: string) =>
+      `.worktree-keep 无法读取，因此其中的例外不会生效：${error}`
+  },
   workspace: {
     title: "仓库列表",
     lede:
       "这个文件夹里包含多个 Git 仓库。每个仓库单独扫描、单独清理，所有工作树判定仍然以它自己的默认分支为准。",
     chooseAnother: "选择其他文件夹",
     repositoriesTitle: (count: number) => `仓库（${count}）`,
-    oneAtATime: "一次处理一个仓库",
+    batchHint: "先全部扫描，再打开某个仓库按它自己的清理计划处理",
+    scanAll: (count: number) => (count === 1 ? "扫描这个仓库" : `扫描全部 ${count} 个仓库`),
+    scanningAll: (completed: number, total: number) =>
+      `正在扫描第 ${Math.min(completed + 1, total)} / ${total} 个仓库…`,
+    cancelScanAll: "取消扫描",
+    batchSummary: (done: number, worktrees: number, artifacts: number) =>
+      `已扫描 ${done} 个仓库 · ${worktrees} 个工作树 · ${artifacts} 个产物目录`,
+    batchFailed: (count: number) => `${count} 个仓库扫描失败`,
     worktrees: (count: number | null) =>
       count === null ? "工作树数量未知" : count === 1 ? "1 个工作树" : `${count} 个工作树`,
     scan: "扫描这个仓库",
+    retry: "重新扫描",
+    openScan: "打开扫描结果",
+    scanningRepository: (name: string) => `正在扫描 ${name}…`,
+    scanSummary: (worktrees: number, artifacts: number, safe: number, review: number, unsafe: number) =>
+      `${worktrees} 个工作树、${artifacts} 个产物目录；可删 ${safe}、待确认 ${review}、禁止 ${unsafe}`,
+    scanFailed: "这个仓库扫描失败；没有改动任何内容。",
     rowEvidence: "只读发现；扫描这个仓库后才会评估它的工作树",
     empty: "这个文件夹下面没有找到 Git 仓库。"
+  },
+  retire: {
+    title: "移除整个 clone",
+    lede:
+      "把这个 clone 整体移入{{trash}}。关联工作树会先通过 Git 移除，所以分支 ref 会留在 clone 里。",
+    requirements:
+      "要移除整个 clone，主工作树必须干净且已推送（没有未提交、未跟踪或凭据文件；分支有上游且没有未推送提交），仓库里不能有 stash 条目，并且所有关联工作树都必须可安全删除。",
+    blockers: "为什么还不能移除",
+    cloneTitle: "Clone",
+    mainWorktree: "主工作树",
+    linkedWorktrees: (count: number) =>
+      count === 1 ? "会先移除 1 个关联工作树" : `会先移除 ${count} 个关联工作树`,
+    noLinked: "没有关联工作树。",
+    eligible: "可以移除",
+    blockedBadge: "暂不能移除",
+    trashNotice:
+      "整个 clone（包括 .git）会移入{{trash}}，在清空{{trash}}前可以恢复。关联工作树的移除是永久的；它们的分支 ref 会留在 clone 里。",
+    acknowledge: "我明白关联工作树会被永久移除，整个 clone 会移入{{trash}}。",
+    confirm: "把整个 clone 移入{{trash}}",
+    retiring: "正在移入{{trash}}…",
+    blocked: "解决上面的阻塞原因后，才能移除这个 clone。",
+    back: "返回总览"
   },
   caches: {
     title: "系统缓存",
@@ -502,7 +601,7 @@ export const zhCN = {
     title: "工作树",
     mainWorkspaceBadge: "主工作区 · 受保护",
     mainWorkspaceHint: (_branch: string) =>
-      "主工作区就是仓库本身，不能删除。",
+      "主工作区就是仓库本身，不能作为工作树删除；如需移除整个 clone，请使用「移除整个 clone」移入{{trash}}。",
     outsideRoot: "在所选目录之外",
     outsideRootHint:
       "在所选目录之外，但仍可扫描和删除。",
@@ -929,8 +1028,8 @@ export const zhCN = {
   result: {
     title: "执行结果",
     successTitle: "清理完成",
-    successSummary: (worktrees: number, freed: string, artifacts: number, trash: string) =>
-      `已移除 ${worktrees} 个工作树，立即释放 ${freed}；将 ${artifacts} 个产物目录移入{{trash}}，清空后可再释放 ${trash}。`,
+    successSummary: (worktrees: number, freed: string, artifacts: number, trash: string, clones: number) =>
+      `已移除 ${worktrees} 个工作树，立即释放 ${freed}；将 ${artifacts} 个产物目录移入{{trash}}，清空后可再释放 ${trash}。${clones > 0 ? `另有 ${clones} 个 clone 已在{{trash}}里。` : ""}`,
     partialTitle: "清理完成，但有跳过项",
     partialSummary: (
       worktrees: number,
@@ -951,6 +1050,10 @@ export const zhCN = {
       "没有目录进入{{trash}}；原因见下表。",
     worktreePermanentNotice: (n: number) =>
       `${n} 个工作树已永久删除，分支仍保留；工作目录和未跟踪文件不会保留。`,
+    cloneRetiredNotice: (n: number) =>
+      n === 1
+        ? "整个 clone 已移入{{trash}}；清空{{trash}}前可以在那里恢复。"
+        : `${n} 个 clone 已整体移入{{trash}}；清空{{trash}}前可以在那里恢复。`,
     openLog: "打开日志",
     logFailedTitle: "操作日志没能写入",
     stats: {
@@ -963,8 +1066,8 @@ export const zhCN = {
       inTrashSubUnknown: (n: number) =>
         `至少为已测得的体积 · ${n} 个产物目录无法测量体积`,
       handled: "已处理",
-      handledSub: (worktrees: number, artifacts: number) =>
-        `${worktrees} 个工作树、${artifacts} 个产物目录`,
+      handledSub: (worktrees: number, artifacts: number, clones: number) =>
+        `${worktrees} 个工作树、${artifacts} 个产物目录${clones > 0 ? `、${clones} 个 clone` : ""}`,
       skippedFailed: "未删除",
       skippedFailedSub: "都没删，原因见下表"
     },

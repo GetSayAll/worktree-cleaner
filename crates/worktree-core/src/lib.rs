@@ -15,6 +15,7 @@ pub mod log;
 pub(crate) mod nested;
 pub mod path;
 pub mod reason;
+pub mod retire;
 pub mod timefmt;
 pub mod workspace;
 pub mod worktree;
@@ -54,7 +55,11 @@ use crate::timefmt::format_rfc3339;
 /// Version 3 added `hygiene`: the read-only policy audit of `docs/DISK_HYGIENE.md`.
 /// A version 2 consumer must reject the snapshot rather than quietly show a
 /// repository with no compliance report at all.
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
+///
+/// Version 4 added `clone_retirement`: the clone-level assessment that can lead to
+/// the whole clone moving to the system Trash. It is deliberately not a worktree
+/// verdict; the main worktree remains protected from ordinary cleanup.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 4;
 
 /// Contract version of a workspace discovery result. It is a separate payload
 /// from [`ProjectSnapshot`] and can grow independently.
@@ -193,6 +198,7 @@ pub enum HistoryAction {
     WorktreeRemove,
     TrashMove,
     Prune,
+    CloneRetire,
 }
 
 /// How one executed action ended.
@@ -295,6 +301,15 @@ pub enum DetailCode {
     /// Removed together with its worktree; not a separate operation.
     #[serde(rename = "bundled.with_worktree")]
     BundledWithWorktree,
+    /// The clone-level retirement was refused before moving anything.
+    #[serde(rename = "clone.not_ready")]
+    CloneNotReady,
+    /// The whole clone moved to the system Trash.
+    #[serde(rename = "clone.retired")]
+    CloneRetired,
+    /// Moving the clone to the system Trash failed. Carries `error`.
+    #[serde(rename = "clone.retire_failed")]
+    CloneRetireFailed,
 }
 
 /// What the user did, as distinct from what was deleted.
@@ -527,6 +542,24 @@ pub struct WorkspaceSnapshot {
     pub warnings: Vec<String>,
 }
 
+/// The clone-level assessment for retiring an entire independent repository.
+///
+/// This is deliberately separate from `WorktreeRecord.safety`: a main worktree is
+/// never a normal deletion item (D4). The clone action can exist only when the main
+/// worktree and every linked worktree satisfy the clone-retirement rule, and it
+/// moves the whole clone to the system Trash rather than deleting a working tree
+/// with a raw filesystem call.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CloneRetirement {
+    /// True only when the main worktree is clean and every linked worktree is Safe.
+    pub eligible: bool,
+    pub main_path: String,
+    /// Linked worktrees that will be removed through Git before the clone moves.
+    pub linked_worktrees: Vec<String>,
+    /// Positive evidence when eligible, blockers otherwise. Never empty.
+    pub reasons: Vec<Reason>,
+}
+
 /// The complete result of one scan, also the payload of `snapshot.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProjectSnapshot {
@@ -536,6 +569,8 @@ pub struct ProjectSnapshot {
     pub default_branch: Option<String>,
     pub worktrees: Vec<WorktreeRecord>,
     pub artifacts: Vec<ArtifactRecord>,
+    /// Clone-level retirement readiness; it never enters `CleanupPlan`.
+    pub clone_retirement: CloneRetirement,
     /// Compliance with the disk-hygiene policy (`docs/DISK_HYGIENE.md`), read-only.
     /// It decides nothing about deletion: an item can be perfectly safe to remove
     /// and still break the layout, or the other way round.
@@ -718,6 +753,12 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
         );
     }
 
+    // A clone-level decision is separate from every worktree verdict above. The
+    // main worktree remains Unsafe in the ordinary list; this says whether the
+    // whole clone can be retired, not whether its main working tree can be removed.
+    let worktree_scan_complete = worktrees.len() == entries.len();
+    let clone_retirement = retire::assess_clone_retirement(&worktrees, worktree_scan_complete);
+
     // ---- policy compliance ----
     // The audit reads the verdicts the two passes above already established — a
     // second pass over the same worktrees would pay for the same Git calls twice —
@@ -748,6 +789,7 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
         default_branch,
         worktrees,
         artifacts: artifact_scan.records,
+        clone_retirement,
         hygiene,
         warnings,
     })
@@ -852,7 +894,7 @@ mod tests {
         // The contract version must be readable by both the CLI and the web UI, and
         // match the constant in src/types.ts.
         let version = SNAPSHOT_SCHEMA_VERSION;
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]
@@ -999,11 +1041,24 @@ mod tests {
             default_branch: Some("main".to_string()),
             worktrees: vec![sample_worktree()],
             artifacts: vec![sample_artifact()],
+            clone_retirement: CloneRetirement {
+                eligible: false,
+                main_path: "/Users/andy/MySrc".to_string(),
+                linked_worktrees: Vec::new(),
+                reasons: vec![Reason::review(
+                    ReasonCode::CloneNotReady,
+                    "the clone is not ready",
+                    "fixture",
+                )],
+            },
             hygiene: sample_hygiene(),
             warnings: vec!["size measurement timed out for .nuxt".to_string()],
         };
         let json = serde_json::to_string(&snapshot).expect("serialize snapshot");
-        assert!(json.contains("\"schema_version\":3"));
+        assert!(json.contains("\"schema_version\":4"));
+        // The clone-level decision travels with the snapshot, but it is not a
+        // worktree verdict and is not part of the cleanup plan.
+        assert!(json.contains("\"clone_retirement\""));
         // The audit travels with the snapshot: a consumer that ignores it would show
         // a repository with no compliance report and no sign that one was missing.
         assert!(json.contains("\"hygiene\""));

@@ -390,6 +390,46 @@ describe("the app shell", () => {
     host.remove();
   });
 
+  it("offers the clone-level retirement confirmation", async () => {
+    const { app, host } = mountApp();
+    state.snapshot.value = {
+      ...mockSnapshot,
+      clone_retirement: {
+        eligible: true,
+        main_path: mockSnapshot.root,
+        linked_worktrees: [],
+        reasons: [
+          {
+            code: "cl.eligible",
+            severity: "Safe",
+            text: "the clone can be retired",
+            evidence: "main worktree is clean"
+          }
+        ]
+      }
+    };
+    state.projectPath.value = mockSnapshot.root;
+    state.view.value = "overview";
+    await nextTick();
+
+    const open = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find((button) =>
+      button.textContent?.includes(messages.retire.confirm)
+    );
+    expect(open, "the retirement action is missing from the overview").toBeDefined();
+    open!.click();
+    await nextTick();
+
+    expect(host.textContent).toContain(messages.retire.title);
+    expect(host.textContent).toContain(messages.retire.acknowledge);
+    expect(host.textContent).toContain(messages.retire.mainWorktree);
+
+    state.snapshot.value = null;
+    state.projectPath.value = "";
+    state.view.value = "welcome";
+    app.unmount();
+    host.remove();
+  });
+
   it("keeps the cache inventory separate from the project result", async () => {
     const { app, host } = mountApp();
     state.cacheSnapshot.value = mockCacheSnapshot;

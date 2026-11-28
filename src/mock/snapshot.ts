@@ -823,6 +823,19 @@ export const mockSnapshot: ProjectSnapshot = {
       ])
     }
   ] as ArtifactRecord[],
+  clone_retirement: {
+    eligible: false,
+    main_path: mockRoot,
+    linked_worktrees: [`${mockRoot}--codex-fix-ble`, `${mockRoot}--cursor-perf`],
+    reasons: [
+      {
+        code: "cl.not_ready",
+        severity: "Review",
+        text: "the clone cannot be retired",
+        evidence: "the sample main worktree has a stash entry and linked worktrees remain"
+      }
+    ]
+  },
   hygiene: mockHygiene
 };
 

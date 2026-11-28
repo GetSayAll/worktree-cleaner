@@ -65,6 +65,14 @@ line-ending, case, file-mode and symlink settings are honored.
   Claude Code, WorkBuddy, Cursor, Aider, or a person with `git worktree add`.
   The layout of any agent's directory is never assumed; only standard Git
   metadata is read.
+- **Finds independent local clones** of the selected repository by comparing the
+  `origin` remote in the repository's parent folder, and can scan all of them in
+  one action. Each clone remains a separate repository with its own snapshot and
+  cleanup plan.
+- **Removes a redundant clone as a whole.** When its main worktree is clean and
+  every linked worktree is Safe, the clone can be moved to the system Trash; linked
+  worktrees are removed through Git first, and any failed removal leaves the main
+  clone in place.
 - **Reads the state of each one**: branch, working-tree status, last commit,
   upstream, whether it is merged, whether it is locked.
 - **Finds build artifacts** — `node_modules`, `target`, `dist`, `build`, and the
@@ -112,9 +120,14 @@ These are the rules the code is written around, and the tests assert them:
 - A worktree is removed through Git's worktree API (gix) and is permanent; the
   branch ref remains. Its metadata is pruned afterwards. No raw directory delete
   is used.
+- A whole clone is never deleted in place. It can leave only through the separate
+  whole-clone removal action, which removes its Safe linked worktrees through Git and
+  then moves the complete clone to the system Trash. The main worktree remains
+  protected from the ordinary worktree plan.
 - A clean worktree may be Safe without a merged branch only when its branch ref
   remains and every ignored entry is proven disposable: a Safe artifact record, a
-  verified reproducible nested checkout, or an empty file or directory.
+  verified reproducible nested checkout, Finder's `.DS_Store` metadata, or an empty
+  file or directory.
 - Every deletion decision is backed by a reason that names what was observed.
 - An item that cannot be verified is *needs review*, never *safe*.
 - The initial scan and the execution re-check use the same rules. A verdict

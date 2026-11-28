@@ -28,7 +28,8 @@ function actionLabel(action: string): string {
     {
       "worktree-remove": messages.common.action.worktreeRemove,
       "trash-move": messages.common.action.trashMove,
-      prune: messages.common.action.prune
+      prune: messages.common.action.prune,
+      "clone-retire": messages.common.action.cloneRetire
     }[action] ?? action
   );
 }

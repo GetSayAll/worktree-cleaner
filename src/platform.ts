@@ -187,6 +187,22 @@ export async function executeGeneratedCachePlan(
 }
 
 /**
+ * Retires one whole clone.
+ *
+ * The snapshot is the eligibility evidence and the main-worktree “before” state.
+ * The core removes any linked worktrees through Git, re-checks the main worktree,
+ * and only then moves the clone to the system Trash.
+ */
+export async function retireClone(
+  snapshot: ProjectSnapshot,
+  options: ExecuteKnobs
+): Promise<ExecutionOutcome> {
+  return invoke<ExecutionOutcome>("retire_clone", {
+    request: { snapshot, ...options }
+  });
+}
+
+/**
  * Listens for one per-item result while the executor is still running.
  *
  * The listener is advisory: the final `execute_plan` answer still carries every

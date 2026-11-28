@@ -12,9 +12,14 @@
 //! directories, and it never follows a symlink. A repository found at one level
 //! is reported once and is not descended into, so nested worktrees are not
 //! mistaken for separate projects.
+//!
+//! Selecting a repository also searches its parent folder for independent clones
+//! whose `origin` remote matches. This is automatic discovery, not a
+//! cross-repository cleanup model: every returned repository is still scanned
+//! and cleaned on its own.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::git::GitRunner;
@@ -172,6 +177,92 @@ fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// Reads the URL of the repository's `origin` remote.
+///
+/// `origin` is the clone's primary identity. Other remotes can point at related
+/// projects: `open-voice-bridge` also has a `macro-platform` remote, and matching
+/// every remote would report `sayall-macro-platform` as a clone of the same
+/// repository. Discovery only needs this one key; it never contacts a remote. A
+/// repository without `origin`, or one whose configuration cannot be read, has
+/// no key and cannot be grouped with another repository.
+fn origin_remote_key(path: &Path) -> Option<String> {
+    let repo = git2::Repository::open(path).ok()?;
+    let remote = repo.find_remote("origin").ok()?;
+    remote.url().and_then(remote_key)
+}
+
+/// Reduces the transport spellings of one remote to the same identity.
+///
+/// `origin` may be written as `https://host/owner/repo.git`,
+/// `git@host:owner/repo.git`, or `ssh://git@host/owner/repo`. A credential in an
+/// HTTPS URL is removed with the other user information: it is not part of the
+/// repository identity and must not be compared or displayed.
+fn remote_key(url: &str) -> Option<String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let without_git = trimmed.strip_suffix(".git").unwrap_or(trimmed);
+    let without_git = without_git.trim_end_matches('/');
+    if without_git.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = without_git.strip_prefix("git@") {
+        let (host, path) = rest.split_once(':')?;
+        return Some(format!(
+            "{}/{}",
+            host.to_ascii_lowercase(),
+            path.trim_start_matches('/')
+        ));
+    }
+
+    if let Some((_, rest)) = without_git.split_once("://") {
+        let host_and_path = rest.split_once('@').map_or(rest, |(_, rest)| rest);
+        let (host, path) = host_and_path.split_once('/')?;
+        return Some(format!(
+            "{}/{}",
+            host.to_ascii_lowercase(),
+            path.trim_start_matches('/')
+        ));
+    }
+
+    Some(without_git.to_string())
+}
+
+fn is_independent_clone(candidate: &DiscoveredRepository) -> bool {
+    let path = Path::new(&candidate.repository.path);
+    is_independent_clone_path(path)
+        && candidate
+            .main_worktree
+            .as_ref()
+            .is_some_and(|main| canonical(main) == canonical(path))
+}
+
+/// Whether a repository root has its own `.git` directory.
+///
+/// A linked worktree and a submodule carry a `.git` file instead; they are not
+/// independent clones even though the shallow walk sees them as repository
+/// roots. This check runs before the worktree list, so an unrelated broken
+/// gitfile in the parent folder cannot produce a discovery warning.
+fn is_independent_clone_path(path: &Path) -> bool {
+    is_repository_root(path)
+        && std::fs::symlink_metadata(path.join(".git"))
+            .is_ok_and(|metadata| metadata.file_type().is_dir())
+}
+
+/// Whether a repository's parent is a useful place to look for sibling clones.
+///
+/// The home directory itself and the filesystem roots are not searched. The
+/// component floor is the same structural guard used elsewhere: a project needs
+/// at least three normal components before its parent is a developer scope.
+fn is_searchable_parent(path: &Path) -> bool {
+    if !path.is_dir() || is_repository_root(path) || has_repository_ancestor(path) {
+        return false;
+    }
+    path.components()
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .count()
+        >= 3
+}
+
 /// Folds linked worktrees into the repository they belong to.
 ///
 /// A linked worktree has its own `.git` file, so the shallow walk finds it as a
@@ -236,9 +327,85 @@ fn sort_repositories(repositories: &mut [WorkspaceRepository]) {
     );
 }
 
+/// Walks below one non-repository folder and returns every repository root.
+///
+/// This is the shallow breadth-first walk used for a developer root and for the
+/// parent of a selected repository. It deliberately does not descend into a
+/// repository it has found, so a linked worktree is reported once and its own
+/// contents are not mistaken for another project.
+fn walk_repository_paths(root: &Path, warnings: &mut Vec<String>) -> Vec<PathBuf> {
+    let mut repositories: Vec<PathBuf> = Vec::new();
+    let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
+    let mut visited = 0usize;
+
+    while let Some((directory, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            visited += 1;
+            if visited > MAX_ENTRIES {
+                warnings.push(format!(
+                    "workspace discovery stopped after {MAX_ENTRIES} entries; some repositories may be missing"
+                ));
+                break;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = entry.path();
+            if is_in_system_trash(&path) {
+                continue;
+            }
+            // Symlinks are not followed: a link can point outside the selected
+            // root, and discovery must not broaden the user's chosen scope.
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() || !file_type.is_dir() {
+                continue;
+            }
+            if is_tagged_cache(&path) {
+                continue;
+            }
+            if is_repository_root(&path) {
+                repositories.push(path);
+                if repositories.len() >= MAX_REPOSITORIES {
+                    warnings.push(format!(
+                        "workspace discovery stopped after {MAX_REPOSITORIES} repositories"
+                    ));
+                    break;
+                }
+                continue;
+            }
+            if depth < MAX_DEPTH && !skip_directory(&name) {
+                stack.push((path, depth + 1));
+            }
+        }
+        if repositories.len() >= MAX_REPOSITORIES || visited > MAX_ENTRIES {
+            break;
+        }
+    }
+    repositories
+}
+
+/// Counts each repository found by the shallow walk.
+///
+/// The count is needed for a displayed repository row. It is deliberately kept
+/// out of the parent-folder search, where an unrelated repository with a broken
+/// gitfile must not emit a warning before its origin is compared.
+fn walk_repositories(root: &Path, warnings: &mut Vec<String>) -> Vec<DiscoveredRepository> {
+    walk_repository_paths(root, warnings)
+        .into_iter()
+        .map(|path| repository(&path, warnings))
+        .collect()
+}
+
 /// Finds the Git repository roots below `path`.
 ///
-/// If `path` is itself a repository, the result contains exactly that repository.
+/// If `path` is itself a repository, the result contains that repository and
+/// independent sibling clones with a matching remote under its parent folder.
+/// This is automatic discovery, not a cross-repository cleanup model: each
+/// returned repository is still scanned and cleaned on its own.
+///
 /// Otherwise the walk is breadth-first, shallow, and never follows a symlink.
 /// An empty result is a successful answer: the caller can tell the user that the
 /// folder contains no repositories rather than pretending the folder was invalid.
@@ -254,7 +421,7 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
 
     let mut warnings = Vec::new();
     let mut repositories: Vec<DiscoveredRepository> = Vec::new();
-    let mut queued = 0usize;
+    let mut result_root = root.clone();
 
     if is_in_system_trash(&root) {
         warnings.push(format!(
@@ -270,77 +437,53 @@ pub fn discover_workspace(path: &str) -> Result<WorkspaceSnapshot, ScanError> {
         });
     }
 
-    if is_repository_root(&root) || has_repository_ancestor(&root) {
-        repositories.push(repository(&root, &mut warnings));
-    } else {
-        let mut stack: Vec<(PathBuf, usize)> = vec![(root.clone(), 0)];
-        let mut visited = 0usize;
-        while let Some((directory, depth)) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&directory) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                visited += 1;
-                queued += 1;
-                if visited > MAX_ENTRIES {
+    if is_repository_root(&root) {
+        let selected = repository(&root, &mut warnings);
+        let selected_key = origin_remote_key(&root);
+        let mut family = vec![selected];
+        if let Some(selected_key) = selected_key.filter(|_| is_independent_clone(&family[0])) {
+            if let Some(parent) = root.parent().filter(|parent| is_searchable_parent(parent)) {
+                let selected_path = canonical(&root);
+                let candidates = walk_repository_paths(parent, &mut warnings);
+                let related: Vec<DiscoveredRepository> = candidates
+                    .into_iter()
+                    .filter(|path| {
+                        canonical(path) != selected_path
+                            && is_independent_clone_path(path)
+                            && origin_remote_key(path).is_some_and(|key| key == selected_key)
+                    })
+                    .map(|path| repository(&path, &mut warnings))
+                    .collect();
+                if !related.is_empty() {
                     warnings.push(format!(
-                        "workspace discovery stopped after {MAX_ENTRIES} entries; some repositories may be missing"
+                        "found {} other local clone(s) sharing the selected repository's origin remote under {}",
+                        related.len(),
+                        parent.display()
                     ));
-                    break;
+                    family.extend(related);
+                    result_root = parent.to_path_buf();
                 }
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let path = entry.path();
-                if is_in_system_trash(&path) {
-                    continue;
-                }
-                // Symlinks are not followed: a link can point outside the selected
-                // root, and discovery must not broaden the user's chosen scope.
-                let Ok(file_type) = entry.file_type() else {
-                    continue;
-                };
-                if file_type.is_symlink() || !file_type.is_dir() {
-                    continue;
-                }
-                if is_tagged_cache(&path) {
-                    continue;
-                }
-                if is_repository_root(&path) {
-                    repositories.push(repository(&path, &mut warnings));
-                    if repositories.len() >= MAX_REPOSITORIES {
-                        warnings.push(format!(
-                            "workspace discovery stopped after {MAX_REPOSITORIES} repositories"
-                        ));
-                        break;
-                    }
-                    continue;
-                }
-                if depth < MAX_DEPTH && !skip_directory(&name) {
-                    stack.push((path, depth + 1));
-                }
-            }
-            if repositories.len() >= MAX_REPOSITORIES || visited > MAX_ENTRIES {
-                break;
             }
         }
+        repositories = family;
+    } else if has_repository_ancestor(&root) {
+        repositories.push(repository(&root, &mut warnings));
+    } else {
+        repositories = walk_repositories(&root, &mut warnings);
     }
 
-    let mut repositories = dedupe_repositories(repositories, &root);
+    let mut repositories = dedupe_repositories(repositories, &result_root);
     sort_repositories(&mut repositories);
     if repositories.is_empty() {
         warnings.push(format!(
             "no Git repositories were found below {}",
-            root.display()
-        ));
-    }
-    if queued > MAX_ENTRIES {
-        warnings.push(format!(
-            "workspace discovery looked at {queued} entries, above its {MAX_ENTRIES} entry limit"
+            result_root.display()
         ));
     }
 
     Ok(WorkspaceSnapshot {
         schema_version: WORKSPACE_SCHEMA_VERSION,
-        root: host_path(&root),
+        root: host_path(&result_root),
         scanned_at: format_rfc3339(SystemTime::now()),
         repositories,
         warnings,
@@ -357,6 +500,150 @@ mod tests {
 
     fn make_repo(path: &Path) {
         std::fs::create_dir_all(path.join(".git")).expect("create .git");
+    }
+
+    fn make_repo_with_remote(path: &Path, url: &str) {
+        std::fs::create_dir_all(path).expect("create repository directory");
+        let repo = git2::Repository::init(path).expect("init repository");
+        repo.remote("origin", url).expect("create remote");
+    }
+
+    fn add_remote(path: &Path, name: &str, url: &str) {
+        let repo = git2::Repository::open(path).expect("open repository");
+        repo.remote(name, url).expect("create extra remote");
+    }
+
+    #[test]
+    fn recognises_transport_spellings_of_one_remote() {
+        let expected = Some("github.com/HD838A/remote-mic-app".to_string());
+        for url in [
+            "https://github.com/HD838A/remote-mic-app.git",
+            "https://token@github.com/HD838A/remote-mic-app",
+            "git@github.com:HD838A/remote-mic-app.git",
+            "ssh://git@github.com/HD838A/remote-mic-app",
+        ] {
+            assert_eq!(remote_key(url), expected, "{url}");
+        }
+        assert_eq!(
+            remote_key("https://github.com/other/repository.git"),
+            Some("github.com/other/repository".to_string())
+        );
+        assert_eq!(remote_key(""), None);
+    }
+
+    #[test]
+    fn finds_independent_sibling_clones_with_the_same_remote() {
+        let root = temp_workspace();
+        let selected = root.path().join("selected");
+        let sibling = root.path().join("sibling");
+        let unrelated = root.path().join("unrelated");
+        make_repo_with_remote(&selected, "https://github.com/HD838A/remote-mic-app.git");
+        make_repo_with_remote(&sibling, "git@github.com:HD838A/remote-mic-app.git");
+        make_repo_with_remote(&unrelated, "https://github.com/other/repository.git");
+
+        let snapshot = discover_workspace(selected.to_str().expect("path")).expect("discover");
+        let mut names: Vec<&str> = snapshot
+            .repositories
+            .iter()
+            .map(|repository| repository.name.as_str())
+            .collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["selected", "sibling"]);
+        assert_eq!(snapshot.root, root.path().display().to_string());
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("other local clone")));
+    }
+
+    #[test]
+    fn a_secondary_remote_does_not_join_an_unrelated_clone() {
+        // `open-voice-bridge` also has a `macro-platform` remote. Matching every
+        // remote would report the independent sayall-macro-platform clone as part of
+        // the same family; only origin is the clone identity.
+        let root = temp_workspace();
+        let selected = root.path().join("selected");
+        let macro_platform = root.path().join("macro-platform");
+        make_repo_with_remote(&selected, "https://github.com/HD838A/remote-mic-app.git");
+        add_remote(
+            &selected,
+            "macro-platform",
+            "https://github.com/GetSayAll/sayall-macro-platform.git",
+        );
+        make_repo_with_remote(
+            &macro_platform,
+            "https://github.com/GetSayAll/sayall-macro-platform.git",
+        );
+
+        let snapshot = discover_workspace(selected.to_str().expect("path")).expect("discover");
+        assert_eq!(snapshot.repositories.len(), 1);
+        assert_eq!(
+            snapshot.repositories[0].path,
+            selected.display().to_string()
+        );
+    }
+
+    #[test]
+    fn a_broken_unrelated_gitfile_does_not_warn_during_sibling_search() {
+        let root = temp_workspace();
+        let selected = root.path().join("selected");
+        let broken = root.path().join("copied-worktree");
+        make_repo_with_remote(&selected, "https://github.com/HD838A/remote-mic-app.git");
+        std::fs::create_dir_all(&broken).expect("create copied worktree");
+        std::fs::write(
+            broken.join(".git"),
+            "gitdir: /Users/someone/missing-main/.git/worktrees/copied\n",
+        )
+        .expect("write broken gitfile");
+
+        let snapshot = discover_workspace(selected.to_str().expect("path")).expect("discover");
+
+        assert_eq!(snapshot.repositories.len(), 1);
+        assert_eq!(
+            snapshot.repositories[0].path,
+            selected.display().to_string()
+        );
+        assert!(
+            snapshot
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("worktree count for")),
+            "an unrelated broken gitfile must not produce a worktree-count warning: {:?}",
+            snapshot.warnings
+        );
+    }
+
+    #[test]
+    fn a_linked_worktree_is_not_an_independent_clone() {
+        let root = temp_workspace();
+        let linked = root.path().join("linked");
+        std::fs::create_dir_all(linked.join(".git")).expect("create linked .git");
+        let candidate = DiscoveredRepository {
+            repository: WorkspaceRepository {
+                path: linked.display().to_string(),
+                name: "linked".to_string(),
+                worktree_count: Some(2),
+            },
+            main_worktree: Some(root.path().join("main")),
+        };
+        assert!(!is_independent_clone(&candidate));
+    }
+
+    #[test]
+    fn a_repository_without_a_remote_is_not_expanded() {
+        let root = temp_workspace();
+        let selected = root.path().join("selected");
+        let sibling = root.path().join("sibling");
+        make_repo(&selected);
+        make_repo_with_remote(&sibling, "https://github.com/HD838A/remote-mic-app.git");
+
+        let snapshot = discover_workspace(selected.to_str().expect("path")).expect("discover");
+        assert_eq!(snapshot.repositories.len(), 1);
+        assert_eq!(
+            snapshot.repositories[0].path,
+            selected.display().to_string()
+        );
+        assert_eq!(snapshot.root, selected.display().to_string());
     }
 
     #[test]

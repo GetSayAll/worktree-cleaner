@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use common::{backdate_tree, purge_marked_from_trash, trash_inspectable, Repo};
 use worktree_core::cleanup::{execute_plan, ExecuteOptions};
+use worktree_core::retire::retire_clone;
 use worktree_core::{
     log, scan_project, CleanupPlan, DetailArg, DetailCode, ExecutionResult, HistoryAction,
     PlanItemKind, ProjectSnapshot, SafetyStatus, ScanOptions, TrashMoveItem, WorktreeRecord,
@@ -1059,4 +1060,194 @@ fn a_skipped_item_does_not_stop_the_items_after_it() {
         outcome.entries[1]
     );
     assert!(!linked.exists(), "the second item executed");
+}
+
+#[test]
+fn a_clone_with_safe_linked_worktrees_removes_them_then_retires() {
+    let (repo, linked, marker) = repo_with_a_safe_worktree("retire-linked");
+    let remote = repo.base.join("origin.git");
+    repo.git_in(&repo.base, &["init", "--bare", "origin.git"]);
+    repo.git(&[
+        "remote",
+        "add",
+        "origin",
+        remote.to_str().expect("utf-8 path"),
+    ]);
+    repo.git(&["push", "--quiet", "--set-upstream", "origin", "main"]);
+
+    let snapshot = scan(&repo);
+    assert!(
+        snapshot.clone_retirement.eligible,
+        "a clean main and one Safe linked worktree should be eligible: {:?}",
+        snapshot.clone_retirement.reasons
+    );
+    let inspectable = trash_inspectable();
+    let outcome = retire_clone(&snapshot, &options_without_log());
+    let recovered = if inspectable {
+        purge_marked_from_trash("repo", &marker)
+    } else {
+        Vec::new()
+    };
+
+    assert!(
+        outcome
+            .entries
+            .iter()
+            .any(|entry| entry.action == HistoryAction::WorktreeRemove
+                && Path::new(&entry.target)
+                    .file_name()
+                    .is_some_and(|name| name == "wt-removable")
+                && entry.result == ExecutionResult::Ok),
+        "the linked worktree should be removed first: {:?}",
+        outcome.entries
+    );
+    assert!(
+        outcome
+            .entries
+            .iter()
+            .any(|entry| entry.action == HistoryAction::CloneRetire
+                && entry.result == ExecutionResult::Ok),
+        "the clone should be retired after the linked worktree: {:?}",
+        outcome.entries
+    );
+    assert!(!linked.exists(), "the linked worktree left through Git");
+    assert!(
+        !repo.root.exists(),
+        "the whole clone left its original path"
+    );
+    if inspectable {
+        assert_eq!(recovered.len(), 1, "the test's clone is the Trash entry");
+    }
+}
+
+#[test]
+fn a_whitelisted_clone_root_is_not_retired() {
+    let (repo, linked, _marker) = repo_with_a_safe_worktree("retire-root-whitelist");
+    let remote = repo.base.join("origin.git");
+    repo.git_in(&repo.base, &["init", "--bare", "origin.git"]);
+    repo.git(&[
+        "remote",
+        "add",
+        "origin",
+        remote.to_str().expect("utf-8 path"),
+    ]);
+    repo.git(&["push", "--quiet", "--set-upstream", "origin", "main"]);
+
+    let snapshot = scan(&repo);
+    assert!(snapshot.clone_retirement.eligible);
+    let mut options = options_without_log();
+    options.whitelist = vec![repo.root.display().to_string()];
+
+    let outcome = retire_clone(&snapshot, &options);
+
+    assert!(
+        repo.root.exists(),
+        "the path guard must run before the clone moves"
+    );
+    assert!(linked.exists(), "the linked worktree must not be removed");
+    assert_eq!(outcome.entries.len(), 1, "{:?}", outcome.entries);
+    assert_eq!(outcome.entries[0].action, HistoryAction::CloneRetire);
+    assert_eq!(outcome.entries[0].result, ExecutionResult::Skipped);
+}
+
+#[test]
+fn a_blocked_linked_removal_leaves_the_clone_in_place() {
+    let (repo, linked, _marker) = repo_with_a_safe_worktree("retire-linked-blocked");
+    let remote = repo.base.join("origin.git");
+    repo.git_in(&repo.base, &["init", "--bare", "origin.git"]);
+    repo.git(&[
+        "remote",
+        "add",
+        "origin",
+        remote.to_str().expect("utf-8 path"),
+    ]);
+    repo.git(&["push", "--quiet", "--set-upstream", "origin", "main"]);
+
+    let snapshot = scan(&repo);
+    assert!(snapshot.clone_retirement.eligible);
+    let mut options = options_without_log();
+    options.whitelist = vec![linked.display().to_string()];
+
+    let outcome = retire_clone(&snapshot, &options);
+
+    assert!(
+        repo.root.exists(),
+        "a skipped linked removal must leave the main clone on disk"
+    );
+    assert!(
+        linked.exists(),
+        "the whitelisted linked worktree must stay where it is"
+    );
+    assert!(
+        outcome
+            .entries
+            .iter()
+            .any(|entry| entry.action == HistoryAction::WorktreeRemove
+                && entry.result == ExecutionResult::Skipped),
+        "the linked removal should be skipped: {:?}",
+        outcome.entries
+    );
+    assert!(
+        outcome
+            .entries
+            .iter()
+            .all(|entry| !(entry.action == HistoryAction::CloneRetire
+                && entry.result == ExecutionResult::Ok)),
+        "the clone must not be retired after a blocked linked removal"
+    );
+}
+
+#[test]
+fn a_fully_safe_clone_is_retired_to_the_trash() {
+    // The fixture keeps a marker in a committed file, so the Trash cleanup below
+    // can prove it owns the entry it takes back. The marker is committed before
+    // the scan, so the main worktree is clean.
+    let repo = Repo::new("retire");
+    let marker = format!("[worktree-cleaner-test-retire-{}]", std::process::id());
+    std::fs::write(repo.root.join("marker.txt"), &marker).expect("write marker");
+    repo.git(&["add", "marker.txt"]);
+    repo.git_dated_in(&repo.root, &["commit", "--quiet", "-m", "marker"], 90);
+
+    let remote = repo.base.join("origin.git");
+    repo.git_in(&repo.base, &["init", "--bare", "origin.git"]);
+    repo.git(&[
+        "remote",
+        "add",
+        "origin",
+        remote.to_str().expect("utf-8 path"),
+    ]);
+    repo.git(&["push", "--quiet", "--set-upstream", "origin", "main"]);
+
+    let snapshot = scan(&repo);
+    assert!(
+        snapshot.clone_retirement.eligible,
+        "a clean clone with no linked worktrees should be eligible: {:?}",
+        snapshot.clone_retirement.reasons
+    );
+    let inspectable = trash_inspectable();
+    let outcome = retire_clone(&snapshot, &options_without_log());
+    let recovered = if inspectable {
+        purge_marked_from_trash("repo", &marker)
+    } else {
+        Vec::new()
+    };
+
+    assert_eq!(outcome.entries.len(), 1, "{:?}", outcome.entries);
+    assert_eq!(
+        outcome.entries[0].result,
+        ExecutionResult::Ok,
+        "the clone retirement should succeed: {:?}",
+        outcome.entries[0]
+    );
+    assert!(
+        !repo.root.exists(),
+        "the whole clone left its original path"
+    );
+    if inspectable {
+        assert_eq!(
+            recovered.len(),
+            1,
+            "the test's clone was the Trash entry, not somebody else's"
+        );
+    }
 }

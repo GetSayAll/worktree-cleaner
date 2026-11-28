@@ -36,7 +36,7 @@ const props = defineProps<{
  * passes through on its own, never a destination, so offering a button back to it
  * would be offering a dead end.
  */
-type NavKey = Exclude<ViewKey, "scanning">;
+type NavKey = Exclude<ViewKey, "scanning" | "retire">;
 
 /**
  * The label for each destination, mirrored from the nav table in `App.vue`.

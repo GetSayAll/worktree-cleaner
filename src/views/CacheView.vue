@@ -25,7 +25,7 @@ import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import RevealPathButton from "../components/RevealPathButton.vue";
 import StatCard from "../components/StatCard.vue";
-import { compareSizeNullsLast, detailText, formatBytes, formatCount, formatRelTime, homePath } from "../format";
+import { compareSizeNullsLast, detailText, formatBytes, formatCount, formatRelTime, homePath, warningText } from "../format";
 import { messages } from "../i18n";
 import { isDesktop, openTrash } from "../platform";
 
@@ -136,7 +136,7 @@ async function openSystemTrash() {
 
     <div v-for="warning in cacheSnapshot?.warnings || []" :key="warning" class="banner banner--warn">
       <span>⚠</span>
-      <span>{{ warning }}</span>
+      <span>{{ warningText(warning) }}</span>
     </div>
 
     <div class="card">

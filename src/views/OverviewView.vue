@@ -4,7 +4,7 @@ import { artifacts, counts, goTo, primaryReason, selectAllSafe, selectedSummary,
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import StatCard from "../components/StatCard.vue";
-import { basename, compareSizeNullsLast, formatBytes, formatCount, formatRelTime, displayPath, isUnder } from "../format";
+import { basename, compareSizeNullsLast, formatBytes, formatCount, formatRelTime, displayPath, isUnder, warningText } from "../format";
 import { messages } from "../i18n";
 
 const root = computed(() => snapshot.value?.root ?? "");
@@ -27,6 +27,7 @@ function isOutsideRoot(path: string): boolean {
  * strip rather than as a row in the "largest worktrees" list.
  */
 const mainWorktree = computed(() => worktrees.value.find((item) => item.is_main) ?? null);
+const cloneRetirement = computed(() => snapshot.value?.clone_retirement ?? null);
 
 /** The remote-tracking ref the merge check actually uses, for the hint copy. */
 const defaultBranchRef = computed(() => {
@@ -129,10 +130,41 @@ const selectableSafeCount = computed(
       <p class="main-workspace__note">{{ messages.worktrees.mainWorkspaceHint(defaultBranchRef) }}</p>
     </div>
 
+    <div v-if="cloneRetirement" class="card">
+      <div class="card__head">
+        <div>
+          <h2>{{ messages.retire.title }}</h2>
+          <span class="faint tiny">{{ messages.retire.lede }}</span>
+        </div>
+        <span
+          class="chip"
+          :class="cloneRetirement.eligible ? 'chip--protected' : ''"
+        >
+          {{ cloneRetirement.eligible ? messages.retire.eligible : messages.retire.blockedBadge }}
+        </span>
+      </div>
+      <div class="card__body">
+        <div class="stack stack--tight">
+          <div>
+            <div class="faint tiny">{{ messages.retire.mainWorktree }}</div>
+            <div class="mono">{{ cloneRetirement.main_path }}</div>
+          </div>
+          <p v-if="!cloneRetirement.eligible" class="faint tiny">{{ messages.retire.requirements }}</p>
+          <div v-if="!cloneRetirement.eligible" class="faint tiny">{{ messages.retire.blockers }}</div>
+          <ReasonList :reasons="cloneRetirement.reasons" :limit="1" />
+        </div>
+      </div>
+      <div v-if="cloneRetirement.eligible" class="card__foot">
+        <button class="btn btn--danger" @click="goTo('retire')">
+          {{ messages.retire.confirm }}
+        </button>
+      </div>
+    </div>
+
     <div v-for="warning in snapshot?.warnings || []" :key="warning" class="banner banner--warn">
       <span>⚠</span>
       <span>
-        <span class="banner__title">{{ messages.overview.warningTitle }}</span>{{ warning }}
+        <span class="banner__title">{{ messages.overview.warningTitle }}</span>{{ warningText(warning) }}
       </span>
     </div>
 

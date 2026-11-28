@@ -39,6 +39,7 @@ import CacheView from "./views/CacheView.vue";
 import BuildCachesView from "./views/BuildCachesView.vue";
 import HygieneView from "./views/HygieneView.vue";
 import CleanupPlanView from "./views/CleanupPlanView.vue";
+import RetireCloneView from "./views/RetireCloneView.vue";
 import ResultView from "./views/ResultView.vue";
 import HistoryView from "./views/HistoryView.vue";
 import SettingsView from "./views/SettingsView.vue";
@@ -54,6 +55,7 @@ const VIEWS = {
   buildCaches: BuildCachesView,
   hygiene: HygieneView,
   plan: CleanupPlanView,
+  retire: RetireCloneView,
   result: ResultView,
   history: HistoryView,
   settings: SettingsView
@@ -139,7 +141,7 @@ function navCount(key: ViewKey): string {
 }
 
 function rescan() {
-  startScan(projectPath.value);
+  startScan(projectPath.value, undefined, false);
 }
 </script>
 

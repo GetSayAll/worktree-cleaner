@@ -130,6 +130,7 @@ describe("the Rust-to-TypeScript field contract", () => {
 
   const structs: Array<[string, keyof typeof core]> = [
     ["ProjectSnapshot", "lib.rs"],
+    ["CloneRetirement", "lib.rs"],
     ["WorkspaceRepository", "lib.rs"],
     ["WorkspaceSnapshot", "lib.rs"],
     ["CacheSnapshot", "cache.rs"],
@@ -166,7 +167,7 @@ describe("the Rust-to-TypeScript field contract", () => {
   it("keeps the reason-code list in step", () => {
     // Rust writes each code twice — once in `ALL`, once in `as_str` — and the string
     // form is the one the front end sees, so it is the one to compare.
-    const rustCodes = [...core["reason.rs"].matchAll(/=> "((?:wt|af)\.[a-z_]+)"/g)].map(
+    const rustCodes = [...core["reason.rs"].matchAll(/=> "((?:wt|af|cl)\.[a-z_]+)"/g)].map(
       (match) => match[1]
     );
     const block = types.match(/export type ReasonCode =([\s\S]*?);/);
@@ -181,7 +182,7 @@ describe("the Rust-to-TypeScript field contract", () => {
     // A code with no entry falls back to the core's English sentence, and the
     // fallback is silent — nothing fails, the reader just gets English on a
     // Chinese screen. So the check is on the table's keys, in both locales.
-    const rustCodes = [...core["reason.rs"].matchAll(/=> "((?:wt|af)\.[a-z_]+)"/g)].map(
+    const rustCodes = [...core["reason.rs"].matchAll(/=> "((?:wt|af|cl)\.[a-z_]+)"/g)].map(
       (match) => match[1]
     );
     const tableCodes = (table: typeof en): string[] =>
@@ -200,7 +201,7 @@ describe("the Rust-to-TypeScript field contract", () => {
     // the field names `detail.fields` knows, which the `changed` codes quote.
     const lib = readFileSync(join(coreDir, "lib.rs"), "utf8");
     const rustCodes = [
-      ...lib.matchAll(/#\[serde\(rename = "((?:worktree|artifact|prunable|precondition|bundled)[a-z_.]*)"\)\]/g)
+      ...lib.matchAll(/#\[serde\(rename = "((?:worktree|artifact|prunable|precondition|bundled|clone)[a-z_.]*)"\)\]/g)
     ].map((match) => match[1]);
 
     const block = types.match(/export type DetailCode =([\s\S]*?);/);
