@@ -3865,10 +3865,11 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
         )
         .expect("write example");
 
-        let relative = ".private-dependencies/release-control/private-platform";
+        let relative = Path::new(".private-dependencies/release-control/private-platform");
+        let relative_text = relative.to_string_lossy();
         let mut rules = calm_rules(CLEAN_STATUS);
         rules.push(canned(
-            &["check-ignore", "-v", "--", relative],
+            &["check-ignore", "-v", "--", relative_text.as_ref()],
             ".gitignore:1:.private-dependencies/
 ",
         ));
