@@ -3,6 +3,35 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Review worktrees are grouped by what removal can lose.** The clean/no-untracked
+  and untracked groups can be selected with one explicit action; recent activity,
+  detached HEAD, an index lock, and unfinished checks stay per row. The cleanup
+  plan groups the same records and folds long clean groups. Nothing is selected
+  automatically, and the execution re-check is unchanged.
+- **Safe items can be selected again after a run.** The overview offers
+  "Select all Safe items" when the selection is empty, and the build-artifacts
+  page has the same action. It adds Safe items without clearing a Review choice.
+- **A clean worktree no longer needs a merged branch when only replaceable content
+  is left.** `wt.reclaimable_clean` keeps the branch ref and promotes the worktree
+  to Safe when every ignored entry is a Safe artifact record, a verified
+  reproducible nested checkout, a zero-byte file, or an empty directory. It never
+  overrides a credential, dirty or untracked file, active lock, incomplete check,
+  or another worktree. The executor repeats the proof with a fresh artifact scan.
+
+### Fixed
+
+- **A clean, remote-backed nested checkout no longer blocks a worktree.** A local
+  dependency checkout inside an ignored directory can carry a tracked
+  `.env.example`; the credential walk used to see only an ignored credential file.
+  It now verifies the nested checkout's own Git state and records
+  `wt.reproducible_checkout` when the checkout is clean, ignored by the parent,
+  remote-backed, free of local-only commits or stashes, and free of ignored
+  credential files. The rule is based on Git facts, not on a directory name.
+
 ## [0.3.0] — 2026-11-28
 
 ### Fixed

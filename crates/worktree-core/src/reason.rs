@@ -76,6 +76,23 @@ pub enum ReasonCode {
     /// worktree-level counterpart of [`Self::AfCredentials`].
     #[serde(rename = "wt.credentials")]
     WtCredentials,
+    /// A nested Git checkout is clean, ignored by the parent worktree, and every
+    /// commit reachable from its HEAD and local branches is also reachable from a
+    /// remote-tracking ref. It has no stash and no ignored credential-looking file.
+    /// Removing the parent worktree therefore deletes a local checkout that can be
+    /// fetched again, not work that exists only here. This is positive evidence:
+    /// the checkout itself does not make the worktree unsafe.
+    #[serde(rename = "wt.reproducible_checkout")]
+    WtReproducibleCheckout,
+    /// The worktree is clean, its branch ref is kept by removal, and every ignored
+    /// entry is proven disposable: a Safe artifact record, a verified reproducible
+    /// nested checkout, an empty file, or an empty directory. The branch may be
+    /// unmerged or have no upstream; the ref survives and the directory holds no
+    /// non-reproducible file. This explicitly replaces the branch-only Review
+    /// reasons `wt.unmerged`, `wt.no_upstream`, `wt.unpushed_branch` and
+    /// `wt.recent_activity`.
+    #[serde(rename = "wt.reclaimable_clean")]
+    WtReclaimableClean,
     /// **No longer emitted.** A stash lives in the common Git directory, so it belongs
     /// to the repository and not to the worktree being judged; reporting it per
     /// worktree downgraded every clean worktree of a repository holding one stash.
@@ -134,7 +151,7 @@ pub enum ReasonCode {
 impl ReasonCode {
     /// All reason codes. Used by the contract-drift test (the serialised value must
     /// match [`Self::as_str`]).
-    pub const ALL: [ReasonCode; 32] = [
+    pub const ALL: [ReasonCode; 34] = [
         ReasonCode::WtMain,
         ReasonCode::WtLocked,
         ReasonCode::WtDirty,
@@ -147,6 +164,8 @@ impl ReasonCode {
         ReasonCode::WtAbsorbedContentChanged,
         ReasonCode::WtUntracked,
         ReasonCode::WtCredentials,
+        ReasonCode::WtReproducibleCheckout,
+        ReasonCode::WtReclaimableClean,
         ReasonCode::WtStash,
         ReasonCode::WtRecentActivity,
         ReasonCode::WtAgentActive,
@@ -184,6 +203,8 @@ impl ReasonCode {
             ReasonCode::WtAbsorbedContentChanged => "wt.absorbed_content_changed",
             ReasonCode::WtUntracked => "wt.untracked",
             ReasonCode::WtCredentials => "wt.credentials",
+            ReasonCode::WtReproducibleCheckout => "wt.reproducible_checkout",
+            ReasonCode::WtReclaimableClean => "wt.reclaimable_clean",
             ReasonCode::WtStash => "wt.stash",
             ReasonCode::WtRecentActivity => "wt.recent_activity",
             ReasonCode::WtAgentActive => "wt.agent_active",
@@ -434,7 +455,7 @@ mod tests {
                 "reason code must carry a wt. / af. prefix: {s}"
             );
         }
-        assert_eq!(ReasonCode::ALL.len(), 32);
+        assert_eq!(ReasonCode::ALL.len(), 34);
     }
 
     #[test]

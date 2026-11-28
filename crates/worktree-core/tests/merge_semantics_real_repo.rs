@@ -83,6 +83,16 @@ struct Fixture {
 
 fn build() -> Fixture {
     let repo = Repo::new("merge-semantics");
+    // The two branches below must stay Review for this merge-semantics test. A
+    // non-empty ignored directory is content the branch-ref rule cannot prove
+    // disposable, so the merge verdict remains the deciding fact.
+    std::fs::write(repo.root.join(".gitignore"), "scratch/\n").expect("write .gitignore");
+    repo.git(&["add", ".gitignore"]);
+    repo.git_dated_in(
+        &repo.root,
+        &["commit", "--quiet", "-m", "ignore scratch"],
+        90,
+    );
 
     // A real bare remote. `origin/main` has to be a genuine remote-tracking ref,
     // because that is the ref the check asks first and the local `main` is about to
@@ -141,6 +151,8 @@ fn build() -> Fixture {
     repo.git_in(&reverted, &["push", "--quiet", "origin", "feat/reverted"]);
     squash_onto_remote(&repo, "revert-holder", "feat/reverted", 35);
     revert_on_remote(&repo, "c.txt", 30);
+    std::fs::create_dir_all(reverted.join("scratch")).expect("create reverted scratch");
+    std::fs::write(reverted.join("scratch/keep.txt"), "keep\n").expect("write reverted scratch");
 
     // 4. A commit that reached the remote as a branch and nowhere else.
     let unique = repo.add_worktree("wt-unique", "feat/unique");
@@ -153,6 +165,8 @@ fn build() -> Fixture {
         40,
     );
     repo.git_in(&unique, &["push", "--quiet", "origin", "feat/unique"]);
+    std::fs::create_dir_all(unique.join("scratch")).expect("create unique scratch");
+    std::fs::write(unique.join("scratch/keep.txt"), "keep\n").expect("write unique scratch");
 
     repo.git(&["fetch", "--quiet", "origin"]);
 

@@ -187,6 +187,25 @@ describe("default selection (D12)", () => {
     state.toggleWorktree(cursor);
     expect(state.isSelectedWorktree(cursor)).toBe(true);
   });
+
+  it("can add Safe items back without clearing an explicit Review selection", async () => {
+    const state = await freshState();
+    state.snapshot.value = mockSnapshot;
+    // This is the state after a cleanup: the selection was cleared, but Safe
+    // records remain. Selecting them again must not discard a Review choice the
+    // reader has already made.
+    state.selectedWorktrees.value = [cursor];
+    state.selectedArtifacts.value = [];
+    state.selectAllSafe();
+
+    expect(state.isSelectedWorktree(codex)).toBe(true);
+    expect(state.isSelectedWorktree(cursor)).toBe(true);
+    expect(
+      mockSnapshot.artifacts.some(
+        (artifact) => artifact.safety.status === "Safe" && state.isSelectedArtifact(artifact.path)
+      )
+    ).toBe(true);
+  });
 });
 
 describe("default selection and bundled artifacts", () => {

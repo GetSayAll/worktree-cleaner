@@ -38,8 +38,10 @@ guess.
 
 The last column answers one question only — whether the commits are already in the
 default branch. It is not a verdict. A worktree still has to pass the other checks
-before it is `Safe`: it is not the main working tree, it is clean, it has no
-untracked files, and nobody touched it inside the activity window.
+before it is `Safe`: it is not the main working tree, it is clean, and it has no
+untracked files. The merged route also requires that nobody touched it inside the
+activity window; the branch-ref-preserved route below replaces that attention signal
+only when every ignored entry is proven disposable.
 
 A and B are verifiable: the answer is a Git object comparison, and it is either true
 or it is not. C and D are judgements about whether a diff has value,
@@ -60,6 +62,25 @@ Measured cost of getting this wrong: of 22 branches that survived A and B, **19
 carried real code**. A stamp-only tail is the exception, not the rule. Tier C is
 worth doing by hand on a repository family that generates build-number branches; it
 is not worth encoding as a rule that promotes to `Safe`.
+
+## Branch-ref-preserved checkout
+
+A branch need not be merged for its checkout to go. `git worktree remove` keeps the
+ref, so an unmerged branch is a Review only while the directory may still hold
+something Git cannot restore. `wt.reclaimable_clean` promotes the record to `Safe`
+when that remaining question is answered: the worktree is clean, has a local
+branch, and **every ignored top-level entry** is a Safe artifact record, a verified
+reproducible nested checkout with a `.git` directory, a zero-byte file, or a
+directory containing only those. A name is never the proof. A credential, an active
+Git lock, a dirty or untracked file, a symlink, another worktree, a `.git` file
+(linked worktree or submodule), a recent artifact write, or a failed check keeps the
+record at Review.
+
+This is not tier C or D: it makes no judgement about the commits. It also does not
+reintroduce stash as a condition — the stash lives in the common Git directory and
+survives removal. The HEAD commit's recent-activity reason is replaced only on this
+route; `last_updated_at` remains visible. The executor repeats the proof with a
+fresh artifact scan before it deletes.
 
 ## Hard rules
 
@@ -154,10 +175,13 @@ Always compare against `origin/<default>`. Never against a bare branch name.
    against a remote-tracking ref, so an unfetched repository answers with old facts.
 2. Enumerate worktrees per repository; drop the main one (it is never removable).
 3. Measure size per worktree, never per repository root.
-4. Classify with A, then B. Stop there for anything automated.
+4. Classify with A, then B. For a clean worktree that fails both, use
+   `wt.reclaimable_clean` only when every ignored entry is proven disposable; otherwise
+   stop at Review.
 5. Review C and D by hand if the repository family generates build-number or
    dependency-bump branches, reading the diff, not the message.
 6. Delete worktrees in ascending risk: largest A first, because it is both the
-   biggest win and the least ambiguous.
+   biggest win and the least ambiguous; remove branch-ref-preserved worktrees only
+   after their ignored entries have been checked.
 7. After deleting, `git worktree prune`, then report what was actually reclaimed
    rather than what was estimated.

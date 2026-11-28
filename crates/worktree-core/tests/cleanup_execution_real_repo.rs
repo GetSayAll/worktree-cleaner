@@ -109,6 +109,34 @@ fn repo_with_a_safe_worktree(name: &str) -> (Repo, PathBuf, String) {
     (repo, linked, marker)
 }
 
+/// A repository plus a clean linked worktree whose branch is not merged and whose
+/// only ignored content is generated. The branch ref is the only copy of the
+/// commits, and it survives removal, so the branch-ref-preserved rule calls the
+/// worktree Safe.
+fn repo_with_a_branch_ref_worktree(name: &str) -> (Repo, PathBuf) {
+    let repo = Repo::new(name);
+    std::fs::write(repo.root.join(".gitignore"), "node_modules/\n").expect("write .gitignore");
+    std::fs::write(repo.root.join("package.json"), "{}\n").expect("write manifest");
+    repo.git(&["add", ".gitignore", "package.json"]);
+    repo.git_dated_in(&repo.root, &["commit", "--quiet", "-m", "layout"], 90);
+
+    let linked = repo.add_worktree("wt-branch-ref", "feature/branch-ref");
+    std::fs::write(linked.join("feature.js"), "console.log(2);\n").expect("write feature");
+    repo.git_in(&linked, &["add", "feature.js"]);
+    repo.git_dated_in(&linked, &["commit", "--quiet", "-m", "feature"], 80);
+
+    std::fs::create_dir_all(linked.join("node_modules/left-pad")).expect("create node_modules");
+    std::fs::write(
+        linked.join("node_modules/left-pad/index.js"),
+        "module.exports = 1;\n",
+    )
+    .expect("write module");
+
+    backdate_tree(&repo.root, 30);
+    backdate_tree(&linked, 30);
+    (repo, linked)
+}
+
 fn scan(repo: &Repo) -> ProjectSnapshot {
     scan_project(&repo.root.display().to_string(), &scan_options()).expect("scan")
 }
@@ -276,6 +304,99 @@ fn a_safe_worktree_is_removed_and_pruned() {
     assert!(
         !history[0].at.is_empty(),
         "the log entry should carry a timestamp"
+    );
+}
+
+#[test]
+fn a_branch_ref_preserved_worktree_is_removed_and_keeps_the_branch() {
+    let (repo, linked) = repo_with_a_branch_ref_worktree("branch-ref-remove");
+    let snapshot = scan(&repo);
+    let record = snapshot
+        .worktrees
+        .iter()
+        .find(|record| record.path.ends_with("wt-branch-ref"))
+        .expect("the linked worktree is reported");
+    assert_eq!(
+        record.safety.status,
+        SafetyStatus::Safe,
+        "{:?}",
+        record.safety.reasons
+    );
+    assert!(
+        record
+            .safety
+            .reasons
+            .iter()
+            .any(|reason| reason.code.as_str() == "wt.reclaimable_clean"),
+        "{:?}",
+        record.safety.reasons
+    );
+
+    let outcome = execute_plan(
+        &plan_removing(&record.path),
+        &snapshot,
+        &options_without_log(),
+    );
+    assert_eq!(outcome.entries.len(), 2, "{:?}", outcome.entries);
+    assert_eq!(
+        outcome.entries[0].result,
+        ExecutionResult::Ok,
+        "the executor must preserve the fresh artifact evidence: {:?}",
+        outcome.entries[0]
+    );
+    assert_eq!(
+        outcome.entries[0].detail_code,
+        Some(DetailCode::WorktreeRemoved)
+    );
+    assert_eq!(outcome.entries[1].action, HistoryAction::Prune);
+    assert_eq!(outcome.entries[1].result, ExecutionResult::Ok);
+
+    assert!(!linked.exists(), "the worktree directory is gone");
+    assert!(
+        repo.git_try_in(
+            &repo.root,
+            &["rev-parse", "--verify", "refs/heads/feature/branch-ref"]
+        )
+        .status
+        .success(),
+        "removal must keep the branch ref"
+    );
+}
+
+#[test]
+fn a_branch_ref_preserved_worktree_changed_to_unsafe_is_skipped() {
+    let (repo, linked) = repo_with_a_branch_ref_worktree("branch-ref-stale");
+    let snapshot = scan(&repo);
+    let record = snapshot
+        .worktrees
+        .iter()
+        .find(|record| record.path.ends_with("wt-branch-ref"))
+        .expect("the linked worktree is reported");
+    assert_eq!(record.safety.status, SafetyStatus::Safe);
+
+    // The worktree-level credential walk skips node_modules; the executor's fresh
+    // artifact scan must catch this file before a stale Safe plan deletes it.
+    std::fs::write(linked.join("node_modules/.env"), "API_KEY=live\n").expect("write secret");
+
+    let outcome = execute_plan(
+        &plan_removing(&record.path),
+        &snapshot,
+        &options_without_log(),
+    );
+    assert_eq!(outcome.entries.len(), 1, "{:?}", outcome.entries);
+    assert_eq!(
+        outcome.entries[0].result,
+        ExecutionResult::Skipped,
+        "{:?}",
+        outcome.entries[0]
+    );
+    assert_eq!(
+        outcome.entries[0].detail_code,
+        Some(DetailCode::WorktreeChanged)
+    );
+    assert!(
+        linked.exists(),
+        "a stale Safe plan must not remove the directory"
     );
 }
 

@@ -12,6 +12,7 @@ pub mod git;
 pub mod git2_runner;
 pub mod hygiene;
 pub mod log;
+pub(crate) mod nested;
 pub mod path;
 pub mod reason;
 pub mod timefmt;
@@ -28,8 +29,8 @@ pub use path::{validate_path_for_deletion, DeletionContext, PathRejection, Valid
 pub use reason::{Reason, ReasonCode, SafetyAssessment, SafetyStatus};
 pub use workspace::discover_workspace;
 pub use worktree::{
-    check_worktree, detect_default_branch, infer_agent, parse_status, parse_worktree_list,
-    WorktreeCheckOptions, WorktreeEntry,
+    apply_reclaimable_clean, check_worktree, detect_default_branch, infer_agent, parse_status,
+    parse_worktree_list, WorktreeCheckOptions, WorktreeEntry,
 };
 
 use std::collections::BTreeMap;
@@ -698,6 +699,24 @@ pub fn scan_project(path: &str, options: &ScanOptions) -> Result<ProjectSnapshot
     };
     let artifact_scan = scan_artifacts(&runner, &present_roots, &artifact_options);
     warnings.extend(artifact_scan.warnings);
+
+    // ---- branch-ref-preserved cleanup ----
+    // A clean worktree does not need a merged branch when removal keeps the ref and
+    // every ignored entry is independently disposable. This runs after the artifact
+    // scan because a recognised artifact directory is accepted only from its own
+    // Safe record; a name is not evidence. The same rule runs in the executor with a
+    // fresh artifact scan, so the initial and re-check answers use the same facts.
+    let protected_paths: Vec<PathBuf> = entries.iter().map(|entry| entry.path.clone()).collect();
+    let reclaim_budget = per_dir_timeout.min(Duration::from_secs(5));
+    for record in &mut worktrees {
+        apply_reclaimable_clean(
+            &runner,
+            record,
+            &artifact_scan.records,
+            &protected_paths,
+            reclaim_budget,
+        );
+    }
 
     // ---- policy compliance ----
     // The audit reads the verdicts the two passes above already established — a

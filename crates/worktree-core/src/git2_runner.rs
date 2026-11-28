@@ -233,12 +233,18 @@ fn run_once(repo_path: &Path, args: &[&str], command: &str) -> Result<GitOutput,
 
     match args {
         ["worktree", "list", "--porcelain", "-z"] => worktree_list(&repo),
-        ["status", "--porcelain=v2", "--branch"] => status_v2(&repo, deadline),
+        ["status", "--porcelain=v2", "--branch"] => status_v2(&repo, deadline, false),
+        ["status", "--porcelain=v2", "--ignored=matching", "--branch"] => {
+            status_v2(&repo, deadline, true)
+        }
         ["status", "--porcelain", "--untracked-files=all", "--", path] => {
             status_v1_path(&repo, path)
         }
         ["ls-files", "--", path] => ls_files_path(&repo, path),
         ["ls-files", "--others", "--exclude-standard"] => ls_files_others(&repo),
+        ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"] => {
+            ls_files_ignored_directory(&repo)
+        }
         ["ls-files", "--error-unmatch", "--", path] => ls_files_error_unmatch(&repo, path),
         ["check-ignore", "-v", "--", path]
         | ["check-ignore", "-v", "-n", "--no-index", "--", path] => check_ignore(
@@ -259,6 +265,9 @@ fn run_once(repo_path: &Path, args: &[&str], command: &str) -> Result<GitOutput,
         ["diff", "--quiet", head, target, "--", paths @ ..] => {
             diff_quiet(&repo, head, target, paths)
         }
+        ["remote"] => remote_names(&repo),
+        ["for-each-ref", "--format=%(refname)", "refs/remotes"] => remote_refs(&repo),
+        ["rev-list", "HEAD", "--branches", "--not", "--remotes"] => local_only_commits(&repo),
         ["stash", "list", "--format=%gd"] => stash_list(&mut repo),
         ["worktree", "remove", rest @ ..] => worktree_remove(repo_path, rest),
         ["worktree", "prune"] => worktree_prune(&repo),
@@ -461,7 +470,11 @@ fn worktree_prune(repo: &Repository) -> Result<GitOutput, GitError> {
 
 // ------------------------------------------------------------------- status
 
-fn status_v2(repo: &Repository, deadline: Instant) -> Result<GitOutput, GitError> {
+fn status_v2(
+    repo: &Repository,
+    deadline: Instant,
+    include_ignored: bool,
+) -> Result<GitOutput, GitError> {
     let (head, branch, detached) = head_facts(repo);
     let mut output = String::new();
     output.push_str("# branch.oid ");
@@ -499,7 +512,7 @@ fn status_v2(repo: &Repository, deadline: Instant) -> Result<GitOutput, GitError
     options
         .include_untracked(true)
         .recurse_untracked_dirs(false)
-        .include_ignored(false)
+        .include_ignored(include_ignored)
         .renames_head_to_index(true)
         .renames_index_to_workdir(true)
         .no_refresh(true);
@@ -517,6 +530,11 @@ fn status_v2(repo: &Repository, deadline: Instant) -> Result<GitOutput, GitError
             continue;
         };
         if entry.status().is_ignored() {
+            if include_ignored {
+                output.push_str("! ");
+                output.push_str(path);
+                output.push('\n');
+            }
             continue;
         }
         if is_untracked(entry.status()) {
@@ -619,6 +637,51 @@ fn ls_files_others(repo: &Repository) -> Result<GitOutput, GitError> {
             output.push_str(path);
             output.push('\n');
         }
+    }
+    Ok(out(output))
+}
+
+/// The top-level ignored files and directories, NUL-separated, as
+/// `git ls-files --others --ignored --exclude-standard --directory -z` reports
+/// them. `--directory` is reproduced by not recursing into ignored directories;
+/// the trailing slash makes the directory form explicit.
+fn ls_files_ignored_directory(repo: &Repository) -> Result<GitOutput, GitError> {
+    let workdir = repo.workdir().ok_or_else(|| {
+        failed(
+            "git ls-files",
+            "the repository has no working tree".to_string(),
+        )
+    })?;
+    let mut options = StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(false)
+        .include_ignored(true)
+        .recurse_ignored_dirs(false)
+        .no_refresh(true);
+    let statuses = repo
+        .statuses(Some(&mut options))
+        .map_err(|error| failed("git ls-files", format!("cannot read the status: {error}")))?;
+    let mut entries: Vec<String> = Vec::new();
+    for entry in statuses.iter() {
+        if !entry.status().is_ignored() {
+            continue;
+        }
+        let Some(path) = entry.path() else {
+            continue;
+        };
+        let mut name = path.to_string();
+        if !name.ends_with('/') && workdir.join(path).is_dir() {
+            name.push('/');
+        }
+        entries.push(name);
+    }
+    entries.sort();
+    entries.dedup();
+    let mut output = String::new();
+    for entry in entries {
+        output.push_str(&entry);
+        output.push('\0');
     }
     Ok(out(output))
 }
@@ -793,6 +856,61 @@ fn origin_head(repo: &Repository) -> GitOutput {
             code: Some(1),
         },
     }
+}
+
+fn remote_names(repo: &Repository) -> Result<GitOutput, GitError> {
+    let remotes = repo
+        .remotes()
+        .map_err(|error| failed("git remote", format!("cannot read remotes: {error}")))?;
+    let mut output = String::new();
+    for name in remotes.iter().flatten() {
+        if !name.is_empty() {
+            let _ = writeln!(output, "{name}");
+        }
+    }
+    Ok(out(output))
+}
+
+fn remote_refs(repo: &Repository) -> Result<GitOutput, GitError> {
+    let references = repo
+        .references_glob("refs/remotes/*")
+        .map_err(|error| failed("git for-each-ref", format!("cannot read refs: {error}")))?;
+    let mut output = String::new();
+    for reference in references {
+        let reference = reference
+            .map_err(|error| failed("git for-each-ref", format!("cannot read a ref: {error}")))?;
+        if let Some(name) = reference.name() {
+            let _ = writeln!(output, "{name}");
+        }
+    }
+    Ok(out(output))
+}
+
+fn local_only_commits(repo: &Repository) -> Result<GitOutput, GitError> {
+    let mut walk = repo
+        .revwalk()
+        .map_err(|error| failed("git rev-list", format!("cannot walk commits: {error}")))?;
+    walk.push_head()
+        .map_err(|error| failed("git rev-list", format!("cannot read HEAD: {error}")))?;
+    walk.push_glob("refs/heads/*").map_err(|error| {
+        failed(
+            "git rev-list",
+            format!("cannot read local branches: {error}"),
+        )
+    })?;
+    walk.hide_glob("refs/remotes/*").map_err(|error| {
+        failed(
+            "git rev-list",
+            format!("cannot read remote-tracking refs: {error}"),
+        )
+    })?;
+    let mut output = String::new();
+    for oid in walk {
+        let oid =
+            oid.map_err(|error| failed("git rev-list", format!("cannot read a commit: {error}")))?;
+        let _ = writeln!(output, "{oid}");
+    }
+    Ok(out(output))
 }
 
 fn is_ancestor(repo: &Repository, head: &str, candidate: &str) -> Result<GitOutput, GitError> {

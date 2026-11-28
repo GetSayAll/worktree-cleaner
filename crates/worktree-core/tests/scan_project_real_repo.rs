@@ -204,6 +204,93 @@ fn a_scan_reads_worktrees_and_their_artifacts_from_a_real_repository() {
 }
 
 #[test]
+fn a_clean_unmerged_worktree_with_only_generated_ignored_entries_is_safe() {
+    // The branch is not merged and has no upstream. The checkout still keeps the
+    // branch ref when it is removed, and the ignored `node_modules` is a Safe
+    // artifact record; the ignored `.private-dependencies` holds only an empty
+    // lock file. That is the branch-ref-preserved case, not a loss of work.
+    let repo = Repo::new("reclaimable");
+    std::fs::write(
+        repo.root.join(".gitignore"),
+        "node_modules/\n.private-dependencies/\n",
+    )
+    .expect("write .gitignore");
+    std::fs::write(repo.root.join("package.json"), "{}\n").expect("write manifest");
+    std::fs::write(repo.root.join("src.js"), "console.log(1);\n").expect("write source");
+    repo.git(&["add", ".gitignore", "package.json", "src.js"]);
+    repo.git_dated_in(&repo.root, &["commit", "--quiet", "-m", "layout"], 90);
+
+    let linked = repo.add_worktree("wt-reclaim", "feature/reclaim");
+    std::fs::write(linked.join("feature.js"), "console.log(2);\n").expect("write feature");
+    repo.git_in(&linked, &["add", "feature.js"]);
+    repo.git_dated_in(&linked, &["commit", "--quiet", "-m", "feature"], 80);
+
+    std::fs::create_dir_all(linked.join("node_modules/left-pad")).expect("create node_modules");
+    std::fs::write(
+        linked.join("node_modules/left-pad/index.js"),
+        "module.exports = 1;\n",
+    )
+    .expect("write module");
+    std::fs::create_dir_all(linked.join(".private-dependencies")).expect("create private deps");
+    std::fs::write(linked.join(".private-dependencies/prepare.lock"), "").expect("write lock");
+    backdate_tree(&repo.root, 30);
+    backdate_tree(&linked, 30);
+
+    let snapshot = scan_project(&repo.root.display().to_string(), &options()).expect("scan");
+    let record = snapshot
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.path.ends_with("wt-reclaim"))
+        .expect("the linked worktree is reported");
+
+    assert!(!record.is_main);
+    assert_eq!(record.branch.as_deref(), Some("feature/reclaim"));
+    assert_eq!(record.merged_into_default, Some(false));
+    assert!(!record.has_upstream);
+    assert_eq!(record.dirty_files, 0);
+    assert_eq!(record.untracked_files, 0);
+    assert_eq!(
+        record.safety.status,
+        SafetyStatus::Safe,
+        "codes {:?}",
+        record
+            .safety
+            .reasons
+            .iter()
+            .map(|reason| reason.code.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        record
+            .safety
+            .reasons
+            .iter()
+            .any(|reason| reason.code == ReasonCode::WtReclaimableClean),
+        "{:?}",
+        record.safety.reasons
+    );
+    assert!(
+        !record.safety.reasons.iter().any(|reason| {
+            reason.code == ReasonCode::WtUnmerged || reason.code == ReasonCode::WtNoUpstream
+        }),
+        "the branch-only Review reasons must be replaced: {:?}",
+        record.safety.reasons
+    );
+
+    let modules = artifact_at(&snapshot, "wt-reclaim", "node_modules");
+    assert_eq!(modules.safety.status, SafetyStatus::Safe);
+    assert!(
+        repo.git_try_in(
+            &linked,
+            &["rev-parse", "--verify", "refs/heads/feature/reclaim"]
+        )
+        .status
+        .success(),
+        "removal keeps the branch ref; the fixture must have one"
+    );
+}
+
+#[test]
 fn a_credential_hidden_by_gitignore_is_still_caught() {
     // The end-to-end version of the unit test: a real repository, a real `.gitignore`
     // that hides the file from Git, and a scan that has to notice anyway. The unit

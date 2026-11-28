@@ -138,6 +138,9 @@ These are the rules the code is written around, and the tests assert them:
 - A worktree is removed through Git's worktree API (gix) and is permanent; the
   branch ref remains. Its metadata is pruned afterwards. No raw directory delete
   is used.
+- A clean worktree may be Safe without a merged branch only when its branch ref
+  remains and every ignored entry is proven disposable: a Safe artifact record, a
+  verified reproducible nested checkout, or an empty file or directory.
 - Every deletion decision is backed by a reason that names what was observed.
 - An item that cannot be verified is *needs review*, never *safe*.
 - The initial scan and the execution re-check use the same rules. A verdict

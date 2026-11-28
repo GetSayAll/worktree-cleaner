@@ -25,13 +25,13 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-use crate::artifact::{check_artifact, lookup_kind, ArtifactScanOptions};
+use crate::artifact::{check_artifact, lookup_kind, scan_artifacts, ArtifactScanOptions};
 use crate::git::{GitError, GitRunner};
 use crate::git2_runner::Git2Runner;
 use crate::log;
 use crate::path::{validate_path_for_deletion, DeletionContext};
 use crate::reason::{ReasonCode, SafetyStatus};
-use crate::worktree::{check_worktree, WorktreeCheckOptions};
+use crate::worktree::{apply_reclaimable_clean, check_worktree, WorktreeCheckOptions};
 use crate::{
     CleanupPlan, DetailArg, DetailCode, ExecutionResult, HistoryAction, HistoryEntry,
     ProjectSnapshot, ResultEntry, WorktreeRecord,
@@ -127,6 +127,12 @@ where
     // worktree removal had failed or been skipped, and the audit log then claimed a
     // deletion that never happened.
     let mut removed_worktrees: Vec<String> = Vec::new();
+    let protected_paths: Vec<PathBuf> = snapshot
+        .worktrees
+        .iter()
+        .map(|worktree| PathBuf::from(&worktree.path))
+        .collect();
+    let reclaim_budget = opts.per_dir_timeout.min(Duration::from_secs(5));
 
     // ---- Channel A: worktrees ----
     for item in &plan.worktree_removals {
@@ -165,7 +171,7 @@ where
         }
 
         // ---- identity and activity re-check (D11) ----
-        let rechecked = check_worktree(
+        let mut rechecked = check_worktree(
             &runner,
             Path::new(&snapshot.root),
             &worktree_entry_for(record),
@@ -184,6 +190,39 @@ where
                 credential_scan_timeout: Duration::from_secs(5),
             },
         );
+        // A Safe plan item may have been Safe because of the branch-ref rule. The
+        // base re-check has no artifact records, so re-run that rule with a fresh
+        // artifact scan before comparing the levels. An unsafe or unreadable
+        // artifact leaves the record at Review and the item is skipped.
+        if record.safety.status == SafetyStatus::Safe
+            && rechecked.safety.status != SafetyStatus::Safe
+        {
+            let roots = [PathBuf::from(&record.path)];
+            let artifacts = scan_artifacts(
+                &runner,
+                &roots,
+                &ArtifactScanOptions {
+                    // The scan uses the settings' depth (default 6). The executor
+                    // has no copy of that setting, so it uses the same default;
+                    // a deeper custom scan can only make this re-check more
+                    // conservative, never less.
+                    max_depth: 6,
+                    per_dir_timeout: opts.per_dir_timeout,
+                    recent_activity_days: opts.recent_activity_days,
+                    whitelist: whitelist.clone(),
+                    now: opts.now,
+                    budget_deadline: None,
+                    credential_budget: None,
+                },
+            );
+            apply_reclaimable_clean(
+                &runner,
+                &mut rechecked,
+                &artifacts.records,
+                &protected_paths,
+                reclaim_budget,
+            );
+        }
         if let Some(change) = worktree_change(record, &rechecked) {
             push(
                 &mut audit,

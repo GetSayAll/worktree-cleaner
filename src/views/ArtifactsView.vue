@@ -5,6 +5,7 @@ import {
   bundledOwner,
   goTo,
   isSelectedArtifact,
+  selectAllSafe,
   selectedSummary,
   settings,
   snapshot,
@@ -118,6 +119,13 @@ function sizeText(item: ArtifactRecord): string {
       <span class="faint tiny nowrap">
         {{ messages.artifacts.summary(visibleArtifacts.length, statusCount(visibleArtifacts, "Safe"), statusCount(visibleArtifacts, "Review"), statusCount(visibleArtifacts, "Unsafe")) }}
       </span>
+      <button
+        class="btn"
+        :disabled="statusCount(visibleArtifacts, 'Safe') === 0"
+        @click="selectAllSafe"
+      >
+        {{ messages.artifacts.selectAllSafe }}
+      </button>
     </div>
 
     <div v-for="group in groups" :key="group.key" class="card">

@@ -560,7 +560,8 @@ h1, h2 { text-wrap: balance; }
    instead, which is the whole job the clip was doing. */
 .card > .group-head:first-child,
 .card > .card__body--flush:first-child > .group-head:first-child,
-.card > .card__body--flush:first-child > .select-all:first-child {
+.card > .card__body--flush:first-child > .select-all:first-child,
+.card > .card__body--flush:first-child > .review-group-head:first-child {
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 .card__head {
@@ -1093,6 +1094,39 @@ h1, h2 { text-wrap: balance; }
 }
 .group-head__path { font-family: var(--mono); font-size: var(--fs-caption); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* A Review group caption. It carries the decision the rows below share: what
+   removal keeps, what it loses, and whether a group action is offered. The
+   border separates the group from the rows that came before it. */
+.review-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: 8px var(--sp-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--accent-weak);
+  color: var(--accent-text);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+}
+.review-hint .btn--ghost { color: inherit; }
+.review-group-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: 10px var(--sp-4);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.review-group-head__body { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.review-group-head__title { font-size: var(--fs-ui); font-weight: 600; color: var(--text); }
+.review-group-head__impact { margin: 0; color: var(--text-2); font-size: var(--fs-caption); line-height: 1.55; overflow-wrap: anywhere; }
+.review-group-head__action { flex: 0 0 auto; display: flex; align-items: center; align-self: center; }
+
 /* ---------- reasons ----------
    A line of text, not a box. Two bordered chips per row put four coloured frames
    into every row of the list, and the verdict they were repeating is already
@@ -1502,6 +1536,8 @@ h1, h2 { text-wrap: balance; }
 }
 
 /* ---------- plan ---------- */
+.plan-removal-group + .plan-removal-group { margin-top: var(--sp-3); }
+.plan-removal-group__rows { padding-top: var(--sp-3); }
 .plan-item {
   display: flex;
   gap: var(--sp-3);

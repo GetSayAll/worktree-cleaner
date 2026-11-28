@@ -20,6 +20,8 @@ import {
   toggleBuildCache
 } from "../state";
 import { isDesktop } from "../platform";
+import type { WorktreeRemovalItem } from "../types";
+import { reviewLane, type ReviewLane } from "../worktreeGroups";
 
 const desktop = isDesktop();
 import StatCard from "../components/StatCard.vue";
@@ -70,6 +72,79 @@ const worktreeStatus = computed(
 const artifactStatus = computed(
   () => new Map((snapshot.value?.artifacts ?? []).map((record) => [record.path, record.safety.status]))
 );
+
+type RemovalGroupKey = "safe" | ReviewLane;
+
+interface RemovalGroup {
+  key: RemovalGroupKey;
+  items: WorktreeRemovalItem[];
+}
+
+const removalGroupOrder: RemovalGroupKey[] = ["safe", "batch", "untracked", "attention"];
+
+/**
+ * The plan is grouped with the same loss profiles as the worktree page. A group
+ * header repeats the impact and the count; the rows remain available underneath,
+ * so this is a way to read 50 clean removals as one decision without hiding the
+ * paths the executor will touch.
+ */
+const removalGroups = computed<RemovalGroup[]>(() => {
+  const records = new Map(
+    (snapshot.value?.worktrees ?? []).map((record) => [record.path, record])
+  );
+  const buckets = new Map<RemovalGroupKey, WorktreeRemovalItem[]>(
+    removalGroupOrder.map((key) => [key, []])
+  );
+  for (const item of plan.value.worktree_removals) {
+    const record = records.get(item.path);
+    const lane =
+      record?.safety.status === "Review"
+        ? reviewLane(record) ?? "attention"
+        : record?.safety.status === "Safe"
+          ? "safe"
+          : "attention";
+    buckets.get(lane)?.push(item);
+  }
+  return removalGroupOrder
+    .map((key) => ({ key, items: buckets.get(key) ?? [] }))
+    .filter((group) => group.items.length > 0);
+});
+
+const collapsedRemovalGroups = ref<RemovalGroupKey[]>(["batch"]);
+
+function removalGroupBytes(group: RemovalGroup): string {
+  const bytes = group.items.reduce((sum, item) => sum + (item.size_bytes ?? 0), 0);
+  const unknown = group.items.filter((item) => item.size_bytes === null).length;
+  return formatBytes(bytes, { approximate: unknown > 0 });
+}
+
+function removalGroupTitle(key: RemovalGroupKey): string {
+  switch (key) {
+    case "safe":
+      return messages.plan.removalGroups.safe;
+    case "batch":
+      return messages.plan.removalGroups.batch;
+    case "untracked":
+      return messages.plan.removalGroups.untracked;
+    case "attention":
+      return messages.plan.removalGroups.attention;
+  }
+}
+
+function removalGroupImpact(key: RemovalGroupKey): string {
+  return messages.plan.removalGroups.impact[key];
+}
+
+function isRemovalGroupCollapsed(group: RemovalGroup): boolean {
+  // Short groups do not need a second click; only a long group starts folded.
+  return group.items.length > 3 && collapsedRemovalGroups.value.includes(group.key);
+}
+
+function toggleRemovalGroup(group: RemovalGroup) {
+  collapsedRemovalGroups.value = collapsedRemovalGroups.value.includes(group.key)
+    ? collapsedRemovalGroups.value.filter((key) => key !== group.key)
+    : [...collapsedRemovalGroups.value, group.key];
+}
 
 type ProgressState = "" | "removed" | "kept";
 
@@ -290,44 +365,69 @@ async function copyPlan() {
       </div>
       <div class="card__body">
         <div v-if="plan.worktree_removals.length === 0" class="faint tiny">{{ messages.plan.noWorktrees }}</div>
-        <div class="stack stack--tight">
-          <div
-            v-for="item in plan.worktree_removals"
-            :key="item.path"
-            class="plan-item"
-            :class="{
-              'plan-item--force': item.force,
-              'is-removed': progressState(item.path, item.command.startsWith('git worktree prune')) === 'removed',
-              'is-kept': progressState(item.path, item.command.startsWith('git worktree prune')) === 'kept'
-            }"
-            :data-plan-target="item.command.startsWith('git worktree prune') ? undefined : item.path"
-            :data-plan-prune="item.command.startsWith('git worktree prune') ? 'true' : undefined"
-          >
-            <div class="plan-item__main">
-              <div class="row-wrap">
-                <span class="mono">{{ displayPath(item.path, root) }}</span>
-                <span class="chip">{{ item.branch || messages.common.detached }}</span>
-                <span v-if="item.force" class="badge badge--review">{{ messages.plan.needForce }}</span>
-                <span v-else-if="worktreeStatus.get(item.path) === 'Review'" class="badge badge--review">{{ messages.plan.reviewItem }}</span>
-                <span v-else class="badge badge--safe">{{ messages.plan.removable }}</span>
-              </div>
-              <div class="code">{{ item.command }}</div>
-              <div v-if="item.force">
-                <div class="field__label">
-                  {{ " " + messages.plan.forceNote(item.untracked_files.length) + " " }}
+        <template v-else>
+          <div v-for="group in removalGroups" :key="group.key" class="plan-removal-group">
+            <div class="review-group-head" :data-plan-group="group.key">
+              <div class="review-group-head__body">
+                <div class="row-wrap">
+                  <span class="review-group-head__title">{{ removalGroupTitle(group.key) }}</span>
+                  <span class="faint tiny">
+                    {{ messages.plan.removalGroups.meta(group.items.length, removalGroupBytes(group)) }}
+                  </span>
                 </div>
-                <div class="untracked-list">
-                  <div v-for="file in item.untracked_files" :key="file">{{ file }}</div>
-                </div>
+                <p class="review-group-head__impact">{{ removalGroupImpact(group.key) }}</p>
               </div>
-              <p v-if="item.command.startsWith('git worktree prune')" class="faint tiny">
-                {{ " " + messages.plan.prunableNote + " " }}
-              </p>
-              <p v-else-if="!item.force" class="faint tiny">{{ messages.plan.cleanNote }}</p>
+              <div v-if="group.items.length > 3" class="review-group-head__action">
+                <button
+                  class="btn btn--ghost"
+                  :aria-expanded="!isRemovalGroupCollapsed(group)"
+                  :disabled="executing"
+                  @click="toggleRemovalGroup(group)"
+                >
+                  {{ isRemovalGroupCollapsed(group) ? messages.plan.removalGroups.showPaths(group.items.length) : messages.plan.removalGroups.hidePaths }}
+                </button>
+              </div>
             </div>
-            <div class="numeric nowrap faint tiny">{{ formatBytes(item.size_bytes) }}</div>
+            <div v-if="!isRemovalGroupCollapsed(group)" class="stack stack--tight plan-removal-group__rows">
+              <div
+                v-for="item in group.items"
+                :key="item.path"
+                class="plan-item"
+                :class="{
+                  'plan-item--force': item.force,
+                  'is-removed': progressState(item.path, item.command.startsWith('git worktree prune')) === 'removed',
+                  'is-kept': progressState(item.path, item.command.startsWith('git worktree prune')) === 'kept'
+                }"
+                :data-plan-target="item.command.startsWith('git worktree prune') ? undefined : item.path"
+                :data-plan-prune="item.command.startsWith('git worktree prune') ? 'true' : undefined"
+              >
+                <div class="plan-item__main">
+                  <div class="row-wrap">
+                    <span class="mono">{{ displayPath(item.path, root) }}</span>
+                    <span class="chip">{{ item.branch || messages.common.detached }}</span>
+                    <span v-if="item.force" class="badge badge--review">{{ messages.plan.needForce }}</span>
+                    <span v-else-if="worktreeStatus.get(item.path) === 'Review'" class="badge badge--review">{{ messages.plan.reviewItem }}</span>
+                    <span v-else class="badge badge--safe">{{ messages.plan.removable }}</span>
+                  </div>
+                  <div class="code">{{ item.command }}</div>
+                  <div v-if="item.force">
+                    <div class="field__label">
+                      {{ " " + messages.plan.forceNote(item.untracked_files.length) + " " }}
+                    </div>
+                    <div class="untracked-list">
+                      <div v-for="file in item.untracked_files" :key="file">{{ file }}</div>
+                    </div>
+                  </div>
+                  <p v-if="item.command.startsWith('git worktree prune')" class="faint tiny">
+                    {{ " " + messages.plan.prunableNote + " " }}
+                  </p>
+                  <p v-else-if="!item.force" class="faint tiny">{{ messages.plan.cleanNote }}</p>
+                </div>
+                <div class="numeric nowrap faint tiny">{{ formatBytes(item.size_bytes) }}</div>
+              </div>
+            </div>
           </div>
-        </div>
+        </template>
       </div>
     </div>
 

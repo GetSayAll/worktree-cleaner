@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { artifacts, counts, goTo, primaryReason, selectedSummary, snapshot, worktrees } from "../state";
+import { artifacts, counts, goTo, primaryReason, selectAllSafe, selectedSummary, snapshot, visibleArtifacts, worktrees } from "../state";
 import SafetyBadge from "../components/SafetyBadge.vue";
 import ReasonList from "../components/ReasonList.vue";
 import StatCard from "../components/StatCard.vue";
@@ -64,6 +64,12 @@ const safeBytes = computed(() => {
 const reviewCount = computed(() => counts.value.worktree.Review + counts.value.artifact.Review);
 const unsafeCount = computed(() => counts.value.worktree.Unsafe + counts.value.artifact.Unsafe);
 const selectionCount = computed(() => selectedSummary.value.worktrees + selectedSummary.value.artifacts);
+// The reselect action can only add items the reader can see. A Safe artifact below
+// the size threshold stays hidden until the threshold is lowered, so it must not
+// make the action appear and then select nothing.
+const selectableSafeCount = computed(
+  () => counts.value.worktree.Safe + visibleArtifacts.value.filter((item) => item.safety.status === "Safe").length
+);
 </script>
 
 <template>
@@ -240,6 +246,9 @@ const selectionCount = computed(() => selectedSummary.value.worktrees + selected
       <div class="actionbar__side">
         <button class="btn" @click="goTo('worktrees')">{{ messages.overview.viewWorktrees }}</button>
         <button class="btn" @click="goTo('artifacts')">{{ messages.overview.viewArtifacts }}</button>
+        <button v-if="selectionCount === 0 && selectableSafeCount > 0" class="btn btn--primary" @click="selectAllSafe">
+          {{ messages.overview.selectAllSafe }}
+        </button>
       </div>
       <span class="actionbar__summary" :class="selectionCount > 0 ? 'muted' : 'faint'">
         {{ " " + messages.overview.selected(selectionCount) }} <strong>{{ formatBytes(selectedSummary.bytes, { approximate: selectedSummary.unknown > 0 }) }}</strong>

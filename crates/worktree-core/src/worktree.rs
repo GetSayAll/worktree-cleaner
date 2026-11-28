@@ -20,14 +20,15 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
-use crate::artifact::{credential_in_worktree, CredentialScan};
+use crate::artifact::{credential_in_worktree_skipping, lookup_kind, CredentialScan};
 use crate::git::{display_command, GitError, GitOutput, GitRunner};
+use crate::nested::{containing_checkout, inspect, NestedCheckoutState};
 use crate::path::whitelist_hit;
 use crate::reason::{Reason, ReasonCode, SafetyAssessment, SafetyStatus};
 use crate::timefmt::{elapsed_days, format_rfc3339, from_unix_seconds, humanize_days};
-use crate::WorktreeRecord;
+use crate::{ArtifactRecord, WorktreeRecord};
 
 /// One entry of `git worktree list --porcelain`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -521,59 +522,11 @@ pub fn check_worktree(
         if !is_main && !entry.is_locked && !is_prunable {
             if let Some(info) = &status {
                 if info.dirty_files == 0 {
-                    match credential_in_worktree(&entry.path, opts.credential_scan_timeout) {
-                        CredentialScan::Complete(Some(name)) => {
-                            // A tracked `.env.example` is in Git; deleting the
-                            // worktree does not lose it, and blocking on it would
-                            // make every repository that commits a template
-                            // Unsafe. Only an untracked or ignored file is a
-                            // worktree-level loss.
-                            match runner.run(
-                                &entry.path,
-                                &["ls-files", "--error-unmatch", "--", &name],
-                            ) {
-                                Ok(output) if output.code == Some(0) => {}
-                                Ok(output) if output.code == Some(1) => {
-                                    reasons.push(Reason::blocking(
-                                        ReasonCode::WtCredentials,
-                                        "contains what looks like a credential file",
-                                        format!(
-                                            "{name} is inside; deleting the worktree would delete it too"
-                                        ),
-                                    ));
-                                }
-                                Ok(output) => reasons.push(Reason::review(
-                                    ReasonCode::WtCannotVerify,
-                                    "could not check whether the credential file is tracked",
-                                    format!(
-                                        "git ls-files exited with {:?} for {name}: {}",
-                                        output.code,
-                                        output.stderr.trim()
-                                    ),
-                                )),
-                                Err(error) => reasons.push(cannot_verify(
-                                    "whether the credential file is tracked",
-                                    &error,
-                                )),
-                            }
-                        }
-                        CredentialScan::Complete(None) => {}
-                        CredentialScan::Truncated { scanned } => reasons.push(Reason::review(
-                            ReasonCode::WtCannotVerify,
-                            "could not finish checking the worktree for credentials",
-                            format!(
-                                "looked at {scanned} entries before the time limit, without covering the whole worktree; a credential further inside would not have been found"
-                            ),
-                        )),
-                        CredentialScan::Failed(error) => reasons.push(Reason::review(
-                            ReasonCode::WtCannotVerify,
-                            "could not check the worktree for credentials",
-                            format!(
-                                "could not list {} to check for credentials: {error}",
-                                entry.path.display()
-                            ),
-                        )),
-                    }
+                    reasons.extend(worktree_credential_reasons(
+                        runner,
+                        &entry.path,
+                        opts.credential_scan_timeout,
+                    ));
                 }
             }
         }
@@ -830,6 +783,413 @@ pub fn check_worktree(
     }
 }
 
+/// Upper bound for walking ignored entries during the `wt.reclaimable_clean`
+/// proof. Passing it is a `cannot verify` answer, not a pass.
+const MAX_RECLAIM_ENTRIES: usize = 50_000;
+
+/// How many ignored entries the positive reason names before it says "and N more".
+/// The whole list is walked; this only keeps one evidence line readable.
+const MAX_RECLAIM_EVIDENCE: usize = 4;
+
+/// One ignored-entry check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IgnoredEntryVerdict {
+    /// The entry is empty, a Safe artifact record, or a verified nested checkout.
+    Disposable(String),
+    /// The entry contains something that only a person can judge; leave the record
+    /// at its branch-only Review level.
+    NotDisposable,
+    /// The check could not finish. The record becomes Review with `cannot_verify`.
+    CannotVerify(String),
+}
+
+/// Tracks the time/entry budget for one ignored-entry walk.
+struct ReclaimWalk {
+    deadline: Instant,
+    visited: usize,
+}
+
+impl ReclaimWalk {
+    fn tick(&mut self) -> Result<(), String> {
+        if self.visited >= MAX_RECLAIM_ENTRIES {
+            return Err(format!(
+                "the ignored-entry walk reached its {MAX_RECLAIM_ENTRIES}-entry limit"
+            ));
+        }
+        self.visited += 1;
+        if Instant::now() >= self.deadline {
+            return Err(
+                "the ignored-entry walk reached its time limit before covering the whole tree"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Promotes a clean, branch-ref-preserved worktree to Safe when every ignored entry
+/// is proven disposable.
+///
+/// The branch ref survives `git worktree remove`; the directory does not. The four
+/// branch-only Review reasons (`wt.unmerged`, `wt.no_upstream`,
+/// `wt.unpushed_branch`, `wt.recent_activity`) describe work that survives on the
+/// ref, not a file that disappears with the checkout. They are replaced by
+/// [`ReasonCode::WtReclaimableClean`] only when the ignored entries are independently
+/// proven to be a Safe artifact record, a verified reproducible nested checkout, an
+/// empty file, or an empty directory. A name is never enough.
+///
+/// `protected_paths` holds the other worktree paths from the same scan. An ignored
+/// entry that is, or contains, another worktree is never disposable: deleting the
+/// parent directory would delete that checkout too.
+///
+/// A failure to read the ignored-entry list or an unverifiable nested checkout adds
+/// `wt.cannot_verify`; it never promotes. A stash is deliberately not checked: it
+/// lives in the common Git directory and survives worktree removal.
+///
+/// Returns whether the record was promoted. Callers must run this after artifact
+/// records are available, and again during the execution re-check with a fresh
+/// artifact scan.
+pub fn apply_reclaimable_clean(
+    runner: &dyn GitRunner,
+    record: &mut WorktreeRecord,
+    artifacts: &[ArtifactRecord],
+    protected_paths: &[PathBuf],
+    budget: Duration,
+) -> bool {
+    if !reclaimable_clean_candidate(record) {
+        return false;
+    }
+
+    let root = PathBuf::from(&record.path);
+    let entries = match ignored_entries(runner, &root) {
+        Ok(entries) => entries,
+        Err(evidence) => {
+            add_cannot_verify(record, evidence);
+            return false;
+        }
+    };
+
+    let mut walk = ReclaimWalk {
+        deadline: Instant::now() + budget,
+        visited: 0,
+    };
+    let mut proofs = Vec::with_capacity(entries.len());
+    for relative in &entries {
+        match verify_ignored_entry(
+            runner,
+            &root,
+            relative,
+            artifacts,
+            protected_paths,
+            &mut walk,
+        ) {
+            IgnoredEntryVerdict::Disposable(proof) => proofs.push(proof),
+            IgnoredEntryVerdict::NotDisposable => return false,
+            IgnoredEntryVerdict::CannotVerify(evidence) => {
+                add_cannot_verify(record, evidence);
+                return false;
+            }
+        }
+    }
+
+    let branch = record.branch.as_deref().unwrap_or("branch");
+    let ignored = if proofs.is_empty() {
+        "no ignored entries are present".to_string()
+    } else {
+        format!("ignored entries: {}", summarize_proofs(&proofs))
+    };
+    let mut reasons = std::mem::take(&mut record.safety.reasons);
+    reasons.retain(|reason| !is_suppressible_branch_reason(reason.code));
+    reasons.push(Reason::safe(
+        ReasonCode::WtReclaimableClean,
+        "clean, with only generated or empty ignored content",
+        format!("branch ref {branch} is kept; {ignored}"),
+    ));
+    record.safety = SafetyAssessment::from_reasons(reasons);
+    true
+}
+
+/// The record-level half of the rule. A worktree that is already Safe or Unsafe is
+/// not reconsidered; one with a non-branch Review reason is not promoted.
+fn reclaimable_clean_candidate(record: &WorktreeRecord) -> bool {
+    if record.safety.status != SafetyStatus::Review
+        || record.is_main
+        || record.is_locked
+        || record.is_detached
+        || record.is_prunable
+        || record.branch.as_deref().is_none_or(str::is_empty)
+        || record.dirty_files > 0
+        || record.untracked_files > 0
+        || !record.untracked_file_list.is_empty()
+        || record.merged_into_default != Some(false)
+        || record.absorbed_into_default
+    {
+        return false;
+    }
+
+    let mut suppressible = false;
+    for reason in &record.safety.reasons {
+        match reason.code {
+            ReasonCode::WtClean | ReasonCode::WtReproducibleCheckout => {}
+            ReasonCode::WtUnmerged
+            | ReasonCode::WtNoUpstream
+            | ReasonCode::WtUnpushedBranch
+            | ReasonCode::WtRecentActivity => suppressible = true,
+            // `wt.dirty`, `wt.untracked`, `wt.credentials`, `wt.cannot_verify`,
+            // `wt.agent_active`, a whitelist hit, or any future reason still means
+            // "not proven"; only the four branch/activity facts are replaced.
+            _ => return false,
+        }
+    }
+    suppressible
+}
+
+const fn is_suppressible_branch_reason(code: ReasonCode) -> bool {
+    matches!(
+        code,
+        ReasonCode::WtUnmerged
+            | ReasonCode::WtNoUpstream
+            | ReasonCode::WtUnpushedBranch
+            | ReasonCode::WtRecentActivity
+    )
+}
+
+/// Lists the top-level ignored files and directories. `--directory` collapses an
+/// ignored tree to one entry, and `-z` keeps a path that contains a newline intact.
+fn ignored_entries(runner: &dyn GitRunner, root: &Path) -> Result<Vec<PathBuf>, String> {
+    let args = [
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+        "-z",
+    ];
+    let output = runner
+        .run(root, &args)
+        .map_err(|error| format!("git ls-files failed: {error}"))?;
+    if !output.success() {
+        return Err(format!(
+            "git ls-files exited with {:?}: {}",
+            output.code,
+            output.stderr.trim()
+        ));
+    }
+    let mut entries: Vec<PathBuf> = output
+        .stdout
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
+        .map(PathBuf::from)
+        .collect();
+    if entries.len() > MAX_RECLAIM_ENTRIES {
+        return Err(format!(
+            "there are more than {MAX_RECLAIM_ENTRIES} ignored entries"
+        ));
+    }
+    entries.shrink_to_fit();
+    Ok(entries)
+}
+
+fn verify_ignored_entry(
+    runner: &dyn GitRunner,
+    root: &Path,
+    relative: &Path,
+    artifacts: &[ArtifactRecord],
+    protected_paths: &[PathBuf],
+    walk: &mut ReclaimWalk,
+) -> IgnoredEntryVerdict {
+    if let Err(evidence) = walk.tick() {
+        return IgnoredEntryVerdict::CannotVerify(evidence);
+    }
+
+    let absolute = root.join(relative);
+    // Another worktree, or a directory containing one, is not disposable. The
+    // check is component-wise so `/repo/a` and `/repo/ab` cannot alias.
+    if protected_paths
+        .iter()
+        .any(|protected| same_path(protected, &absolute) || protected.starts_with(&absolute))
+    {
+        return IgnoredEntryVerdict::NotDisposable;
+    }
+    // The tool's own worktree layout is never a dependency checkout, even if the
+    // path is not in the scan's protected list.
+    if relative.components().any(|component| {
+        matches!(
+            component.as_os_str().to_str(),
+            Some(".worktrees" | ".worktree")
+        )
+    }) {
+        return IgnoredEntryVerdict::NotDisposable;
+    }
+
+    let file_type = match std::fs::symlink_metadata(&absolute) {
+        Ok(metadata) => metadata.file_type(),
+        Err(error) => {
+            return IgnoredEntryVerdict::CannotVerify(format!(
+                "cannot read {}: {error}",
+                relative.display()
+            ));
+        }
+    };
+    if file_type.is_symlink() {
+        return IgnoredEntryVerdict::NotDisposable;
+    }
+    if file_type.is_file() {
+        return match std::fs::metadata(&absolute) {
+            Ok(metadata) if metadata.len() == 0 => {
+                IgnoredEntryVerdict::Disposable(format!("{} is an empty file", relative.display()))
+            }
+            Ok(_) => IgnoredEntryVerdict::NotDisposable,
+            Err(error) => IgnoredEntryVerdict::CannotVerify(format!(
+                "cannot read {}: {error}",
+                relative.display()
+            )),
+        };
+    }
+    if !file_type.is_dir() {
+        return IgnoredEntryVerdict::NotDisposable;
+    }
+
+    // A nested checkout has its own Git state; verify it before treating its
+    // contents as ordinary files. A `.git` **directory** is an ordinary clone and
+    // can be proven reproducible. A `.git` **file** is a linked worktree or a
+    // submodule: the directory may belong to another checkout, so it is not
+    // auto-promoted even when its Git state looks clean.
+    let git_marker = absolute.join(".git");
+    if git_marker.exists() {
+        let marker_is_directory = std::fs::symlink_metadata(&git_marker)
+            .is_ok_and(|metadata| metadata.file_type().is_dir());
+        if !marker_is_directory {
+            return IgnoredEntryVerdict::NotDisposable;
+        }
+        return match inspect(runner, root, &absolute) {
+            NestedCheckoutState::Reproducible { evidence, .. } => {
+                IgnoredEntryVerdict::Disposable(format!(
+                    "{} is a reproducible nested checkout ({evidence})",
+                    relative.display()
+                ))
+            }
+            NestedCheckoutState::NotReproducible { .. } => IgnoredEntryVerdict::NotDisposable,
+            NestedCheckoutState::CannotVerify { evidence, .. } => {
+                IgnoredEntryVerdict::CannotVerify(evidence)
+            }
+        };
+    }
+
+    let name = relative
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    if lookup_kind(&name).is_some() {
+        return match artifacts
+            .iter()
+            .find(|artifact| same_path(Path::new(&artifact.path), &absolute))
+        {
+            Some(artifact) if artifact_is_safe_generated(artifact) => {
+                IgnoredEntryVerdict::Disposable(format!(
+                    "{} is a Safe generated artifact ({})",
+                    relative.display(),
+                    artifact.kind
+                ))
+            }
+            Some(_) => IgnoredEntryVerdict::NotDisposable,
+            None => IgnoredEntryVerdict::CannotVerify(format!(
+                "{} is an artifact directory with no completed artifact record",
+                relative.display()
+            )),
+        };
+    }
+
+    let entries = match std::fs::read_dir(&absolute) {
+        Ok(entries) => entries,
+        Err(error) => {
+            return IgnoredEntryVerdict::CannotVerify(format!(
+                "cannot list {}: {error}",
+                relative.display()
+            ));
+        }
+    };
+    let mut proofs = Vec::new();
+    for entry in entries {
+        if let Err(evidence) = walk.tick() {
+            return IgnoredEntryVerdict::CannotVerify(evidence);
+        }
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                return IgnoredEntryVerdict::CannotVerify(format!(
+                    "cannot read an entry under {}: {error}",
+                    relative.display()
+                ));
+            }
+        };
+        let child_relative = relative.join(entry.file_name());
+        match verify_ignored_entry(
+            runner,
+            root,
+            &child_relative,
+            artifacts,
+            protected_paths,
+            walk,
+        ) {
+            IgnoredEntryVerdict::Disposable(proof) => proofs.push(proof),
+            IgnoredEntryVerdict::NotDisposable => return IgnoredEntryVerdict::NotDisposable,
+            IgnoredEntryVerdict::CannotVerify(evidence) => {
+                return IgnoredEntryVerdict::CannotVerify(evidence);
+            }
+        }
+    }
+
+    if proofs.is_empty() {
+        IgnoredEntryVerdict::Disposable(format!("{} is an empty directory", relative.display()))
+    } else {
+        IgnoredEntryVerdict::Disposable(format!(
+            "{} contains only: {}",
+            relative.display(),
+            summarize_proofs(&proofs)
+        ))
+    }
+}
+
+fn artifact_is_safe_generated(artifact: &ArtifactRecord) -> bool {
+    artifact.safety.status == SafetyStatus::Safe
+        && artifact.git_ignored == Some(true)
+        && artifact.git_tracked == Some(false)
+        && !artifact.is_symlink
+        && artifact
+            .safety
+            .reasons
+            .iter()
+            .any(|reason| matches!(reason.code, ReasonCode::AfRebuildable | ReasonCode::AfEmpty))
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    left.components().eq(right.components())
+}
+
+fn summarize_proofs(proofs: &[String]) -> String {
+    let shown = proofs
+        .iter()
+        .take(MAX_RECLAIM_EVIDENCE)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("; ");
+    if proofs.len() <= MAX_RECLAIM_EVIDENCE {
+        shown
+    } else {
+        format!("{shown}; and {} more", proofs.len() - MAX_RECLAIM_EVIDENCE)
+    }
+}
+
+fn add_cannot_verify(record: &mut WorktreeRecord, evidence: String) {
+    let mut reasons = std::mem::take(&mut record.safety.reasons);
+    reasons.push(Reason::review(
+        ReasonCode::WtCannotVerify,
+        "cannot verify the ignored entries",
+        evidence,
+    ));
+    record.safety = SafetyAssessment::from_reasons(reasons);
+}
+
 /// Two candidate names are tried, in order: `origin/<name>` first, then the bare
 /// name.
 ///
@@ -1039,6 +1399,106 @@ fn run_checked(
             None
         }
     }
+}
+
+/// The worktree credential walk, with verified reproducible nested checkouts
+/// removed from it.
+///
+/// A single credential hit inside a nested checkout used to make an otherwise
+/// clean worktree `Unsafe`, even when the hit was a tracked template in a local
+/// dependency clone. When the nested checkout is proven reproducible, the walk
+/// skips that checkout and records the positive evidence. When it is not proven,
+/// the existing tracked-file check runs unchanged; an unknown answer is a
+/// `wt.cannot_verify`, never a pass (D3).
+fn worktree_credential_reasons(
+    runner: &dyn GitRunner,
+    worktree: &Path,
+    budget: Duration,
+) -> Vec<Reason> {
+    let mut reasons = Vec::new();
+    let mut skipped: Vec<PathBuf> = Vec::new();
+    loop {
+        match credential_in_worktree_skipping(worktree, budget, &skipped) {
+            CredentialScan::Complete(Some(name)) => {
+                let credential_path = Path::new(&name);
+                if let Some(nested) = containing_checkout(worktree, credential_path) {
+                    if !skipped.iter().any(|root| root == &nested) {
+                        match inspect(runner, worktree, &nested) {
+                            NestedCheckoutState::Reproducible { evidence, .. } => {
+                                reasons.push(Reason::safe(
+                                    ReasonCode::WtReproducibleCheckout,
+                                    "contains a reproducible nested checkout",
+                                    evidence,
+                                ));
+                                skipped.push(nested);
+                                continue;
+                            }
+                            NestedCheckoutState::CannotVerify { evidence, .. } => {
+                                reasons.push(Reason::review(
+                                    ReasonCode::WtCannotVerify,
+                                    "could not verify the nested checkout",
+                                    evidence,
+                                ));
+                            }
+                            NestedCheckoutState::NotReproducible { .. } => {}
+                        }
+                    }
+                }
+
+                // A tracked `.env.example` is in Git; deleting the worktree does
+                // not lose it, and blocking on it would make every repository that
+                // commits a template Unsafe. Only an untracked or ignored file is a
+                // worktree-level loss.
+                match runner.run(worktree, &["ls-files", "--error-unmatch", "--", &name]) {
+                    Ok(output) if output.code == Some(0) => {}
+                    Ok(output) if output.code == Some(1) => {
+                        reasons.push(Reason::blocking(
+                            ReasonCode::WtCredentials,
+                            "contains what looks like a credential file",
+                            format!("{name} is inside; deleting the worktree would delete it too"),
+                        ));
+                    }
+                    Ok(output) => reasons.push(Reason::review(
+                        ReasonCode::WtCannotVerify,
+                        "could not check whether the credential file is tracked",
+                        format!(
+                            "git ls-files exited with {:?} for {name}: {}",
+                            output.code,
+                            output.stderr.trim()
+                        ),
+                    )),
+                    Err(error) => reasons.push(cannot_verify(
+                        "whether the credential file is tracked",
+                        &error,
+                    )),
+                }
+                break;
+            }
+            CredentialScan::Complete(None) => break,
+            CredentialScan::Truncated { scanned } => {
+                reasons.push(Reason::review(
+                    ReasonCode::WtCannotVerify,
+                    "could not finish checking the worktree for credentials",
+                    format!(
+                        "looked at {scanned} entries before the time limit, without covering the whole worktree; a credential further inside would not have been found"
+                    ),
+                ));
+                break;
+            }
+            CredentialScan::Failed(error) => {
+                reasons.push(Reason::review(
+                    ReasonCode::WtCannotVerify,
+                    "could not check the worktree for credentials",
+                    format!(
+                        "could not list {} to check for credentials: {error}",
+                        worktree.display()
+                    ),
+                ));
+                break;
+            }
+        }
+    }
+    reasons
 }
 
 /// The single shape of a failed check: `Review` level, never `Safe` (D3).
@@ -3328,6 +3788,70 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
     }
 
     #[test]
+    fn a_reproducible_nested_checkout_is_skipped_and_recorded_as_positive() {
+        // The measured false positive: `.private-dependencies/.../.env.example` is
+        // tracked by a nested private checkout, but outer Git only sees an ignored
+        // `.env.example`. Once the nested checkout is proven reproducible, the walk
+        // skips it and records the evidence instead of marking the worktree Unsafe.
+        let dir = temp_dir("worktree-reproducible-nested");
+        backdate(&dir, 30 * 86_400);
+        let nested = dir.join(".private-dependencies/release-control/private-platform");
+        std::fs::create_dir_all(nested.join(".git")).expect("create nested git marker");
+        let credential = nested.join("services/wechat-gateway/.env.example");
+        std::fs::create_dir_all(credential.parent().expect("credential parent"))
+            .expect("create credential parent");
+        std::fs::write(
+            &credential,
+            "TOKEN=example
+",
+        )
+        .expect("write example");
+
+        let relative = ".private-dependencies/release-control/private-platform";
+        let mut rules = calm_rules(CLEAN_STATUS);
+        rules.push(canned(
+            &["check-ignore", "-v", "--", relative],
+            ".gitignore:1:.private-dependencies/
+",
+        ));
+        rules.push(canned(
+            &["status", "--porcelain=v2", "--ignored=matching", "--branch"],
+            CLEAN_STATUS,
+        ));
+        rules.push(canned(
+            &["remote"],
+            "origin
+",
+        ));
+        rules.push(canned(
+            &["for-each-ref", "--format=%(refname)", "refs/remotes"],
+            "refs/remotes/origin/main
+",
+        ));
+        rules.push(canned(
+            &["rev-list", "HEAD", "--branches", "--not", "--remotes"],
+            "",
+        ));
+        rules.push(canned(&["stash", "list", "--format=%gd"], ""));
+
+        let record = check_worktree(
+            &FakeGitRunner::new(rules),
+            &dir,
+            &feature_entry(&dir),
+            false,
+            &default_options(),
+        );
+        assert!(
+            has(&record, ReasonCode::WtReproducibleCheckout),
+            "the nested checkout must be recorded as positive: {:?}",
+            codes(&record)
+        );
+        assert!(!has(&record, ReasonCode::WtCredentials));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn an_untracked_credential_is_unsafe_not_only_review() {
         // An untracked `.env` is a Review under `wt.untracked`, which the user can
         // force through. The credential check must run anyway and make it Unsafe.
@@ -3535,6 +4059,430 @@ worktree /private/tmp/wt-fixture-gone\0HEAD 19402c62a2bdb19e2271df95ecfc1a272aad
             );
         }
         assert_eq!(record.safety.status, SafetyStatus::Unsafe);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- branch-ref-preserved cleanup --------------------------------------
+
+    fn reclaim_record(root: &Path) -> WorktreeRecord {
+        WorktreeRecord {
+            path: root.display().to_string(),
+            branch: Some("feature/x".to_string()),
+            head: Some("19402c6".to_string()),
+            is_main: false,
+            is_detached: false,
+            is_locked: false,
+            is_prunable: false,
+            dirty_files: 0,
+            untracked_files: 0,
+            untracked_file_list: Vec::new(),
+            ahead: 1,
+            behind: 0,
+            has_upstream: false,
+            merged_into_default: Some(false),
+            absorbed_into_default: false,
+            stash_count: 0,
+            last_updated_at: Some("2026-01-01T00:00:00Z".to_string()),
+            agent: None,
+            size_bytes: Some(1_000),
+            safety: SafetyAssessment::from_reasons(vec![
+                Reason::safe(
+                    ReasonCode::WtClean,
+                    "the working tree is clean",
+                    "no uncommitted changes, no untracked files",
+                ),
+                Reason::review(
+                    ReasonCode::WtUnmerged,
+                    "not merged into the default branch",
+                    "not an ancestor",
+                ),
+                Reason::review(
+                    ReasonCode::WtNoUpstream,
+                    "has no upstream branch and is not merged",
+                    "no upstream",
+                ),
+                Reason::review(
+                    ReasonCode::WtRecentActivity,
+                    "changed within the activity window",
+                    "last activity: 1 day ago",
+                ),
+            ]),
+        }
+    }
+
+    fn safe_generated_artifact(path: &Path, root: &Path) -> ArtifactRecord {
+        ArtifactRecord {
+            path: path.display().to_string(),
+            kind: "artifact".to_string(),
+            ecosystem: "generic".to_string(),
+            project_root: root.display().to_string(),
+            worktree_path: Some(root.display().to_string()),
+            size_bytes: Some(10),
+            file_count: 1,
+            last_updated_at: None,
+            git_ignored: Some(true),
+            git_tracked: Some(false),
+            is_symlink: false,
+            symlink_target: None,
+            safety: SafetyAssessment::from_reasons(vec![
+                Reason::safe(
+                    ReasonCode::AfGitIgnored,
+                    "ignored by .gitignore",
+                    ".gitignore:1",
+                ),
+                Reason::safe(
+                    ReasonCode::AfRebuildable,
+                    "regenerable directory",
+                    "regenerated by the build",
+                ),
+            ]),
+        }
+    }
+
+    fn ignored_rules(entries: &str) -> Vec<(Vec<String>, Canned)> {
+        vec![canned(
+            &[
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "--directory",
+                "-z",
+            ],
+            entries,
+        )]
+    }
+
+    #[test]
+    fn a_clean_unmerged_branch_with_no_ignored_entries_is_reclaimable() {
+        let dir = temp_dir("reclaim-empty");
+        let mut record = reclaim_record(&dir);
+        let runner = FakeGitRunner::new(ignored_rules(""));
+        assert!(apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        assert!(has(&record, ReasonCode::WtReclaimableClean));
+        assert!(!has(&record, ReasonCode::WtUnmerged));
+        assert!(!has(&record, ReasonCode::WtNoUpstream));
+        assert!(!has(&record, ReasonCode::WtRecentActivity));
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtReclaimableClean)
+            .expect("reclaim reason");
+        assert!(reason.evidence.contains("no ignored entries"));
+        assert!(reason.evidence.contains("feature/x"));
+    }
+
+    #[test]
+    fn a_safe_artifact_record_covers_its_ignored_directory() {
+        let dir = temp_dir("reclaim-artifact");
+        std::fs::create_dir_all(dir.join(".build")).expect("create .build");
+        let mut record = reclaim_record(&dir);
+        let artifact = safe_generated_artifact(&dir.join(".build"), &dir);
+        let runner = FakeGitRunner::new(ignored_rules(".build/\0"));
+        assert!(apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[artifact],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtReclaimableClean)
+            .expect("reclaim reason");
+        assert!(reason.evidence.contains(".build"));
+        assert!(reason.evidence.contains("Safe generated artifact"));
+    }
+
+    #[test]
+    fn an_unsafe_or_recent_artifact_record_does_not_promote() {
+        let dir = temp_dir("reclaim-artifact-unsafe");
+        std::fs::create_dir_all(dir.join(".build")).expect("create .build");
+        let runner = FakeGitRunner::new(ignored_rules(".build/\0"));
+        let mut unsafe_artifact = safe_generated_artifact(&dir.join(".build"), &dir);
+        unsafe_artifact.safety = SafetyAssessment::from_reasons(vec![
+            Reason::safe(
+                ReasonCode::AfGitIgnored,
+                "ignored by .gitignore",
+                ".gitignore:1",
+            ),
+            Reason::blocking(
+                ReasonCode::AfCredentials,
+                "contains what looks like a credential file",
+                ".env is inside",
+            ),
+        ]);
+        let mut record = reclaim_record(&dir);
+        assert!(!apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[unsafe_artifact],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert!(!has(&record, ReasonCode::WtReclaimableClean));
+
+        let mut recent = safe_generated_artifact(&dir.join(".build"), &dir);
+        recent.safety = SafetyAssessment::from_reasons(vec![
+            Reason::safe(
+                ReasonCode::AfGitIgnored,
+                "ignored by .gitignore",
+                ".gitignore:1",
+            ),
+            Reason::safe(
+                ReasonCode::AfRebuildable,
+                "regenerable directory",
+                "regenerated by the build",
+            ),
+            Reason::review(
+                ReasonCode::AfRecentActivity,
+                "changed recently",
+                "last activity: 1 day ago",
+            ),
+        ]);
+        let mut recent_record = reclaim_record(&dir);
+        assert!(!apply_reclaimable_clean(
+            &runner,
+            &mut recent_record,
+            &[recent],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(recent_record.safety.status, SafetyStatus::Review);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unknown_ignored_tree_is_accepted_only_when_it_contains_only_empty_files() {
+        let dir = temp_dir("reclaim-empty-tree");
+        std::fs::create_dir_all(dir.join(".private-dependencies")).expect("create dependency dir");
+        std::fs::write(dir.join(".private-dependencies/prepare.lock"), "").expect("write lock");
+        let mut record = reclaim_record(&dir);
+        let runner = FakeGitRunner::new(ignored_rules(".private-dependencies/\0"));
+        assert!(apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtReclaimableClean)
+            .expect("reclaim reason");
+        assert!(reason.evidence.contains("prepare.lock"));
+        assert!(reason.evidence.contains("empty file"));
+
+        std::fs::write(dir.join(".private-dependencies/notes.md"), "keep me\n")
+            .expect("write note");
+        let mut blocked = reclaim_record(&dir);
+        assert!(!apply_reclaimable_clean(
+            &runner,
+            &mut blocked,
+            &[],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(blocked.safety.status, SafetyStatus::Review);
+        assert!(!has(&blocked, ReasonCode::WtReclaimableClean));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unreadable_ignored_list_adds_cannot_verify_and_never_promotes() {
+        let dir = temp_dir("reclaim-cannot");
+        let mut record = reclaim_record(&dir);
+        let runner = FakeGitRunner::new(vec![failing(
+            &[
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "--directory",
+                "-z",
+            ],
+            Some(128),
+            "fatal: bad repository",
+        )]);
+        assert!(!apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert!(has(&record, ReasonCode::WtCannotVerify));
+        assert!(!has(&record, ReasonCode::WtReclaimableClean));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn another_worktree_inside_an_ignored_tree_blocks_promotion() {
+        let dir = temp_dir("reclaim-protected");
+        let nested = dir.join(".private-dependencies/worktree");
+        std::fs::create_dir_all(&nested).expect("create nested worktree");
+        let mut record = reclaim_record(&dir);
+        let runner = FakeGitRunner::new(ignored_rules(".private-dependencies/\0"));
+        assert!(!apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[],
+            &[nested],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_verified_nested_checkout_is_disposable_for_the_branch_ref_rule() {
+        let dir = temp_dir("reclaim-nested");
+        let nested = dir.join(".private-dependencies/dependency");
+        std::fs::create_dir_all(nested.join(".git")).expect("create nested .git");
+        let mut runner_rules = ignored_rules(".private-dependencies/\0");
+        runner_rules.push(canned(
+            &[
+                "check-ignore",
+                "-v",
+                "--",
+                ".private-dependencies/dependency",
+            ],
+            ".gitignore:1:dependency\t.private-dependencies/dependency\n",
+        ));
+        runner_rules.push(canned(
+            &["status", "--porcelain=v2", "--ignored=matching", "--branch"],
+            CLEAN_STATUS,
+        ));
+        runner_rules.push(canned(&["remote"], "origin\n"));
+        runner_rules.push(canned(
+            &["for-each-ref", "--format=%(refname)", "refs/remotes"],
+            "refs/remotes/origin/main\n",
+        ));
+        runner_rules.push(canned(
+            &["rev-list", "HEAD", "--branches", "--not", "--remotes"],
+            "",
+        ));
+        runner_rules.push(canned(&["stash", "list", "--format=%gd"], ""));
+        let runner = FakeGitRunner::new(runner_rules);
+        let mut record = reclaim_record(&dir);
+        assert!(apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+        let reason = record
+            .safety
+            .reasons
+            .iter()
+            .find(|reason| reason.code == ReasonCode::WtReclaimableClean)
+            .expect("reclaim reason");
+        assert!(reason.evidence.contains("reproducible nested checkout"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_nested_gitfile_is_not_auto_promoted() {
+        let dir = temp_dir("reclaim-gitfile");
+        let nested = dir.join(".private-dependencies/dependency");
+        std::fs::create_dir_all(&nested).expect("create nested directory");
+        std::fs::write(nested.join(".git"), "gitdir: elsewhere\n").expect("write gitfile");
+        let runner = FakeGitRunner::new(ignored_rules(".private-dependencies/\0"));
+        let mut record = reclaim_record(&dir);
+        assert!(!apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Review);
+        assert!(!has(&record, ReasonCode::WtReclaimableClean));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_non_branch_review_reason_is_never_replaced_by_the_branch_ref_rule() {
+        for code in [
+            ReasonCode::WtDirty,
+            ReasonCode::WtUntracked,
+            ReasonCode::WtCredentials,
+            ReasonCode::WtCannotVerify,
+            ReasonCode::WtAgentActive,
+        ] {
+            let dir = temp_dir(&format!("reclaim-blocked-{}", code.as_str()));
+            let mut record = reclaim_record(&dir);
+            record.safety = SafetyAssessment::from_reasons(vec![
+                Reason::safe(
+                    ReasonCode::WtClean,
+                    "the working tree is clean",
+                    "no uncommitted changes, no untracked files",
+                ),
+                Reason::new(
+                    code,
+                    if matches!(code, ReasonCode::WtDirty | ReasonCode::WtCredentials) {
+                        SafetyStatus::Unsafe
+                    } else {
+                        SafetyStatus::Review
+                    },
+                    "a non-branch fact",
+                    "fixture",
+                ),
+            ]);
+            let runner = FakeGitRunner::new(Vec::new());
+            assert!(
+                !apply_reclaimable_clean(&runner, &mut record, &[], &[], Duration::from_secs(5)),
+                "{} must not be replaced by the branch-ref rule",
+                code.as_str()
+            );
+            assert!(!has(&record, ReasonCode::WtReclaimableClean));
+            assert!(!runner.called_prefix(&["ls-files"]));
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn a_stash_does_not_block_the_branch_ref_rule() {
+        // The stash lives in the common Git directory and survives worktree removal;
+        // reintroducing it here would downgrade every clean worktree of a repository
+        // holding one stash.
+        let dir = temp_dir("reclaim-stash");
+        let mut record = reclaim_record(&dir);
+        record.stash_count = 3;
+        let runner = FakeGitRunner::new(ignored_rules(""));
+        assert!(apply_reclaimable_clean(
+            &runner,
+            &mut record,
+            &[],
+            &[],
+            Duration::from_secs(5)
+        ));
+        assert_eq!(record.safety.status, SafetyStatus::Safe);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

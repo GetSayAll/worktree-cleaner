@@ -80,9 +80,9 @@ export const en = {
     shortLabel: "Rule:",
     hint: "Every row follows the same rules; only Safe items are selected by default",
     safeBody:
-      "The worktree is clean and its work is in the default branch; or the artifact is rebuildable or empty, and free of protected content",
+      "The worktree is clean and its work is in the default branch, or its branch ref is kept and every ignored entry is proven generated, reproducible, or empty; or the artifact is rebuildable or empty, and free of protected content",
     reviewBody:
-      "Work is unmerged, files are untracked, recent activity could still be lost, or a check did not finish",
+      "Work is unmerged with ignored content that is not proven disposable, files are untracked, recent activity could still be lost, or a check did not finish",
     unsafeBody: "Main worktree, uncommitted changes, credentials, a lock, tracked files, or the whitelist",
     defaultSelected: "Selected by default",
     defaultUnselected: "Not selected",
@@ -90,7 +90,7 @@ export const en = {
     footer:
       "Worktrees are deleted permanently; their branches remain. Build artifacts go to the {{trash}} and can be restored.",
     worktreesSummary:
-      "Only Safe items are selected by default; Review items must be selected one by one; Unsafe items cannot be selected",
+      "Only Safe items are selected by default; Review items are grouped by what deletion can lose and are never selected automatically; Unsafe items cannot be selected",
     artifactsSummary:
       "Only rebuildable or empty artifacts are deleted; everything else needs review.",
     welcomeSummary:
@@ -120,6 +120,9 @@ export const en = {
       unmerged: "not merged into the default branch",
       untracked: "has untracked files",
       credentials: "contains what looks like a credential file",
+      reproducible_checkout: "contains a reproducible nested checkout",
+      reclaimable_clean:
+        "clean; the branch ref is kept and every ignored entry is generated, reproducible, or empty",
       // No longer produced by a scan: a stash belongs to the repository, not to the
       // worktree being judged. Kept so that audit logs written before it was withdrawn
       // still render.
@@ -516,7 +519,7 @@ export const en = {
       safeSubUnknown: (bytes: string, unknown: number) =>
         `${bytes} total · ${unknown} ${unknown === 1 ? "size" : "sizes"} unknown · Safe items are selected by default`,
       reviewLabel: "Needs review",
-      reviewSub: "not merged / changed recently",
+      reviewSub: "unproven ignored content / changed recently",
       unsafeLabel: "Must not delete",
       unsafeSub: "main worktree / dirty / locked / committed to the repository",
       reclaimableLabel: "Estimated reclaimable",
@@ -534,6 +537,7 @@ export const en = {
     // lower bound, and the user must be able to see that at a glance.
     selectedUnknown: (n: number) =>
       `${n} selected items have unknown size; the total is a minimum.`,
+    selectAllSafe: "Select all Safe items",
     selectHint: "Select items on the Worktree or Build artifacts page; Safe items are selected by default",
     adjustSelection: "Adjust selection",
     generatePlan: "Generate cleanup plan"
@@ -555,6 +559,22 @@ export const en = {
     filterUnsafe: (n: number) => `Must not delete ${n}`,
     searchPlaceholder: "Search by path or branch",
     selectAll: "Select every worktree that can be removed",
+    reviewGroupHint: (n: number) =>
+      `${n} ${n === 1 ? "worktree needs" : "worktrees need"} review; they are grouped by what deletion can lose.`,
+    reviewGroupHintAction: "Review by risk",
+    reviewGroupBatchTitle: "No untracked files",
+    reviewGroupBatchImpact:
+      "Branch refs are kept. No uncommitted or untracked files will be lost; Git-ignored files inside each directory are removed.",
+    reviewGroupUntrackedTitle: "Has untracked files",
+    reviewGroupUntrackedImpact:
+      "Untracked files will be deleted with these worktrees. The cleanup plan lists every file before execution.",
+    reviewGroupAttentionTitle: "Needs an individual look",
+    reviewGroupAttentionImpact:
+      "Recent activity, a detached HEAD, an index lock, or an incomplete check. Select these one by one.",
+    reviewGroupCount: (n: number) => `${n} ${n === 1 ? "worktree" : "worktrees"}`,
+    reviewGroupSelect: (n: number) => `Select these ${n} ${n === 1 ? "worktree" : "worktrees"}`,
+    reviewGroupClear: "Clear this group",
+    reviewGroupIndividual: "Select individually",
     details: "Details",
     collapse: "Collapse",
     gitFacts: "Git facts",
@@ -902,6 +922,25 @@ export const en = {
       // selected item is not mistaken for a guaranteed deletion.
       identityNotRun: "Re-check path and size before deletion.",
       activityNotRun: "Check for new changes before deletion."
+    },
+    removalGroups: {
+      safe: "Safe worktrees",
+      batch: "No untracked files",
+      untracked: "Has untracked files",
+      attention: "Needs an individual look",
+      meta: (n: number, bytes: string) =>
+        `${n} ${n === 1 ? "worktree" : "worktrees"} · ${bytes}`,
+      impact: {
+        safe: "All checks passed; these were selected by default.",
+        batch:
+          "Branch refs are kept; no uncommitted or untracked files will be lost. Git-ignored files inside these directories are removed.",
+        untracked:
+          "Untracked files will be deleted with these worktrees; every file is listed below before the run.",
+        attention:
+          "Recent activity, a detached HEAD, an index lock, or an incomplete check. Inspect each path before running."
+      },
+      showPaths: (n: number) => `Show ${n} paths`,
+      hidePaths: "Hide paths"
     },
     channelA: "Remove worktrees permanently",
     items: (n: number) => `${n} ${n === 1 ? "item" : "items"}`,
