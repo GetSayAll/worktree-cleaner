@@ -705,6 +705,6 @@ mod tests {
         let plan = linked_worktree_plan(&snapshot);
         assert_eq!(plan.worktree_removals.len(), 1);
         assert_eq!(plan.worktree_removals[0].path, "/repo--feature");
-        assert!(plan.trash_moves.is_empty());
+        assert_eq!(plan.trash_moves, Vec::new());
     }
 }

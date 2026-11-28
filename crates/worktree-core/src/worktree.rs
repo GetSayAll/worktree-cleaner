@@ -1263,7 +1263,7 @@ fn merge_base_is_ancestor(
                 last_error = Some(GitError::Failed {
                     command: display_command(repo, &args),
                     code: output.code,
-                    stderr: output.stderr.clone(),
+                    stderr: output.stderr,
                 });
             }
             Err(error) => return Err(error),

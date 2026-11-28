@@ -17,6 +17,7 @@ import {
 import { applyLocale, messages, SOURCE_LOCALE } from "./i18n";
 import { en } from "./i18n/en";
 import { zhCN } from "./i18n/zh-CN";
+import { hostOs } from "./platform";
 import type { Reason, ReasonCode } from "./types";
 
 // `size_bytes` is `number | null` since schema version 2: an item whose size
@@ -291,7 +292,7 @@ describe("warningText", () => {
     ],
     ["workspace discovery stopped after 250000 entries; some repositories may be missing", "工作区发现达到 250000 个条目上限"],
     ["workspace discovery stopped after 2000 repositories", "工作区发现达到 2000 个仓库上限"],
-    ["/tmp/repo is inside the system Trash; discovery does not read the Trash", "位于废纸篓中"],
+    ["/tmp/repo is inside the system Trash; discovery does not read the Trash", "位于"],
     [
       "found 5 other local clone(s) sharing the selected repository's origin remote under /tmp",
       "发现 5 个其他本地 clone"
@@ -300,7 +301,7 @@ describe("warningText", () => {
     ["the repository stash count could not be read: git stash list exited with Some(1): err", "无法读取仓库的 stash 数量"],
     ["the scan budget of 10s ran out after 2 of 5 worktrees; the remaining ones were not scanned", "扫描预算 10 秒已用完"],
     ["size measurement of /tmp/x did not complete within 5s; the size is recorded as unknown", "大小测量在 5 秒内未完成"],
-    ["3 worktree(s) inside the system Trash were not scanned; the Trash is left alone", "3 个工作树位于废纸篓中"],
+    ["3 worktree(s) inside the system Trash were not scanned; the Trash is left alone", "3 个工作树位于"],
     ["the scan budget ran out; artifact scanning stopped at /tmp/x (4 directories checked so far)", "构建产物扫描停在 /tmp/x"],
     ["/tmp/x is no longer on disk; it is reported as unmeasurable rather than empty", "已不在磁盘上"],
     ["/tmp/x could not be read while looking for build caches: denied", "查找构建缓存时无法读取 /tmp/x"],
@@ -331,6 +332,9 @@ describe("warningText", () => {
       }
       expect(warningText(rawWarnings[1][0])).toContain("/tmp/repo");
       expect(warningText(rawWarnings[1][0])).toContain("Some(128)");
+      expect(warningText(rawWarnings[4][0])).toContain(
+        `位于${messages.platform.trash[hostOs()]}中`
+      );
     });
   });
 
@@ -338,7 +342,7 @@ describe("warningText", () => {
     inLocale("en", () => {
       for (const [raw] of rawWarnings) {
         if (raw.includes("Trash")) {
-          expect(warningText(raw)).toContain("Trash");
+          expect(warningText(raw)).toContain(messages.platform.trash[hostOs()]);
           continue;
         }
         expect(warningText(raw)).toBe(raw);
